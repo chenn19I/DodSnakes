@@ -1,4 +1,5 @@
 import {
+  ACCESSORY_META,
   ARCHETYPE_REGISTRY,
   BOARD_LAYOUT,
   GAME_MODE_META,
@@ -9,6 +10,7 @@ import {
   STAR_SHOP_COST,
   getPlayerShopCost,
   previewDiceLanding,
+  type AccessoryId,
   type ActiveChallenge,
   type BotDifficulty,
   type ChallengeArchetype,
@@ -24,9 +26,11 @@ import {
   type RoomStatePayload,
 } from '@doodle-dash/shared';
 import type { DoodleSceneManager, SceneDebugStats } from '../scene/sceneManager.js';
+import { PawnPreviewStage } from '../scene/pawnPreview.js';
 import type { DoodleSoundEngine } from '../audio/soundEngine.js';
 import { CLIENT_CHALLENGE_RENDERERS } from '../challenges/challengeRenderer.js';
 import {
+  renderAccessorySvg,
   renderItemSvg,
   renderPawnAvatarSvg,
   renderUiIconSvg,
@@ -53,7 +57,7 @@ interface CareerStats {
   challengesWon: number;
 }
 
-const SETTINGS_STORAGE_KEY = 'doodle_dash_settings_v2';
+const SETTINGS_STORAGE_KEY = 'doodle_dash_settings_v3';
 const CAREER_STORAGE_KEY = 'doodle_dash_career_v1';
 
 const EMOTE_LIST: Array<{ id: EmoteId; icon: string; label: string }> = [
@@ -73,8 +77,13 @@ function escapeHtml(text: string): string {
     .replaceAll('"', '&quot;');
 }
 
-function pawnSvg(pawnId: PawnId, colorId: PlayerColorId = 'kuning', size = 26): string {
-  return renderPawnAvatarSvg(pawnId, PLAYER_COLORS[colorId].hex, size);
+function pawnSvg(
+  pawnId: PawnId,
+  colorId: PlayerColorId = 'kuning',
+  size = 26,
+  accessory: AccessoryId = 'none',
+): string {
+  return renderPawnAvatarSvg(pawnId, PLAYER_COLORS[colorId].hex, size, accessory);
 }
 
 export class DoodleAppShell {
@@ -123,6 +132,7 @@ export class DoodleAppShell {
   private draftName = 'Pemain Kece';
   private draftPawn: PawnId = 'kucing';
   private draftColor: PlayerColorId = 'pink';
+  private draftAccessory: AccessoryId = 'none';
   private draftRoomCode = '';
   private draftBotCount = 3;
   private draftBotDiff: BotDifficulty = 'pintar';
@@ -132,6 +142,17 @@ export class DoodleAppShell {
   private draftLocalNames = ['Mochi', 'Koko', 'Wekwek', 'Boba', 'Roro', 'Toady'];
   private draftLocalPawns: PawnId[] = ['kucing', 'kodok', 'bebek', 'panda', 'dino', 'jamur'];
   private draftLocalColors: PlayerColorId[] = ['pink', 'kuning', 'mint', 'biru', 'oranye', 'ungu'];
+  private draftLocalAccessories: AccessoryId[] = ['flower', 'scarf', 'headset', 'glasses', 'crown', 'backpack'];
+
+  private studioContext: {
+    mode: 'profile' | 'local' | 'lobby';
+    localIndex?: number;
+    name: string;
+    pawn: PawnId;
+    color: PlayerColorId;
+    accessory: AccessoryId;
+  } | null = null;
+  private studioPreviewStage: PawnPreviewStage | null = null;
 
   private settings: AccessibilitySettings;
   private career: CareerStats;
@@ -190,6 +211,13 @@ export class DoodleAppShell {
       }
     });
 
+    const unlockAudio = () => {
+      this.sound.unlock();
+      window.removeEventListener('pointerdown', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
+    };
+    window.addEventListener('pointerdown', unlockAudio, { passive: true });
+    window.addEventListener('keydown', unlockAudio, { passive: true });
     window.addEventListener('keydown', this.handleGlobalKeyDown);
     this.render();
   }
@@ -200,8 +228,8 @@ export class DoodleAppShell {
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const defaults: AccessibilitySettings = {
       muted: false,
-      musicEnabled: false,
-      volume: 0.7,
+      musicEnabled: true,
+      volume: 0.72,
       colorblindMode: false,
       largeText: false,
       reducedMotion: prefersReduced,
@@ -329,6 +357,10 @@ export class DoodleAppShell {
       onStateChange: (state) => {
         this.gameState = state;
         if (state && this.screen !== 'game') {
+          this.studioPreviewStage?.dispose();
+          this.studioPreviewStage = null;
+          this.studioContext = null;
+          this.scene.setExternalPause(false);
           this.screen = 'game';
           this.activityFeed = [];
         }
@@ -451,6 +483,10 @@ export class DoodleAppShell {
         cancelAnimationFrame(this.challengeTimerRaf);
         this.activeChallengeModal = null;
         this.renderedChallengeKey = 'none';
+        this.studioPreviewStage?.dispose();
+        this.studioPreviewStage = null;
+        this.studioContext = null;
+        this.scene.setExternalPause(false);
         this.controller = null;
         this.onlineController = null;
         this.roomState = null;
@@ -558,7 +594,11 @@ export class DoodleAppShell {
   }
 
   private renderModalsLayer(): void {
+    const studioKey = this.studioContext
+      ? `studio:${this.studioContext.mode}:${this.studioContext.localIndex ?? ''}`
+      : 'no-studio';
     const key = [
+      studioKey,
       this.gameState?.phase === 'GAME_OVER' ? `podium:${this.gameState.winnerId}` : 'no-pod',
       this.showHowToPlay ? 'howto' : '',
       this.showSettings ? `set:${this.settings.muted}:${this.settings.musicEnabled}:${Math.round(this.settings.volume * 100)}:${this.settings.colorblindMode}:${this.settings.largeText}:${this.settings.reducedMotion}` : '',
@@ -566,8 +606,14 @@ export class DoodleAppShell {
     if (key === this.renderedModalKey) return;
     this.renderedModalKey = key;
 
+    if (!this.studioContext && this.studioPreviewStage) {
+      this.studioPreviewStage.dispose();
+      this.studioPreviewStage = null;
+    }
+
     this.modalLayer.innerHTML = `
-      ${this.gameState?.phase === 'GAME_OVER' ? this.renderPodiumModal() : ''}
+      ${this.studioContext ? this.renderCharacterStudioModal() : ''}
+      ${!this.studioContext && this.gameState?.phase === 'GAME_OVER' ? this.renderPodiumModal() : ''}
       ${this.showHowToPlay ? this.renderHowToPlayModal() : ''}
       ${this.showSettings ? this.renderSettingsModal() : ''}
     `;
@@ -734,9 +780,9 @@ export class DoodleAppShell {
     return `
       <div class="screen-showcase">
         <div class="doodle-card sketchbook-panel menu-box stagger-item">
-          <div class="showcase-badge">${renderUiIconSvg('dice', 18)} Papan Sketchbook 3D</div>
-          <h1 class="game-logo">Ular Tangga<br/>Doodle Dash!</h1>
-          <p class="subtitle">100 kotak kejutan, 98 tantangan kilat, dan Kantin Bintang di atas meja gambar 3D.</p>
+          <div class="showcase-badge">${renderUiIconSvg('dice', 18)} Ular Tangga Sketchbook 3D</div>
+          <h1 class="game-logo">DodSnake</h1>
+          <p class="subtitle">100 kotak tantangan kilat, studio karakter & aksesoris 3D, Kantin Bintang, dan duel seru bersama teman atau bot!</p>
           <button class="doodle-btn doodle-btn-primary stagger-item stagger-1" id="btn-splash-play">
             ${renderUiIconSvg('dice', 22)} Ayo Main!
           </button>
@@ -752,19 +798,29 @@ export class DoodleAppShell {
   }
 
   private renderMenu(): string {
+    const activeMeta = PAWN_META[this.draftPawn];
+    const accMeta = ACCESSORY_META[this.draftAccessory];
     return `
       <div class="screen-showcase">
         <div class="doodle-card sketchbook-panel menu-box">
           <div class="showcase-badge">${renderUiIconSvg('trophy', 16)} Mode Petualangan</div>
           <h1 class="game-logo">Ular Tangga<br/>Doodle Dash</h1>
           <p class="subtitle">Pilih mode bermain favoritmu!</p>
+          <button class="doodle-btn menu-profile-card stagger-item" id="btn-menu-studio" title="Buka Studio Karakter & Aksesoris 3D">
+            <span class="menu-profile-avatar">${pawnSvg(this.draftPawn, this.draftColor, 42, this.draftAccessory)}</span>
+            <span class="menu-profile-meta">
+              <b>${escapeHtml(this.draftName)} • ${escapeHtml(activeMeta.shortName)}</b>
+              <small>${escapeHtml(accMeta.name)} • ${escapeHtml(activeMeta.perkTitle)}</small>
+            </span>
+            <span class="menu-profile-cta">Ganti Gaya</span>
+          </button>
           ${
             this.career.matches > 0
               ? `<div class="career-banner tabular-num">
                    <span>Main: <b>${this.career.matches}</b></span>
                    <span>Menang: <b>${this.career.wins}</b></span>
                    <span>${renderUiIconSvg('star', 15)} <b>${this.career.starsEarned}</b></span>
-                   <span>Menang Tantangan: <b>${this.career.challengesWon}</b></span>
+                   <span>Tantangan: <b>${this.career.challengesWon}</b></span>
                  </div>`
               : ''
           }
@@ -801,18 +857,21 @@ export class DoodleAppShell {
 
   private renderCustomizationDraftHtml(): string {
     const pawns = Object.keys(PAWN_META) as PawnId[];
+    const accessories = Object.keys(ACCESSORY_META) as AccessoryId[];
     const colors = Object.keys(PLAYER_COLORS) as PlayerColorId[];
     const selectedMeta = PAWN_META[this.draftPawn];
+    const selectedAcc = ACCESSORY_META[this.draftAccessory];
     return `
-      <label><b>Nama Kamu:</b></label>
-      <input class="doodle-input" id="inp-name" maxlength="18" value="${escapeHtml(this.draftName)}" />
-      <label><b>Pilih Karakter Unik:</b></label>
+      <div class="setup-name-row">
+        <input class="doodle-input" id="inp-name" maxlength="18" value="${escapeHtml(this.draftName)}" placeholder="Nama Kamu" />
+        <button class="doodle-btn doodle-btn-blue" id="btn-open-studio-profile" style="white-space:nowrap;padding:8px 12px" title="Buka Pratinjau 3D Karakter & Aksesoris">Studio 3D</button>
+      </div>
       <div class="picker-grid">
         ${pawns
           .map(
             (p) => `
           <button class="doodle-btn pawn-chip ${this.draftPawn === p ? 'selected' : ''}" data-pick-pawn="${p}" title="${PAWN_META[p].name} — ${PAWN_META[p].perkTitle}">
-            <span>${pawnSvg(p, this.draftColor, 28)}</span>
+            <span>${pawnSvg(p, this.draftColor, 28, p === this.draftPawn ? this.draftAccessory : 'none')}</span>
             <span>${PAWN_META[p].shortName}</span>
           </button>`,
           )
@@ -823,10 +882,23 @@ export class DoodleAppShell {
           <b>${escapeHtml(selectedMeta.name)}</b>
           <span class="char-role-tag">${escapeHtml(selectedMeta.title)}</span>
         </div>
-        <div style="font-size:0.82rem;opacity:0.82">${escapeHtml(selectedMeta.accessory)} • ${escapeHtml(selectedMeta.tagline)}</div>
-        <div class="char-perk-pill">✨ <b>${escapeHtml(selectedMeta.perkTitle)}:</b> ${escapeHtml(selectedMeta.perkDesc)}</div>
+        <div style="font-size:0.8rem;opacity:0.82">${escapeHtml(selectedMeta.tagline)}</div>
+        <div class="char-perk-pill"><b>${escapeHtml(selectedMeta.perkTitle)}:</b> ${escapeHtml(selectedMeta.perkDesc)}</div>
       </div>
-      <label><b>Pilih Warna:</b></label>
+      <div class="acc-strip-header">
+        <b>Aksesoris:</b>
+        <span>${escapeHtml(selectedAcc.name)}</span>
+      </div>
+      <div class="acc-strip">
+        ${accessories
+          .map(
+            (acc) => `
+          <button class="doodle-btn acc-chip ${this.draftAccessory === acc ? 'selected' : ''}" data-pick-acc="${acc}" title="${ACCESSORY_META[acc].name}: ${ACCESSORY_META[acc].description}">
+            ${renderAccessorySvg(acc, PLAYER_COLORS[this.draftColor].hex, 24)}
+          </button>`,
+          )
+          .join('')}
+      </div>
       <div class="color-row">
         ${colors
           .map(
@@ -841,10 +913,18 @@ export class DoodleAppShell {
   }
 
   private renderOnlineSetup(): string {
+    const hasServer = OnlineGameController.hasConfiguredServer();
     return `
       <div class="screen-center">
         <div class="doodle-card menu-box stagger-item">
           <h2 style="margin:0;text-align:center">🌐 Main Online</h2>
+          ${
+            !hasServer
+              ? `<div class="online-info-note">
+                   Mode Online membutuhkan server backend aktif (<code>VITE_SERVER_URL</code>). Untuk langsung bermain di browser tanpa server, pilih <b>Main Lokal</b> atau <b>Lawan Bot</b> di menu utama!
+                 </div>`
+              : ''
+          }
           ${this.renderCustomizationDraftHtml()}
           <button class="doodle-btn doodle-btn-primary" id="btn-create-room">✨ Buat Room Baru</button>
           <div style="display:flex;gap:8px;align-items:center">
@@ -876,12 +956,15 @@ export class DoodleAppShell {
             ${Array.from({ length: this.draftLocalCount }, (_, i) => {
               const p = this.draftLocalPawns[i];
               const c = this.draftLocalColors[i];
+              const acc = this.draftLocalAccessories[i];
               const meta = PAWN_META[p];
+              const accMeta = ACCESSORY_META[acc];
               return `<div class="lobby-row" style="gap:6px;flex-wrap:wrap">
-                <button class="doodle-btn" style="min-height:36px;padding:4px 8px" data-local-pawn="${i}" title="Ganti Karakter (${meta.name})">${pawnSvg(p, c, 24)}</button>
+                <button class="doodle-btn" style="min-height:36px;padding:4px 8px" data-local-pawn="${i}" title="Ganti Karakter (${meta.name})">${pawnSvg(p, c, 26, acc)}</button>
                 <button class="doodle-btn" style="min-height:36px;width:36px;padding:0;background:${PLAYER_COLORS[c].hex}" data-local-color="${i}" title="Ganti Warna">${this.settings.colorblindMode ? this.colorShapes[c] : ''}</button>
-                <input class="doodle-input" style="min-height:36px;padding:4px 10px;flex:1;min-width:110px" data-local-name="${i}" value="${escapeHtml(this.draftLocalNames[i])}" maxlength="16" />
-                <div style="width:100%;font-size:0.74rem;opacity:0.8;padding-left:4px"><b>${escapeHtml(meta.name)}</b> • ✨ ${escapeHtml(meta.perkTitle)}: ${escapeHtml(meta.perkDesc)}</div>
+                <input class="doodle-input" style="min-height:36px;padding:4px 10px;flex:1;min-width:95px" data-local-name="${i}" value="${escapeHtml(this.draftLocalNames[i])}" maxlength="16" />
+                <button class="doodle-btn doodle-btn-blue" style="min-height:36px;padding:4px 10px;font-size:0.8rem" data-local-studio="${i}" title="Pilih Karakter & Aksesoris 3D">Gaya</button>
+                <div style="width:100%;font-size:0.74rem;opacity:0.82;padding-left:4px"><b>${escapeHtml(meta.name)}</b> • ${escapeHtml(accMeta.shortName)} • ${escapeHtml(meta.perkTitle)}: ${escapeHtml(meta.perkDesc)}</div>
               </div>`;
             }).join('')}
           </div>
@@ -946,14 +1029,14 @@ export class DoodleAppShell {
               <div class="lobby-row">
                 <div style="display:flex;align-items:center;gap:6px">
                   <span style="width:14px;height:14px;border-radius:50%;background:${PLAYER_COLORS[p.color].hex};border:2px solid var(--ink);display:inline-block"></span>
-                  <span>${pawnSvg(p.pawn, p.color, 24)}</span>
+                  <span>${pawnSvg(p.pawn, p.color, 26, p.accessory ?? 'none')}</span>
                   <b>${escapeHtml(p.name)}</b>
-                  <span style="font-size:0.75rem;opacity:0.7">(${escapeHtml(PAWN_META[p.pawn].shortName)})</span>
+                  <span style="font-size:0.75rem;opacity:0.72">(${escapeHtml(PAWN_META[p.pawn].shortName)}${p.accessory && p.accessory !== 'none' ? ` • ${escapeHtml(ACCESSORY_META[p.accessory].shortName)}` : ''})</span>
                   ${p.id === room.hostId ? renderUiIconSvg('trophy', 15) : ''}
                   ${p.isBot ? '<span style="font-size:0.75rem;padding:0 5px;border:1.5px solid var(--ink);border-radius:6px;background:var(--blue)">BOT</span>' : ''}
                 </div>
                 <div style="display:flex;align-items:center;gap:6px">
-                  ${p.id === myId ? `<button class="doodle-btn" style="min-height:30px;padding:2px 8px;font-size:0.8rem" id="btn-lobby-cycle-pawn" title="Ganti Pion">🎨</button>` : ''}
+                  ${p.id === myId ? `<button class="doodle-btn doodle-btn-blue" style="min-height:32px;padding:3px 10px;font-size:0.8rem" id="btn-lobby-studio" title="Pilih Karakter & Aksesoris">Gaya</button>` : ''}
                   ${isHost && p.isBot ? `<button class="doodle-btn doodle-btn-pink" style="min-height:30px;padding:2px 8px;font-size:0.8rem" data-remove-bot="${p.id}" title="Hapus Bot">✕</button>` : ''}
                   <span style="padding:3px 10px;border-radius:10px;border:2px solid var(--ink);background:${p.ready ? 'var(--mint)' : '#EEE'}">
                     ${p.ready ? 'Siap!' : 'Belum'}
@@ -1020,9 +1103,9 @@ export class DoodleAppShell {
               const streak = p.challengeStreak ?? 0;
               const meta = PAWN_META[p.pawn];
               return `
-                <div class="player-pill ${isAct ? 'active' : ''} ${!p.connected ? 'disconnected' : ''}" style="border-left: 8px solid ${PLAYER_COLORS[p.color].hex}" title="${escapeHtml(meta.name)} — ${escapeHtml(meta.perkTitle)}: ${escapeHtml(meta.perkDesc)}">
+                <div class="player-pill player-pill-clickable ${isAct ? 'active' : ''} ${!p.connected ? 'disconnected' : ''}" data-focus-player="${p.id}" style="border-left: 8px solid ${PLAYER_COLORS[p.color].hex}" title="${escapeHtml(meta.name)} — ${escapeHtml(meta.perkTitle)}: ${escapeHtml(meta.perkDesc)} (Klik untuk sorot pion)">
                   ${this.settings.colorblindMode ? `<span class="cb-shape" title="${PLAYER_COLORS[p.color].name}">${this.colorShapes[p.color]}</span>` : ''}
-                  <span>${pawnSvg(p.pawn, p.color, 26)}</span>
+                  <span>${pawnSvg(p.pawn, p.color, 26, p.accessory ?? 'none')}</span>
                   <div>
                     <div style="display:flex;align-items:center;gap:4px">
                       <b>${escapeHtml(p.name)}</b>
@@ -1041,6 +1124,7 @@ export class DoodleAppShell {
         <div class="hud-actions-top">
           <div class="player-pill tabular-num" id="hud-turn-timer" style="display:none;font-weight:700"></div>
           <button class="doodle-btn" id="btn-hud-cam" title="${camOverview ? 'Mode Ikuti Pion' : 'Mode Lihat Penuh'}">${renderUiIconSvg('camera', 18)}</button>
+          <button class="doodle-btn" id="btn-hud-reset-cam" title="Kembalikan Sudut Kamera">Reset</button>
           <button class="doodle-btn" id="btn-hud-music" title="Musik Latar">${renderUiIconSvg(this.settings.musicEnabled ? 'sound' : 'muted', 18)}</button>
           <button class="doodle-btn" id="btn-hud-mute" title="Suara Efek">${this.settings.muted ? 'Mute' : 'SFX'}</button>
           <button class="doodle-btn" id="btn-hud-settings" title="Pengaturan">${renderUiIconSvg('settings', 18)}</button>
@@ -1075,6 +1159,16 @@ export class DoodleAppShell {
       </div>
 
       <div class="hud-bottom">
+        ${
+          isMyTurn && state.phase === 'TURN_BEGIN' && me
+            ? `<div class="hud-turn-helper tabular-num">
+                 <span><b>Giliranmu!</b> Kt.${me.position}/100</span>
+                 <span class="helper-dot-row"><span class="preview-dot is-ladder"></span>Tangga</span>
+                 <span class="helper-dot-row"><span class="preview-dot is-snake"></span>Ular</span>
+                 <span class="helper-key-hint">[Spasi]</span>
+               </div>`
+            : ''
+        }
         ${activeBuffs.length > 0 ? `<div style="margin-bottom:4px;font-size:0.82rem;font-weight:700;background:rgba(255,255,255,0.92);padding:2px 10px;border-radius:999px;border:2px solid var(--ink)">Aktif: ${activeBuffs.join(' • ')}</div>` : ''}
         <div class="hud-bottom-bar">
           <div class="item-slots">
@@ -1135,7 +1229,7 @@ export class DoodleAppShell {
                     })
                     .join('')}
                  </div>`
-              : `<button class="doodle-btn roll-btn" id="btn-roll-dice" ${!isMyTurn || state.phase !== 'TURN_BEGIN' ? 'disabled' : ''}>
+              : `<button class="doodle-btn roll-btn ${isMyTurn && state.phase === 'TURN_BEGIN' ? 'is-your-turn' : ''}" id="btn-roll-dice" ${!isMyTurn || state.phase !== 'TURN_BEGIN' ? 'disabled' : ''}>
                   ${
                     this.controller?.isSpectator()
                       ? 'Mode Penonton'
@@ -1165,7 +1259,7 @@ export class DoodleAppShell {
             <div>
               <div style="font-size:0.82rem;opacity:0.8">Kotak ${ch.tileId} • ${spec.displayName} ${ch.mode === 'all_play' ? '• SEMUA MAIN!' : ch.mode === 'duel' ? '• DUEL 1v1' : ''}</div>
               <h3 style="margin:2px 0">${escapeHtml(ch.title)}</h3>
-              ${owner ? `<div style="font-size:0.85rem;display:inline-flex;align-items:center;gap:5px">${pawnSvg(owner.pawn, owner.color, 18)} <b>${escapeHtml(owner.name)}</b> <span style="opacity:0.75">• ${escapeHtml(PAWN_META[owner.pawn].shortName)}</span></div>` : ''}
+              ${owner ? `<div style="font-size:0.85rem;display:inline-flex;align-items:center;gap:5px">${pawnSvg(owner.pawn, owner.color, 20, owner.accessory ?? 'none')} <b>${escapeHtml(owner.name)}</b> <span style="opacity:0.75">• ${escapeHtml(PAWN_META[owner.pawn].shortName)}</span></div>` : ''}
             </div>
             <div class="challenge-timer-ring">
               <svg width="52" height="52">
@@ -1182,7 +1276,7 @@ export class DoodleAppShell {
                   <div class="mg-sub">Pilih siapa lawan duelmu!</div>
                   ${others
                     .map(
-                      (o) => `<button class="doodle-btn doodle-btn-primary" style="width:100%" data-duel-opp="${o.id}">${pawnSvg(o.pawn, o.color, 24)} Tantang ${escapeHtml(o.name)} (Kt.${o.position})</button>`,
+                      (o) => `<button class="doodle-btn doodle-btn-primary" style="width:100%" data-duel-opp="${o.id}">${pawnSvg(o.pawn, o.color, 24, o.accessory ?? 'none')} Tantang ${escapeHtml(o.name)} (Kt.${o.position})</button>`,
                     )
                     .join('')}
                  </div>`
@@ -1244,7 +1338,7 @@ export class DoodleAppShell {
                 (entry) => `
               <div class="podium-col podium-rank-${entry.rank}">
                 <div class="tabular-num" style="font-size:1.3rem;font-weight:700">#${entry.rank}</div>
-                <div>${pawnSvg(entry.pawn, entry.color, 36)}</div>
+                <div>${pawnSvg(entry.pawn, entry.color, 38, entry.accessory ?? 'none')}</div>
                 <div>${this.settings.colorblindMode ? `<span class="cb-shape">${this.colorShapes[entry.color]}</span> ` : ''}<b>${escapeHtml(entry.name)}</b></div>
                 <div style="font-size:0.74rem;opacity:0.78">${escapeHtml(PAWN_META[entry.pawn].shortName)}</div>
                 <div class="tabular-num" style="font-size:0.85rem">Kt.${entry.position} • ★${entry.stars}</div>
@@ -1255,7 +1349,7 @@ export class DoodleAppShell {
           <div class="lobby-list">
             ${podium
               .map(
-                (e) => `<div class="lobby-row"><span style="display:inline-flex;align-items:center;gap:6px">#${e.rank} ${this.settings.colorblindMode ? `<span class="cb-shape">${this.colorShapes[e.color]}</span>` : ''}${pawnSvg(e.pawn, e.color, 22)} <b>${escapeHtml(e.name)}</b></span><span class="tabular-num">Kotak ${e.position} • ★${e.stars}</span></div>`,
+                (e) => `<div class="lobby-row"><span style="display:inline-flex;align-items:center;gap:6px">#${e.rank} ${this.settings.colorblindMode ? `<span class="cb-shape">${this.colorShapes[e.color]}</span>` : ''}${pawnSvg(e.pawn, e.color, 22, e.accessory ?? 'none')} <b>${escapeHtml(e.name)}</b></span><span class="tabular-num">Kotak ${e.position} • ★${e.stars}</span></div>`,
               )
               .join('')}
           </div>
@@ -1280,6 +1374,214 @@ export class DoodleAppShell {
     if (this.controller.mode !== 'online') return true;
     const myId = this.onlineController?.getLocalPlayerId();
     return Boolean(myId && this.roomState?.hostId === myId);
+  }
+
+  private openCharacterStudio(mode: 'profile' | 'local' | 'lobby', localIndex = 0): void {
+    if (mode === 'local') {
+      this.studioContext = {
+        mode: 'local',
+        localIndex,
+        name: this.draftLocalNames[localIndex] || PAWN_META[this.draftLocalPawns[localIndex]].shortName,
+        pawn: this.draftLocalPawns[localIndex],
+        color: this.draftLocalColors[localIndex],
+        accessory: this.draftLocalAccessories[localIndex],
+      };
+    } else if (mode === 'lobby' && this.roomState) {
+      const myId = this.onlineController?.getLocalPlayerId();
+      const me = this.roomState.players.find((p) => p.id === myId);
+      this.studioContext = {
+        mode: 'lobby',
+        name: me?.name ?? this.draftName,
+        pawn: me?.pawn ?? this.draftPawn,
+        color: me?.color ?? this.draftColor,
+        accessory: me?.accessory ?? this.draftAccessory,
+      };
+    } else {
+      this.studioContext = {
+        mode: 'profile',
+        name: this.draftName,
+        pawn: this.draftPawn,
+        color: this.draftColor,
+        accessory: this.draftAccessory,
+      };
+    }
+    this.scene.setExternalPause(true);
+    this.renderModalsLayer();
+  }
+
+  private closeCharacterStudio(applyChanges: boolean): void {
+    const ctx = this.studioContext;
+    if (applyChanges && ctx) {
+      const cleanName = ctx.name.trim();
+      if (ctx.mode === 'local' && ctx.localIndex !== undefined) {
+        const idx = ctx.localIndex;
+        const prevShort = PAWN_META[this.draftLocalPawns[idx]].shortName;
+        this.draftLocalPawns[idx] = ctx.pawn;
+        this.draftLocalColors[idx] = ctx.color;
+        this.draftLocalAccessories[idx] = ctx.accessory;
+        if (cleanName && cleanName !== prevShort) {
+          this.draftLocalNames[idx] = cleanName;
+        } else if (cleanName === prevShort || !cleanName) {
+          this.draftLocalNames[idx] = PAWN_META[ctx.pawn].shortName;
+        }
+      } else if (ctx.mode === 'lobby') {
+        this.onlineController?.customize({
+          playerName: cleanName || this.draftName,
+          pawn: ctx.pawn,
+          color: ctx.color,
+          accessory: ctx.accessory,
+        });
+      } else {
+        if (cleanName) this.draftName = cleanName;
+        this.draftPawn = ctx.pawn;
+        this.draftColor = ctx.color;
+        this.draftAccessory = ctx.accessory;
+      }
+    }
+
+    this.studioPreviewStage?.dispose();
+    this.studioPreviewStage = null;
+    this.studioContext = null;
+    this.scene.setExternalPause(false);
+    this.renderModalsLayer();
+    this.renderMainLayer();
+  }
+
+  private renderStudioBioCardHtml(pawn: PawnId, color: PlayerColorId, accessory: AccessoryId): string {
+    const meta = PAWN_META[pawn];
+    const acc = ACCESSORY_META[accessory];
+    const col = PLAYER_COLORS[color];
+    return `
+      <div class="char-bio-card studio-bio-box">
+        <div class="char-bio-top">
+          <b>${escapeHtml(meta.name)}</b>
+          <span class="char-role-tag">${escapeHtml(meta.title)}</span>
+        </div>
+        <div style="font-size:0.82rem;opacity:0.82">${escapeHtml(col.name)} • ${escapeHtml(acc.name)}</div>
+        <div class="char-perk-pill"><b>${escapeHtml(meta.perkTitle)}:</b> ${escapeHtml(meta.perkDesc)}</div>
+      </div>
+    `;
+  }
+
+  private renderCharacterStudioModal(): string {
+    const ctx = this.studioContext;
+    if (!ctx) return '';
+    const pawns = Object.keys(PAWN_META) as PawnId[];
+    const accessories = Object.keys(ACCESSORY_META) as AccessoryId[];
+    const colors = Object.keys(PLAYER_COLORS) as PlayerColorId[];
+    const titleLabel =
+      ctx.mode === 'local' && ctx.localIndex !== undefined
+        ? `Studio Pemain ${ctx.localIndex + 1}`
+        : 'Studio Karakter & Aksesoris';
+
+    return `
+      <div class="challenge-backdrop">
+        <div class="doodle-card studio-modal stagger-item">
+          <div class="studio-header">
+            <div>
+              <h2 style="margin:0">${titleLabel}</h2>
+              <small style="opacity:0.75">Pilih karakter favorit, warna pastel, dan aksesoris lucunya</small>
+            </div>
+            <button class="doodle-btn" id="btn-studio-cancel" style="min-height:40px;padding:6px 12px" aria-label="Tutup">✕</button>
+          </div>
+          <div class="studio-layout">
+            <div class="studio-stage-col">
+              <div class="studio-preview-box">
+                <div id="studio-preview-stage" class="studio-preview-stage">
+                  ${pawnSvg(ctx.pawn, ctx.color, 130, ctx.accessory)}
+                </div>
+                <div class="studio-drag-hint">Geser kiri / kanan untuk memutar model 3D</div>
+              </div>
+              <input class="doodle-input" id="inp-studio-name" maxlength="18" value="${escapeHtml(ctx.name)}" placeholder="Nama Karakter" />
+              <div class="color-row" id="studio-color-row">
+                ${colors
+                  .map(
+                    (c) => `
+                  <button class="color-dot ${ctx.color === c ? 'selected' : ''}" data-studio-color="${c}" style="background:${PLAYER_COLORS[c].hex}" title="${PLAYER_COLORS[c].name}">
+                    ${this.settings.colorblindMode ? this.colorShapes[c] : ''}
+                  </button>`,
+                  )
+                  .join('')}
+              </div>
+              <div id="studio-bio-slot">${this.renderStudioBioCardHtml(ctx.pawn, ctx.color, ctx.accessory)}</div>
+            </div>
+            <div class="studio-picker-col">
+              <div class="studio-section-label"><b>1. Pilih Karakter Unik</b></div>
+              <div class="studio-char-grid" id="studio-char-grid">
+                ${pawns
+                  .map((p) => {
+                    const m = PAWN_META[p];
+                    return `
+                      <button class="doodle-btn studio-char-card ${ctx.pawn === p ? 'selected' : ''}" data-studio-pawn="${p}" title="${m.name} — ${m.perkDesc}">
+                        <span>${pawnSvg(p, ctx.color, 36, ctx.accessory)}</span>
+                        <span class="studio-char-name">${escapeHtml(m.shortName)}</span>
+                        <small class="studio-char-role">${escapeHtml(m.title)}</small>
+                      </button>`;
+                  })
+                  .join('')}
+              </div>
+              <div class="studio-section-label" style="margin-top:4px">
+                <b>2. Pasang Aksesoris</b>
+                <span id="studio-acc-active" style="font-size:0.84rem;opacity:0.8">${escapeHtml(ACCESSORY_META[ctx.accessory].name)}</span>
+              </div>
+              <div class="studio-acc-grid" id="studio-acc-grid">
+                ${accessories
+                  .map((accId) => {
+                    const acc = ACCESSORY_META[accId];
+                    return `
+                      <button class="doodle-btn studio-acc-card ${ctx.accessory === accId ? 'selected' : ''}" data-studio-acc="${accId}" title="${acc.description}">
+                        <span>${renderAccessorySvg(accId, PLAYER_COLORS[ctx.color].hex, 28)}</span>
+                        <small>${escapeHtml(acc.shortName)}</small>
+                      </button>`;
+                  })
+                  .join('')}
+              </div>
+              <div id="studio-acc-desc" class="studio-acc-desc">${escapeHtml(ACCESSORY_META[ctx.accessory].description)}</div>
+              <div class="studio-footer-actions">
+                <button class="doodle-btn" id="btn-studio-close" style="flex:1">Batal</button>
+                <button class="doodle-btn doodle-btn-primary" id="btn-studio-save" style="flex:2">Simpan & Pakai</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  private syncStudioLiveUi(): void {
+    const ctx = this.studioContext;
+    if (!ctx) return;
+
+    this.studioPreviewStage?.setSelection(ctx.pawn, ctx.color, ctx.accessory);
+    if (!this.studioPreviewStage?.isActive()) {
+      const stageEl = this.modalLayer.querySelector<HTMLElement>('#studio-preview-stage');
+      if (stageEl) stageEl.innerHTML = pawnSvg(ctx.pawn, ctx.color, 130, ctx.accessory);
+    }
+
+    const bioSlot = this.modalLayer.querySelector<HTMLElement>('#studio-bio-slot');
+    if (bioSlot) {
+      bioSlot.innerHTML = this.renderStudioBioCardHtml(ctx.pawn, ctx.color, ctx.accessory);
+    }
+    const accActive = this.modalLayer.querySelector<HTMLElement>('#studio-acc-active');
+    if (accActive) accActive.textContent = ACCESSORY_META[ctx.accessory].name;
+    const accDesc = this.modalLayer.querySelector<HTMLElement>('#studio-acc-desc');
+    if (accDesc) accDesc.textContent = ACCESSORY_META[ctx.accessory].description;
+
+    this.modalLayer.querySelectorAll<HTMLElement>('[data-studio-pawn]').forEach((btn) => {
+      const p = btn.dataset.studioPawn as PawnId;
+      btn.classList.toggle('selected', p === ctx.pawn);
+      const iconSpan = btn.querySelector('span');
+      if (iconSpan) iconSpan.innerHTML = pawnSvg(p, ctx.color, 36, ctx.accessory);
+    });
+    this.modalLayer.querySelectorAll<HTMLElement>('[data-studio-acc]').forEach((btn) => {
+      const a = btn.dataset.studioAcc as AccessoryId;
+      btn.classList.toggle('selected', a === ctx.accessory);
+      const iconSpan = btn.querySelector('span');
+      if (iconSpan) iconSpan.innerHTML = renderAccessorySvg(a, PLAYER_COLORS[ctx.color].hex, 28);
+    });
+    this.modalLayer.querySelectorAll<HTMLElement>('[data-studio-color]').forEach((btn) => {
+      btn.classList.toggle('selected', btn.dataset.studioColor === ctx.color);
+    });
   }
 
   private renderHowToPlayModal(): string {
@@ -1310,7 +1612,7 @@ export class DoodleAppShell {
             <input type="checkbox" id="set-mute" ${this.settings.muted ? 'checked' : ''} style="width:24px;height:24px"/>
           </label>
           <label style="display:flex;justify-content:space-between;align-items:center">
-            <span>🎵 Musik Santai Lo-Fi</span>
+            <span>🎵 Musik Latar Tabletop</span>
             <input type="checkbox" id="set-music" ${this.settings.musicEnabled ? 'checked' : ''} style="width:24px;height:24px"/>
           </label>
           <label>
@@ -1380,11 +1682,16 @@ export class DoodleAppShell {
       this.controller = online;
       online.joinRoom(saved.roomCode, this.draftName, this.draftPawn, this.draftColor, {
         reconnectToken: saved.reconnectToken,
+        accessory: this.draftAccessory,
       });
       this.screen = 'lobby';
       this.render();
     });
 
+    q('#btn-menu-studio')?.addEventListener('click', () => {
+      this.sound.playUiClick();
+      this.openCharacterStudio('profile');
+    });
     q('#btn-menu-online')?.addEventListener('click', () => {
       this.sound.playUiClick();
       this.screen = 'online_setup';
@@ -1420,6 +1727,10 @@ export class DoodleAppShell {
     q<HTMLInputElement>('#inp-name')?.addEventListener('input', (e) => {
       this.draftName = (e.target as HTMLInputElement).value;
     });
+    q('#btn-open-studio-profile')?.addEventListener('click', () => {
+      this.sound.playUiClick();
+      this.openCharacterStudio('profile');
+    });
     q<HTMLInputElement>('#inp-room-code')?.addEventListener('input', (e) => {
       this.draftRoomCode = (e.target as HTMLInputElement).value.toUpperCase();
     });
@@ -1427,6 +1738,13 @@ export class DoodleAppShell {
       el.onclick = () => {
         this.sound.playUiClick();
         this.draftPawn = el.dataset.pickPawn as PawnId;
+        this.renderMainLayer();
+      };
+    });
+    this.mainLayer.querySelectorAll<HTMLElement>('[data-pick-acc]').forEach((el) => {
+      el.onclick = () => {
+        this.sound.playUiClick();
+        this.draftAccessory = el.dataset.pickAcc as AccessoryId;
         this.renderMainLayer();
       };
     });
@@ -1456,7 +1774,12 @@ export class DoodleAppShell {
       const online = new OnlineGameController(this.scene, this.createSessionCallbacks());
       this.onlineController = online;
       this.controller = online;
-      online.createRoom(this.draftName.trim() || 'Pemain', this.draftPawn, this.draftColor);
+      online.createRoom(
+        this.draftName.trim() || 'Pemain',
+        this.draftPawn,
+        this.draftColor,
+        this.draftAccessory,
+      );
       this.screen = 'lobby';
       this.render();
     });
@@ -1473,6 +1796,7 @@ export class DoodleAppShell {
       this.controller = online;
       online.joinRoom(code, this.draftName.trim() || 'Pemain', this.draftPawn, this.draftColor, {
         asSpectator,
+        accessory: this.draftAccessory,
       });
       this.screen = 'lobby';
       this.render();
@@ -1518,6 +1842,12 @@ export class DoodleAppShell {
         this.renderMainLayer();
       };
     });
+    this.mainLayer.querySelectorAll<HTMLElement>('[data-local-studio]').forEach((btn) => {
+      btn.onclick = () => {
+        this.sound.playUiClick();
+        this.openCharacterStudio('local', Number(btn.dataset.localStudio));
+      };
+    });
     q('#btn-start-local')?.addEventListener('click', () => {
       this.sound.playUiClick();
       const players: CreatePlayerInput[] = Array.from({ length: this.draftLocalCount }, (_, i) => ({
@@ -1525,6 +1855,7 @@ export class DoodleAppShell {
         name: this.draftLocalNames[i].trim() || `Pemain ${i + 1}`,
         pawn: this.draftLocalPawns[i],
         color: this.draftLocalColors[i],
+        accessory: this.draftLocalAccessories[i],
         isBot: false,
       }));
       this.recordedMatchKey = null;
@@ -1562,6 +1893,7 @@ export class DoodleAppShell {
         this.draftColor,
         this.draftBotCount,
         this.draftBotDiff,
+        this.draftAccessory,
       );
       this.recordedMatchKey = null;
       this.controller = new LocalGameController(
@@ -1581,24 +1913,29 @@ export class DoodleAppShell {
     });
     q('#btn-copy-invite')?.addEventListener('click', () => {
       if (!this.roomState) return;
-      const url = `${window.location.origin}${window.location.pathname}?room=${this.roomState.roomCode}`;
+      const roomCode = this.roomState.roomCode;
+      const url = `${window.location.origin}/?room=${roomCode}`;
       this.sound.playUiClick();
       if (navigator.clipboard?.writeText) {
         void navigator.clipboard.writeText(url).then(
-          () => this.showToast(`Link room ${this.roomState!.roomCode} disalin!`),
-          () => this.showToast(`Kode room: ${this.roomState!.roomCode}`),
+          () => this.showToast(`Link room ${roomCode} disalin!`),
+          () => this.showToast(`Kode room: ${roomCode}`),
         );
+      } else if (typeof navigator.share === 'function') {
+        void navigator
+          .share({
+            title: 'DodSnake — Gabung Room!',
+            text: `Main DodSnake bareng yuk! Kode room: ${roomCode}`,
+            url,
+          })
+          .catch(() => this.showToast(`Kode room: ${roomCode}`));
       } else {
-        this.showToast(`Kode room: ${this.roomState.roomCode}`);
+        this.showToast(`Kode room: ${roomCode}`);
       }
     });
-    q('#btn-lobby-cycle-pawn')?.addEventListener('click', () => {
-      const myId = this.onlineController?.getLocalPlayerId();
-      const me = this.roomState?.players.find((p) => p.id === myId);
-      if (!me) return;
-      const nextPawn = allPawns[(allPawns.indexOf(me.pawn) + 1) % allPawns.length];
+    q('#btn-lobby-studio')?.addEventListener('click', () => {
       this.sound.playUiClick();
-      this.onlineController?.customize({ pawn: nextPawn });
+      this.openCharacterStudio('lobby');
     });
     this.mainLayer.querySelectorAll<HTMLElement>('[data-remove-bot]').forEach((btn) => {
       btn.onclick = () => {
@@ -1663,12 +2000,32 @@ export class DoodleAppShell {
         this.renderMainLayer();
       };
     });
+    this.mainLayer.querySelectorAll<HTMLElement>('[data-focus-player]').forEach((el) => {
+      el.onclick = () => {
+        const pid = el.dataset.focusPlayer;
+        if (!pid) return;
+        this.sound.playUiClick();
+        if (this.scene.getPreferredCameraMode() === 'overview') {
+          this.scene.setPreferredCameraMode('follow');
+          this.renderMainLayer();
+        }
+        this.scene.focusPlayer(pid);
+      };
+    });
     q('#btn-hud-cam')?.addEventListener('click', () => {
       this.sound.playUiClick();
       const next = this.scene.getPreferredCameraMode() === 'overview' ? 'follow' : 'overview';
       this.scene.resetCameraOrbit();
       this.scene.setPreferredCameraMode(next);
       this.renderMainLayer();
+    });
+    q('#btn-hud-reset-cam')?.addEventListener('click', () => {
+      this.sound.playUiClick();
+      this.scene.resetCameraOrbit();
+      const activeId = this.gameState?.turnOrder[this.gameState.currentTurnIndex];
+      if (activeId) {
+        this.scene.focusPlayer(activeId);
+      }
     });
     q('#btn-hud-music')?.addEventListener('click', () => {
       this.sound.playUiClick();
@@ -1707,6 +2064,76 @@ export class DoodleAppShell {
 
   private bindModalEvents(): void {
     const q = <T extends HTMLElement>(sel: string) => this.modalLayer.querySelector<T>(sel);
+
+    if (this.studioContext) {
+      const stageEl = q<HTMLElement>('#studio-preview-stage');
+      if (stageEl) {
+        this.studioPreviewStage?.dispose();
+        this.studioPreviewStage = new PawnPreviewStage(stageEl);
+        this.studioPreviewStage.setSelection(
+          this.studioContext.pawn,
+          this.studioContext.color,
+          this.studioContext.accessory,
+        );
+      }
+
+      q('#btn-studio-cancel')?.addEventListener('click', () => {
+        this.sound.playUiClick();
+        this.closeCharacterStudio(false);
+      });
+      q('#btn-studio-close')?.addEventListener('click', () => {
+        this.sound.playUiClick();
+        this.closeCharacterStudio(false);
+      });
+      q('#btn-studio-save')?.addEventListener('click', () => {
+        this.sound.playUiClick();
+        this.closeCharacterStudio(true);
+      });
+
+      const nameInp = q<HTMLInputElement>('#inp-studio-name');
+      nameInp?.addEventListener('input', (e) => {
+        if (this.studioContext) {
+          this.studioContext.name = (e.target as HTMLInputElement).value;
+        }
+      });
+
+      this.modalLayer.querySelectorAll<HTMLElement>('[data-studio-pawn]').forEach((btn) => {
+        btn.onclick = () => {
+          if (!this.studioContext) return;
+          const nextPawn = btn.dataset.studioPawn as PawnId;
+          const prevShort = PAWN_META[this.studioContext.pawn].shortName;
+          const curName = this.studioContext.name.trim();
+          if (
+            this.studioContext.mode === 'local' &&
+            (!curName || curName === prevShort || /^Pemain \d+$/.test(curName))
+          ) {
+            this.studioContext.name = PAWN_META[nextPawn].shortName;
+            if (nameInp) nameInp.value = this.studioContext.name;
+          }
+          this.studioContext.pawn = nextPawn;
+          this.sound.playUiClick();
+          this.syncStudioLiveUi();
+        };
+      });
+
+      this.modalLayer.querySelectorAll<HTMLElement>('[data-studio-acc]').forEach((btn) => {
+        btn.onclick = () => {
+          if (!this.studioContext) return;
+          this.studioContext.accessory = btn.dataset.studioAcc as AccessoryId;
+          this.sound.playUiClick();
+          this.syncStudioLiveUi();
+        };
+      });
+
+      this.modalLayer.querySelectorAll<HTMLElement>('[data-studio-color]').forEach((btn) => {
+        btn.onclick = () => {
+          if (!this.studioContext) return;
+          this.studioContext.color = btn.dataset.studioColor as PlayerColorId;
+          this.sound.playUiClick();
+          this.syncStudioLiveUi();
+        };
+      });
+    }
 
     q('#btn-podium-rematch')?.addEventListener('click', () => {
       this.sound.playUiClick();

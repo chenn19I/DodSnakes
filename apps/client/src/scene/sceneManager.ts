@@ -75,6 +75,7 @@ export class DoodleSceneManager {
   private readonly diceSecondary: DiceVisual;
   private readonly particles: DoodleParticleSystem;
   private readonly pawns = new Map<string, PawnVisual>();
+  private readonly pawnSignatures = new Map<string, string>();
   private readonly animatingPawns = new Set<string>();
   private readonly sound: DoodleSoundEngine;
 
@@ -83,11 +84,12 @@ export class DoodleSceneManager {
   private elapsedSec = 0;
   private lastBoilStep = -1;
   private paused = false;
+  private externalPaused = false;
   private reducedMotion = false;
   private speedMultiplier = 1;
   private preferredCameraMode: 'overview' | 'follow' = 'follow';
   private showcaseMode = true;
-  private maxDpr = 1.5;
+  private maxDpr = 2;
   private lowFpsStrikes = 0;
   private idleShadowCounter = 0;
   private activeTimeline: gsap.core.Timeline | null = null;
@@ -118,11 +120,15 @@ export class DoodleSceneManager {
     this.scene.background = new THREE.Color(DOODLE_PALETTE.deskWood);
 
     this.cameraRig = new DoodleCameraRig(window.innerWidth / window.innerHeight);
-    this.outlineCtrl = createOutlineController(0.038);
+    this.outlineCtrl = createOutlineController(0.032);
 
-    // Warm pastel storybook lighting
-    const hemi = new THREE.HemisphereLight('#FFFDF9', '#E2CEB0', 1.22);
+    // Warm pastel storybook lighting with subtle cool rim separation
+    const hemi = new THREE.HemisphereLight('#FFFDF9', '#E2CEB0', 1.24);
     this.scene.add(hemi);
+
+    const rim = new THREE.DirectionalLight('#DCEBFF', 0.42);
+    rim.position.set(-10, 14, -11);
+    this.scene.add(rim);
 
     const dir = new THREE.DirectionalLight('#FFF6E3', 1.12);
     dir.position.set(11, 22, 13);
@@ -226,6 +232,18 @@ export class DoodleSceneManager {
     this.cameraRig.setFollowPoint(this.board.getTileWorldTop(tileId));
   }
 
+  public focusPlayer(playerId: string): void {
+    const pv = this.pawns.get(playerId);
+    if (pv) {
+      this.cameraRig.setFollowPoint(pv.root.position);
+      return;
+    }
+    const p = this.latestPlayers.find((x) => x.id === playerId);
+    if (p) {
+      this.focusTile(p.position);
+    }
+  }
+
   public toggleSpeedUp(enable: boolean): void {
     this.speedMultiplier = enable ? 2 : 1;
     if (this.activeTimeline) {
@@ -247,7 +265,8 @@ export class DoodleSceneManager {
     }
     const seen = new Set<number>();
     const markers: TilePreviewMarker[] = [];
-    for (let die = 1; die <= 6; die++) {
+    const maxDie = player.activeBrake ? 3 : 6;
+    for (let die = 1; die <= maxDie; die++) {
       const p = previewDiceLanding(
         BOARD_LAYOUT,
         player.position,
@@ -279,13 +298,20 @@ export class DoodleSceneManager {
       if (!validIds.has(id)) {
         this.scene.remove(pv.root);
         this.pawns.delete(id);
+        this.pawnSignatures.delete(id);
       }
     }
 
     const activeId = state.turnOrder[state.currentTurnIndex];
 
     state.players.forEach((player, idx) => {
+      const acc = player.accessory ?? 'none';
+      const sig = `${player.pawn}:${player.color}:${acc}:${player.name}`;
       let pv = this.pawns.get(player.id);
+      if (pv && this.pawnSignatures.get(player.id) !== sig) {
+        this.scene.remove(pv.root);
+        pv = undefined;
+      }
       if (!pv) {
         pv = buildPawnVisual(
           player.id,
@@ -294,8 +320,10 @@ export class DoodleSceneManager {
           this.outlineCtrl,
           idx * 1.3,
           player.name,
+          { accessory: acc },
         );
         this.pawns.set(player.id, pv);
+        this.pawnSignatures.set(player.id, sig);
         this.scene.add(pv.root);
       }
       pv.setShieldVisible(player.shields > 0 || player.items.includes('shield'));
@@ -787,6 +815,18 @@ export class DoodleSceneManager {
         return;
       }
 
+      if (ev.type === 'ExtraRollGranted') {
+        const pv = this.pawns.get(ev.playerId);
+        if (pv) {
+          this.particles.spawnStarBurst(pv.root.position, this.reducedMotion);
+          this.showCallout('Lempar Lagi!', pv.root.position, DOODLE_PALETTE.yellow, 0.8);
+          tl.to(pv.bodyGroup.position, { y: 0.3, yoyo: true, repeat: 1, duration: 0.14 });
+        } else {
+          tl.to({}, { duration: 0.1 });
+        }
+        return;
+      }
+
       // Default subtle pause for informational events
       tl.to({}, { duration: 0.08 });
     });
@@ -870,8 +910,16 @@ export class DoodleSceneManager {
     this.cameraRig.setAspect(w / h);
   };
 
+  public setExternalPause(paused: boolean): void {
+    this.externalPaused = paused;
+    this.paused = document.hidden || this.externalPaused;
+    if (!this.paused) {
+      this.lastFrameMs = performance.now();
+    }
+  }
+
   private readonly handleVisibility = (): void => {
-    this.paused = document.hidden;
+    this.paused = document.hidden || this.externalPaused;
     if (!this.paused) {
       this.lastFrameMs = performance.now();
     }

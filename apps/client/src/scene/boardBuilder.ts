@@ -129,13 +129,13 @@ function createTileAtlasTexture(): THREE.CanvasTexture {
     const cy = y + cell / 2;
 
     // Subtle rounded card frame border + corner stitch accents
-    ctx.strokeStyle = 'rgba(36, 34, 45, 0.18)';
+    ctx.strokeStyle = 'rgba(43, 40, 56, 0.16)';
     ctx.lineWidth = 3.5;
     ctx.beginPath();
     ctx.roundRect(x + 12, y + 12, cell - 24, cell - 24, 30);
     ctx.stroke();
 
-    // Special badge for start, boss, ladder, snake
+    // Special badge for start, boss, ladder, snake & zone gate milestones
     if (tile.id === 1) {
       ctx.fillStyle = DOODLE_PALETTE.mint;
       ctx.beginPath();
@@ -152,21 +152,29 @@ function createTileAtlasTexture(): THREE.CanvasTexture {
       ctx.strokeStyle = DOODLE_PALETTE.ink;
       ctx.lineWidth = 6;
       ctx.stroke();
+    } else if (tile.id === 26 || tile.id === 51 || tile.id === 76) {
+      ctx.strokeStyle = 'rgba(43, 40, 56, 0.28)';
+      ctx.lineWidth = 4;
+      ctx.setLineDash([10, 7]);
+      ctx.beginPath();
+      ctx.roundRect(x + 20, y + 20, cell - 40, cell - 40, 24);
+      ctx.stroke();
+      ctx.setLineDash([]);
     } else if (ladderStarts.has(tile.id)) {
-      ctx.fillStyle = 'rgba(94, 226, 173, 0.52)';
+      ctx.fillStyle = 'rgba(88, 214, 163, 0.56)';
       ctx.beginPath();
       ctx.arc(cx, cy + 10, 60, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = 'rgba(36, 34, 45, 0.35)';
-      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(43, 40, 56, 0.42)';
+      ctx.lineWidth = 3.5;
       ctx.stroke();
     } else if (snakeHeads.has(tile.id)) {
-      ctx.fillStyle = 'rgba(255, 134, 173, 0.52)';
+      ctx.fillStyle = 'rgba(255, 127, 167, 0.56)';
       ctx.beginPath();
       ctx.arc(cx, cy + 10, 60, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = 'rgba(36, 34, 45, 0.35)';
-      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(43, 40, 56, 0.42)';
+      ctx.lineWidth = 3.5;
       ctx.stroke();
     }
 
@@ -698,7 +706,7 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
   let activeBeaconTileId: number | null = 1;
 
   // Pooled 6 landing-preview halos (used pre-roll & for Golden Dice targets)
-  const previewGeo = new THREE.RingGeometry(0.62, 0.80, 20);
+  const previewGeo = new THREE.RingGeometry(0.58, 0.79, 24);
   previewGeo.rotateX(-Math.PI / 2);
   const previewKindColors: Record<TilePreviewMarker['kind'], string> = {
     normal: DOODLE_PALETTE.yellow,

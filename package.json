@@ -1,8 +1,8 @@
 {
-  "name": "ular-tangga-doodle-dash",
+  "name": "dodsnake",
   "version": "1.0.0",
   "private": true,
-  "description": "Ular Tangga Doodle Dash - Game web multiplayer 3D semi-doodle dengan tantangan di setiap kotak",
+  "description": "DodSnake - Game web multiplayer 3D semi-doodle ular tangga dengan 100 kotak tantangan",
   "workspaces": [
     "packages/*",
     "apps/*"
