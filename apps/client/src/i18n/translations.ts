@@ -163,6 +163,8 @@ const ARCHETYPE_EN: Record<ChallengeArchetype, { name: string; instruction: stri
   pair_flip: { name: 'Memory Pairs', instruction: 'Flip and match every hidden doodle pair before time runs out!' },
   number_order: { name: 'Number Order', instruction: 'Tap the number stickers in exact ascending or descending order!' },
   odd_one_out: { name: 'Spot the Odd One', instruction: 'Find and tap the 1 unique sticker that stands out from the rest!' },
+  pattern_next: { name: 'Complete the Pattern', instruction: 'Pick the sticker that comes next in the sequence!' },
+  math_compare: { name: 'Compare Expressions', instruction: 'Tap the math card with the LARGEST or SMALLEST total!' },
   boss_doodle: { name: 'Boss Doodle Finale', instruction: 'Clear all 3 stages at Tile 100 to claim victory!' },
 };
 
