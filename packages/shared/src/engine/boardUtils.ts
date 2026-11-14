@@ -1,4 +1,68 @@
-import type { BoardLayout, LadderDef, PawnId, SnakeDef, ZoneDef, ZoneId } from '../types.js';
+import type {
+  BoardLayout,
+  BoardSpecialKind,
+  BoardSpecialTile,
+  LadderDef,
+  PawnId,
+  SnakeDef,
+  ZoneDef,
+  ZoneId,
+} from '../types.js';
+
+export const BOARD_SPECIAL_TILES: readonly BoardSpecialTile[] = [
+  {
+    tileId: 12,
+    kind: 'star_fountain',
+    name: 'Mata Air Bintang',
+    description: 'Dapat +2 Bintang bonus seketika!',
+  },
+  {
+    tileId: 22,
+    kind: 'supply_crate',
+    name: 'Peti Suplai',
+    description: 'Dapat 1 Item taktis gratis (atau +2 ★ jika penuh)!',
+  },
+  {
+    tileId: 38,
+    kind: 'shield_shrine',
+    name: 'Kuil Perisai',
+    description: 'Dapat +1 Perisai Anti-Ular otomatis!',
+  },
+  {
+    tileId: 43,
+    kind: 'tailwind',
+    name: 'Portal Angin',
+    description: 'Dorongan cepat +2 kotak ke depan!',
+  },
+  {
+    tileId: 60,
+    kind: 'star_fountain',
+    name: 'Mata Air Bintang',
+    description: 'Dapat +2 Bintang bonus seketika!',
+  },
+  {
+    tileId: 69,
+    kind: 'supply_crate',
+    name: 'Peti Suplai',
+    description: 'Dapat 1 Item taktis gratis (atau +2 ★ jika penuh)!',
+  },
+  {
+    tileId: 84,
+    kind: 'shield_shrine',
+    name: 'Kuil Perisai',
+    description: 'Dapat +1 Perisai Anti-Ular otomatis!',
+  },
+  {
+    tileId: 88,
+    kind: 'tailwind',
+    name: 'Portal Angin',
+    description: 'Dorongan cepat +2 kotak ke depan!',
+  },
+];
+
+export function getBoardSpecialTile(tileId: number): BoardSpecialTile | undefined {
+  return BOARD_SPECIAL_TILES.find((t) => t.tileId === tileId);
+}
 
 export interface TileGridCoord {
   tileId: number;
@@ -98,6 +162,7 @@ export interface LandingPreview {
   bounced: boolean;
   ladderTo?: number;
   snakeTo?: number;
+  specialKind?: BoardSpecialKind;
 }
 
 /**
@@ -113,7 +178,7 @@ export function computeEffectiveDiceSteps(
 }
 
 /**
- * Computes tactical landing destination & ladder/snake preview for a dice roll.
+ * Computes tactical landing destination & ladder/snake/special-event preview for a dice roll.
  */
 export function previewDiceLanding(
   board: BoardLayout,
@@ -126,6 +191,7 @@ export function previewDiceLanding(
   const move = computeMove(fromTile, steps, board.size);
   const ladder = findLadderAt(board, move.to);
   const snake = findSnakeAt(board, move.to);
+  const special = getBoardSpecialTile(move.to);
   return {
     diceValue,
     steps,
@@ -133,6 +199,7 @@ export function previewDiceLanding(
     bounced: move.bounced,
     ladderTo: ladder?.to,
     snakeTo: snake?.to,
+    specialKind: special?.kind,
   };
 }
 
