@@ -239,6 +239,26 @@ const ARCHETYPE_TITLE_TEMPLATES: Record<ChallengeArchetype, string[]> = {
     'Kalkulator Crayon Kilat',
     'Jagoan Perbandingan Angka',
   ],
+  target_sum: [
+    'Kombinasi Angka Pas!',
+    'Cari 2 Kartu Target',
+    'Pasangan Penjumlahan Kilat',
+    'Cocokkan Total Target!',
+    'Teka-Teki Dua Angka',
+    'Tambah Jadi Pas!',
+    'Rumus Dua Kartu Ceria',
+    'Kombo Angka Rahasia',
+  ],
+  arrow_blitz: [
+    'Panah Kilat Beruntun!',
+    'Ikuti Arah Panah',
+    'Kompas Crayon Cepat',
+    'Arah Mata Angin Mini',
+    'Tes Refleks 4 Arah',
+    'Panah Zigzag Kertas',
+    'Navigasi Cepat Doodle',
+    'Balapan Panah Akurat',
+  ],
   boss_doodle: ['Bos Doodle: Raja Coretan!'],
 };
 
@@ -348,13 +368,8 @@ export function generateTiles(board: BoardLayout, seed = DEFAULT_TILE_GENERATOR_
     const occIndex = archCounters.get(archetype) ?? 0;
     archCounters.set(archetype, occIndex + 1);
 
-    // Choose mode: duel is always duel, ~15% of all_play-capable archetypes become all_play
-    let mode: ChallengeMode = 'solo';
-    if (archetype === 'quick_duel') {
-      mode = 'duel';
-    } else if (spec.allowedModes.includes('all_play') && tileRng.chance(0.22)) {
-      mode = 'all_play';
-    }
+    // Choose mode: quick_duel is duel, all other tiles are strictly solo
+    const mode: ChallengeMode = archetype === 'quick_duel' ? 'duel' : 'solo';
 
     // Build unique title
     const templates = ARCHETYPE_TITLE_TEMPLATES[archetype];
@@ -372,9 +387,7 @@ export function generateTiles(board: BoardLayout, seed = DEFAULT_TILE_GENERATOR_
     const modeNote =
       mode === 'duel'
         ? 'Saatnya pilih satu rival untuk adu cepat!'
-        : mode === 'all_play'
-          ? 'Semua pemain ikut adu cepat bareng-bareng!'
-          : spec.instruction;
+        : spec.instruction;
     const specialNote = snakeHeads.has(tileId)
       ? ' Hati-hati, kepala ular mengintip. Menanglah supaya dia cuma ketawa!'
       : ladderStarts.has(tileId)
