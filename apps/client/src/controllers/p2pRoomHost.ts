@@ -29,6 +29,7 @@ import {
   recordChallengeSubmission,
   resolveTile,
   rollDice,
+  selectDuelOpponent,
   shouldBotBuyStarItem,
   simulateBotChallengeSubmission,
   startGame,
@@ -512,21 +513,14 @@ export class P2pRoomHost {
     const slot = this.getSlot(senderId);
     const ch = this.gameState.activeChallenge;
     if (ch.mode !== 'duel' || ch.ownerPlayerId !== slot.id) return;
+    if (!ch.awaitingDuelPick && Object.keys(ch.submissions).length > 0) return;
     if (opponentId === slot.id) return;
     const exists = this.gameState.players.some((p) => p.id === opponentId);
     if (!exists) return;
 
-    ch.opponentId = opponentId;
-    ch.participantIds = [slot.id, opponentId];
-    ch.submissions = {};
-    ch.deadlineAt = Date.now() + ch.durationMs;
-
-    const opp = this.gameState.players.find((p) => p.id === opponentId);
-    if (opp?.isBot) {
-      const botRng = new SeededRng(hashSeed(ch.seed, opp.id, 'p2p_duel_bot'));
-      ch.submissions[opp.id] = simulateBotChallengeSubmission(ch, opp.id, opp.botDifficulty, botRng);
-    }
-
+    this.gameState = selectDuelOpponent(this.gameState, slot.id, opponentId, Date.now());
+    const updated = this.gameState.activeChallenge!;
+    this.emit('challenge:begin', { challenge: updated }, '*');
     this.emit('game:sync', { state: this.gameState }, '*');
     this.scheduleChallengeResolution();
   }
@@ -543,7 +537,15 @@ export class P2pRoomHost {
     if (!this.gameState || !this.inGame) return;
     const slot = this.getSlot(senderId);
     const ch = this.gameState.activeChallenge;
-    if (!ch || ch.tileId !== submission.tileId) return;
+    if (!ch || ch.tileId !== submission.tileId || ch.awaitingDuelPick) return;
+    const allowedParticipant =
+      ch.participantIds.includes(slot.id) &&
+      (ch.mode === 'duel'
+        ? slot.id === ch.ownerPlayerId || slot.id === ch.opponentId
+        : ch.mode === 'solo'
+          ? slot.id === ch.ownerPlayerId
+          : true);
+    if (!allowedParticipant) return;
 
     this.gameState = recordChallengeSubmission(this.gameState, {
       playerId: slot.id,
@@ -642,6 +644,20 @@ export class P2pRoomHost {
     }
     if (this.disposed || !this.gameState?.activeChallenge) return;
     const ch = this.gameState.activeChallenge;
+
+    if (ch.mode === 'duel' && ch.awaitingDuelPick) {
+      const pickTimeoutMs = 12_000 * this.delayScale;
+      this.challengeTimer = globalThis.setTimeout(() => {
+        if (this.disposed || !this.gameState?.activeChallenge?.awaitingDuelPick) return;
+        this.gameState = selectDuelOpponent(this.gameState, ch.ownerPlayerId, undefined, Date.now());
+        const updated = this.gameState.activeChallenge!;
+        this.emit('challenge:begin', { challenge: updated }, '*');
+        this.emit('game:sync', { state: this.gameState }, '*');
+        this.scheduleChallengeResolution();
+      }, pickTimeoutMs);
+      return;
+    }
+
     const spec = ARCHETYPE_REGISTRY[ch.archetype];
 
     // Pre-populate any bot participants cleanly
