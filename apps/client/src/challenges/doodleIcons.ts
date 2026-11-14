@@ -338,6 +338,19 @@ export function renderItemSvg(itemId: string, size = 24): string {
         <circle cx="24" cy="24" r="3" fill="#FF6B7B"/>
         <circle cx="17" cy="31" r="3" fill="${INK}"/><circle cx="31" cy="31" r="3" fill="${INK}"/>
       </svg>`;
+    case 'star_multiplier':
+      return `<svg viewBox="0 0 48 48" width="${s}" height="${s}" aria-hidden="true">
+        <circle cx="24" cy="24" r="17" fill="#B295FF" stroke="${INK}" stroke-width="3"/>
+        <polygon points="18,12 20,17 25,17 21,20 22,25 18,22 14,25 15,20 11,17 16,17" fill="#FFD15C" stroke="${INK}" stroke-width="2" stroke-linejoin="round"/>
+        <polygon points="31,22 33,27 38,27 34,30 35,35 31,32 27,35 28,30 24,27 29,27" fill="#FFD15C" stroke="${INK}" stroke-width="2" stroke-linejoin="round"/>
+      </svg>`;
+    case 'rival_brake':
+      return `<svg viewBox="0 0 48 48" width="${s}" height="${s}" aria-hidden="true">
+        <polygon points="16,8 32,8 40,16 40,32 32,40 16,40 8,32 8,16" fill="#FF9852" stroke="${INK}" stroke-width="3" stroke-linejoin="round"/>
+        <path d="M18 22 V18 A6 6 0 0 1 30 18 V22" fill="none" stroke="${INK}" stroke-width="3" stroke-linecap="round"/>
+        <rect x="16" y="22" width="16" height="12" rx="3" fill="#FFFDF7" stroke="${INK}" stroke-width="2.6"/>
+        <circle cx="24" cy="28" r="2.2" fill="#FF6B7B"/>
+      </svg>`;
     case 'sabotage':
     default:
       return `<svg viewBox="0 0 48 48" width="${s}" height="${s}" aria-hidden="true">
@@ -382,6 +395,7 @@ export type UiIconKind =
   | 'leave'
   | 'sticker'
   | 'heart'
+  | 'mission'
   | 'bolt';
 
 export function renderUiIconSvg(kind: UiIconKind, size = 20): string {
@@ -560,6 +574,12 @@ export function renderUiIconSvg(kind: UiIconKind, size = 20): string {
     case 'heart':
       return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
         <path d="M18 30 C18 30 6 22 6 13.5 C6 9.5 9.2 6.5 13 6.5 C15.4 6.5 17 7.8 18 9.6 C19 7.8 20.6 6.5 23 6.5 C26.8 6.5 30 9.5 30 13.5 C30 22 18 30 18 30 Z" fill="#FF86AD" stroke="${INK}" stroke-width="2.6" stroke-linejoin="round"/>
+      </svg>`;
+    case 'mission':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <rect x="7" y="7" width="22" height="24" rx="4" fill="#FFFDF7" stroke="${INK}" stroke-width="2.6"/>
+        <rect x="13" y="4" width="10" height="5" rx="2" fill="#FFD15C" stroke="${INK}" stroke-width="2.2"/>
+        <path d="M12 18 L16 22 L25 13" fill="none" stroke="#34A87F" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>`;
     case 'bolt':
     default:
