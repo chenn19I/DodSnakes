@@ -103,6 +103,12 @@ function archetypeBadgeSymbol(tile: Tile): string {
       return '❖';
     case 'balance_bar':
       return '≈';
+    case 'pair_flip':
+      return '◫';
+    case 'number_order':
+      return '#';
+    case 'odd_one_out':
+      return '✧';
     default:
       return '•';
   }
