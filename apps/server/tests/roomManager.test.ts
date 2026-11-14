@@ -179,4 +179,41 @@ describe('RoomManager multiplayer logic', () => {
     mgr.customizePlayer('s1', { playerName: 'Nasution' });
     expect(mgr.getRoom(ok.roomCode)?.players[0].name).toBe('Nasution');
   });
+
+  it('keeps consecutive player turns rollable and emits game:sync on syncToSocket', () => {
+    const { mgr, socketEmits } = createTestHarness({ turnTimeoutMs: 5000, botDelayMs: 50 });
+    const c = mgr.createRoom('s1', { playerName: 'Ali', pawn: 'kucing', color: 'pink' });
+    mgr.joinRoom('s2', {
+      roomCode: c.roomCode,
+      playerName: 'Bima',
+      pawn: 'kodok',
+      color: 'mint',
+    });
+    mgr.setPlayerReady('s2', true);
+    mgr.startRoomGame('s1', 2026);
+
+    // Player 1 rolls; resolve any challenge or bonus, then Player 2 must be rollable in TURN_BEGIN
+    mgr.roll('s1', 1);
+    const room = mgr.getRoom(c.roomCode)!;
+    if (room.state?.phase === 'CHALLENGE' && room.state.activeChallenge) {
+      const ch = room.state.activeChallenge;
+      for (const pid of ch.participantIds) {
+        const sock = pid === room.players[0].id ? 's1' : 's2';
+        mgr.submitChallenge(sock, {
+          tileId: ch.tileId,
+          claimedSuccess: true,
+          score: 100,
+          inputLog: { kind: ch.archetype, reactionMs: 400 },
+        });
+      }
+    }
+
+    // After resolving turn, whichever turn becomes TURN_BEGIN can be synced and rolled immediately
+    mgr.syncToSocket('s2');
+    expect(socketEmits.some((e) => e.socketId === 's2' && e.event === 'game:sync')).toBe(true);
+    const activeId = room.state!.turnOrder[room.state!.currentTurnIndex];
+    const activeSocket = activeId === room.players[0].id ? 's1' : 's2';
+    expect(room.state?.phase).toBe('TURN_BEGIN');
+    expect(() => mgr.roll(activeSocket, 2)).not.toThrow();
+  });
 });
