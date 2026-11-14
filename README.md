@@ -63,7 +63,14 @@ Customize any pawn inside the **Studio Karakter & Aksesoris** with a draggable l
    - **Mode Kilat**: Start with 1 item + 2 stars and faster forward challenge momentum.
    - **Pesta Item**: Start with 1 item and greatly increased item drop chances.
 3. **Landing Resolution Order**:
-   - Play one of **22 interactive randomized mini-game archetypes** on tiles `2-99` (`tap_timing`, `quick_quiz`, `memory_doodle`, `spam_tap`, `swipe_dodge`, `shadow_match`, `quick_math`, `word_scramble`, `trace_line`, `lucky_wheel`, `stroop_color`, `quick_duel`, `gift_trap`, `bubble_pop`, `rhythm_clap`, `color_count`, `balance_bar`, `pair_flip`, `number_order`, `odd_one_out`, `pattern_next`, `math_compare`), excluding tile `1` (`start`).
+   - Trigger any **Special Board Tile** effect when landing on designated landmark spaces:
+     - **Air Mancur Bintang** (`star_fountain`, tiles `12, 60`): `+2 ★`.
+     - **Peti Item Spesial** (`supply_crate`, tiles `22, 69`): Free tactical item (or `+2 ★` if bag is full).
+     - **Altar Perisai** (`shield_shrine`, tiles `38, 84`): `+1` Snake Shield.
+     - **Angin Penolong** (`tailwind`, tiles `43, 88`): Auto-glides `+2` steps forward.
+   - Play one of **24 interactive randomized mini-game archetypes** on tiles `2-99` (`tap_timing`, `quick_quiz`, `memory_doodle`, `spam_tap`, `swipe_dodge`, `shadow_match`, `quick_math`, `word_scramble`, `trace_line`, `lucky_wheel`, `stroop_color`, `quick_duel`, `gift_trap`, `bubble_pop`, `rhythm_clap`, `color_count`, `balance_bar`, `pair_flip`, `number_order`, `odd_one_out`, `pattern_next`, `math_compare`, `target_sum`, `arrow_blitz`), excluding tile `1` (`start`).
+   - Only the active player who landed on a challenge plays it (including Ladder and Snake checks), **except** 1v1 Duel tiles (`quick_duel`), where the challenger picks 1 opponent before both duelists compete.
+   - Track your **Match Mission** (`Naik 2 Tangga`, `Menang 3 Tantangan`, `Kombo 2x`, or `Pakai 2 Item`) for an instant `+3 ★` plus an item (or shield if full) reward.
    - Apply challenge rewards (stars `★`, `advance` / `shield` / `extra_dice`, comeback **Bonus Ngejar +1 ★** when trailing the leader by `>= 25` tiles) or penalties (`retreat` / `skip_turn`).
    - Resolve ladders or snakes on the landed tile:
      - **Ladder base**: Pawn climbs up to the ladder top.
@@ -76,6 +83,8 @@ Customize any pawn inside the **Studio Karakter & Aksesoris** with a draggable l
    - **Kotak Kejutan** (`surprise`): Triggers one of 4 playful deterministic random effects before moving.
    - **Magnet Bintang** (`magnet_star`): Pulls 1 ★ from the current leader (or grants +1 ★ bonus).
    - **Sepatu Turbo** (`swap_turbo`): Adds `+2` extra steps to the next dice roll.
+   - **Jimat Ganda** (`star_multiplier`): Doubles challenge star winnings (`2x`) on a challenge victory this turn.
+   - **Jebakan Rem** (`rival_brake`): Applies a `1-3` dice brake onto the leading rival for their next roll.
 5. **Anti-Frustration Safeguards**:
    - Last-place players receive higher item drop odds upon winning challenges.
    - At most 2 consecutive turn penalties; a 3rd consecutive penalty is automatically forgiven (*Kartu Kasihan*).
