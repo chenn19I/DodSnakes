@@ -16,6 +16,7 @@ import {
   recordChallengeSubmission,
   resolveTile,
   rollDice,
+  selectDuelOpponent,
   shouldBotBuyStarItem,
   simulateBotChallengeSubmission,
   startGame,
@@ -288,6 +289,9 @@ export class LocalGameController implements GameSessionController {
     this.callbacks.onChallengePrompt(ch, pid);
 
     if (this.challengeTimerId !== null) clearTimeout(this.challengeTimerId);
+    if (ch.awaitingDuelPick) {
+      return;
+    }
     this.challengeTimerId = window.setTimeout(() => {
       if (this.disposed || this.state.phase !== 'CHALLENGE') return;
       this.submitChallenge({
@@ -302,19 +306,23 @@ export class LocalGameController implements GameSessionController {
   public chooseDuelOpponent(opponentId: string): void {
     const ch = this.state.activeChallenge;
     if (!ch || ch.mode !== 'duel') return;
-    ch.opponentId = opponentId;
-    ch.participantIds = [ch.ownerPlayerId, opponentId];
-    ch.submissions = {};
-    const opp = this.state.players.find((p) => p.id === opponentId);
+    this.state = selectDuelOpponent(this.state, ch.ownerPlayerId, opponentId, Date.now());
+    const updated = this.state.activeChallenge!;
+    const opp = updated.opponentId
+      ? this.state.players.find((p) => p.id === updated.opponentId)
+      : undefined;
     if (opp?.isBot) {
-      ch.submissions[opp.id] = simulateBotChallengeSubmission(
-        ch,
-        opp.id,
-        opp.botDifficulty,
-        new SeededRng(hashSeed(ch.seed, opp.id, 'bot_loc')),
+      this.state = recordChallengeSubmission(
+        this.state,
+        simulateBotChallengeSubmission(
+          updated,
+          opp.id,
+          opp.botDifficulty,
+          new SeededRng(hashSeed(updated.seed, opp.id, 'bot_loc')),
+        ),
       );
     }
-    this.pendingLocalParticipants = ch.participantIds.filter((pid) => {
+    this.pendingLocalParticipants = updated.participantIds.filter((pid) => {
       const p = this.state.players.find((x) => x.id === pid);
       return p && !p.isBot;
     });
