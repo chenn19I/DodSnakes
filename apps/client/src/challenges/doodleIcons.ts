@@ -99,11 +99,124 @@ export function renderPatternBadge(pattern: string): string {
 
 const INK = '#24222D';
 
-export function renderPawnAvatarSvg(pawnId: string, tintHex = '#FF86AD', size = 34): string {
+function renderPawnAccessoryOverlay(pawnId: string, accessory: string): string {
+  if (!accessory || accessory === 'none') return '';
+  const eyeY = pawnId === 'jamur' ? 42 : pawnId === 'kodok' ? 22 : pawnId === 'bebek' ? 28 : 34;
+  const eyeLeft = pawnId === 'kodok' ? 19 : pawnId === 'dino' ? 37 : pawnId === 'jamur' ? 28 : 24;
+  const eyeRight = pawnId === 'kodok' ? 45 : pawnId === 'dino' ? 46 : pawnId === 'jamur' ? 36 : 40;
+  const topY = pawnId === 'dino' ? 6 : pawnId === 'jamur' ? 11 : pawnId === 'kodok' ? 10 : 12;
+
+  switch (accessory) {
+    case 'crown':
+      return `<g>
+        <polygon points="23,${topY + 8} 26,${topY} 32,${topY + 5} 38,${topY} 41,${topY + 8}" fill="#FFD15C" stroke="${INK}" stroke-width="2.2" stroke-linejoin="round"/>
+        <circle cx="32" cy="${topY + 5}" r="1.8" fill="#FF6B7B"/>
+      </g>`;
+    case 'glasses':
+      return pawnId === 'dino'
+        ? `<g>
+             <circle cx="${eyeLeft}" cy="${eyeY - 5}" r="5.5" fill="none" stroke="${INK}" stroke-width="2.2"/>
+             <line x1="${eyeLeft - 6}" y1="${eyeY - 5}" x2="26" y2="${eyeY - 6}" stroke="${INK}" stroke-width="2"/>
+           </g>`
+        : `<g>
+             <circle cx="${eyeLeft}" cy="${eyeY}" r="6.2" fill="none" stroke="${INK}" stroke-width="2.2"/>
+             <circle cx="${eyeRight}" cy="${eyeY}" r="6.2" fill="none" stroke="${INK}" stroke-width="2.2"/>
+             <line x1="${eyeLeft + 6}" y1="${eyeY}" x2="${eyeRight - 6}" y2="${eyeY}" stroke="${INK}" stroke-width="2"/>
+           </g>`;
+    case 'scarf':
+      return `<g>
+        <path d="M18 50 Q32 56 46 50" fill="none" stroke="#FF6B7B" stroke-width="6.5" stroke-linecap="round"/>
+        <path d="M18 50 Q32 56 46 50" fill="none" stroke="${INK}" stroke-width="2" stroke-linecap="round"/>
+        <rect x="36" y="49" width="6" height="10" rx="2.5" fill="#FF6B7B" stroke="${INK}" stroke-width="1.8"/>
+      </g>`;
+    case 'headset':
+      return `<g>
+        <path d="M11 35 C11 10 53 10 53 35" fill="none" stroke="#72C0FF" stroke-width="3.8" stroke-linecap="round"/>
+        <rect x="7" y="29" width="7" height="14" rx="3.5" fill="#FF86AD" stroke="${INK}" stroke-width="2.2"/>
+        <rect x="50" y="29" width="7" height="14" rx="3.5" fill="#FF86AD" stroke="${INK}" stroke-width="2.2"/>
+      </g>`;
+    case 'flower':
+      return `<g transform="translate(17, ${topY + 5})">
+        <circle cx="0" cy="-4.5" r="3" fill="#FF86AD" stroke="${INK}" stroke-width="1.4"/>
+        <circle cx="4.3" cy="-1.2" r="3" fill="#FFFDF7" stroke="${INK}" stroke-width="1.4"/>
+        <circle cx="2.7" cy="3.8" r="3" fill="#FF86AD" stroke="${INK}" stroke-width="1.4"/>
+        <circle cx="-2.7" cy="3.8" r="3" fill="#FFFDF7" stroke="${INK}" stroke-width="1.4"/>
+        <circle cx="-4.3" cy="-1.2" r="3" fill="#FF86AD" stroke="${INK}" stroke-width="1.4"/>
+        <circle cx="0" cy="0" r="2.6" fill="#FFD15C" stroke="${INK}" stroke-width="1.4"/>
+      </g>`;
+    case 'backpack':
+      return `<g>
+        <circle cx="51" cy="49" r="6" fill="#72C0FF" stroke="${INK}" stroke-width="2.2"/>
+        <polygon points="51,45 52.3,47.8 55.3,48 53,50 53.6,53 51,51.4 48.4,53 49,50 46.7,48 49.7,47.8" fill="#FFD15C"/>
+      </g>`;
+    default:
+      return '';
+  }
+}
+
+export function renderAccessorySvg(accessoryId: string, tintHex = '#FF86AD', size = 32): string {
   const s = size;
+  switch (accessoryId) {
+    case 'crown':
+      return `<svg viewBox="0 0 48 48" width="${s}" height="${s}" aria-hidden="true">
+        <polygon points="8,34 11,14 19,24 24,10 29,24 37,14 40,34" fill="#FFD15C" stroke="${INK}" stroke-width="3" stroke-linejoin="round"/>
+        <circle cx="24" cy="27" r="3.2" fill="#FF6B7B" stroke="${INK}" stroke-width="1.6"/>
+      </svg>`;
+    case 'glasses':
+      return `<svg viewBox="0 0 48 48" width="${s}" height="${s}" aria-hidden="true">
+        <circle cx="15" cy="25" r="8" fill="#DCEBFF" fill-opacity="0.7" stroke="${INK}" stroke-width="3"/>
+        <circle cx="33" cy="25" r="8" fill="#DCEBFF" fill-opacity="0.7" stroke="${INK}" stroke-width="3"/>
+        <path d="M23 24 H25" stroke="${INK}" stroke-width="3.2" stroke-linecap="round"/>
+      </svg>`;
+    case 'scarf':
+      return `<svg viewBox="0 0 48 48" width="${s}" height="${s}" aria-hidden="true">
+        <path d="M8 18 Q24 26 40 18 Q42 26 36 28 Q24 34 12 28 Q6 26 8 18 Z" fill="#FF6B7B" stroke="${INK}" stroke-width="3" stroke-linejoin="round"/>
+        <rect x="27" y="25" width="9" height="15" rx="4" fill="#FF6B7B" stroke="${INK}" stroke-width="2.8"/>
+        <line x1="28" y1="34" x2="35" y2="34" stroke="#FFF6E5" stroke-width="3"/>
+      </svg>`;
+    case 'headset':
+      return `<svg viewBox="0 0 48 48" width="${s}" height="${s}" aria-hidden="true">
+        <path d="M10 28 C10 10 38 10 38 28" fill="none" stroke="#72C0FF" stroke-width="5" stroke-linecap="round"/>
+        <rect x="6" y="22" width="9" height="16" rx="4.5" fill="${tintHex}" stroke="${INK}" stroke-width="2.8"/>
+        <rect x="33" y="22" width="9" height="16" rx="4.5" fill="${tintHex}" stroke="${INK}" stroke-width="2.8"/>
+      </svg>`;
+    case 'flower':
+      return `<svg viewBox="0 0 48 48" width="${s}" height="${s}" aria-hidden="true">
+        <circle cx="24" cy="13" r="6.5" fill="#FF86AD" stroke="${INK}" stroke-width="2.4"/>
+        <circle cx="34" cy="21" r="6.5" fill="#FFFDF7" stroke="${INK}" stroke-width="2.4"/>
+        <circle cx="30" cy="33" r="6.5" fill="#FF86AD" stroke="${INK}" stroke-width="2.4"/>
+        <circle cx="18" cy="33" r="6.5" fill="#FFFDF7" stroke="${INK}" stroke-width="2.4"/>
+        <circle cx="14" cy="21" r="6.5" fill="#FF86AD" stroke="${INK}" stroke-width="2.4"/>
+        <circle cx="24" cy="24" r="6" fill="#FFD15C" stroke="${INK}" stroke-width="2.6"/>
+      </svg>`;
+    case 'backpack':
+      return `<svg viewBox="0 0 48 48" width="${s}" height="${s}" aria-hidden="true">
+        <path d="M18 14 C18 8 30 8 30 14" fill="none" stroke="${INK}" stroke-width="3"/>
+        <rect x="11" y="13" width="26" height="27" rx="9" fill="#72C0FF" stroke="${INK}" stroke-width="3"/>
+        <rect x="15" y="26" width="18" height="10" rx="4" fill="#5EE2AD" stroke="${INK}" stroke-width="2.4"/>
+        <polygon points="24,15 25.8,19.2 30.3,19.6 26.8,22.5 27.9,27 24,24.6 20.1,27 21.2,22.5 17.7,19.6 22.2,19.2" fill="#FFD15C" stroke="${INK}" stroke-width="1.6"/>
+      </svg>`;
+    default:
+      return `<svg viewBox="0 0 48 48" width="${s}" height="${s}" aria-hidden="true">
+        <circle cx="24" cy="24" r="14" fill="#FFF6E5" stroke="${INK}" stroke-width="3" stroke-dasharray="5 4"/>
+        <polygon points="24,13 26.5,20 34,20 28,24.5 30,32 24,27.5 18,32 20,24.5 14,20 21.5,20" fill="${tintHex}" stroke="${INK}" stroke-width="2"/>
+      </svg>`;
+  }
+}
+
+export function renderPawnAvatarSvg(
+  pawnId: string,
+  tintHex = '#FF86AD',
+  size = 34,
+  accessory = 'none',
+): string {
+  const s = size;
+  const overlay = renderPawnAccessoryOverlay(pawnId, accessory);
+  const wrap = (inner: string) =>
+    `<svg viewBox="0 0 64 64" width="${s}" height="${s}" aria-hidden="true">${inner}${overlay}</svg>`;
   switch (pawnId) {
     case 'kucing':
-      return `<svg viewBox="0 0 64 64" width="${s}" height="${s}" aria-hidden="true">
+      return wrap(`
         <polygon points="12,30 17,7 30,21" fill="${tintHex}" stroke="${INK}" stroke-width="3.4" stroke-linejoin="round"/>
         <polygon points="16,26 19,14 26,22" fill="#FF9BB8"/>
         <polygon points="52,30 47,7 34,21" fill="${tintHex}" stroke="${INK}" stroke-width="3.4" stroke-linejoin="round"/>
@@ -118,9 +231,9 @@ export function renderPawnAvatarSvg(pawnId: string, tintHex = '#FF86AD', size = 
         <circle cx="40" cy="34" r="3" fill="${INK}"/><circle cx="41" cy="33" r="1" fill="#FFFDF7"/>
         <polygon points="30,38 34,38 32,41" fill="#FF6B8B"/>
         <path d="M27 43 Q32 46 37 43" fill="none" stroke="${INK}" stroke-width="2.4" stroke-linecap="round"/>
-      </svg>`;
+      `);
     case 'kodok':
-      return `<svg viewBox="0 0 64 64" width="${s}" height="${s}" aria-hidden="true">
+      return wrap(`
         <ellipse cx="32" cy="18" rx="16" ry="4.5" fill="#5EE2AD" stroke="${INK}" stroke-width="2.8"/>
         <circle cx="37" cy="14" r="3.4" fill="#FFD15C" stroke="${INK}" stroke-width="1.8"/>
         <circle cx="19" cy="22" r="8" fill="${tintHex}" stroke="${INK}" stroke-width="3.2"/>
@@ -132,9 +245,9 @@ export function renderPawnAvatarSvg(pawnId: string, tintHex = '#FF86AD', size = 
         <circle cx="19" cy="22" r="3.4" fill="${INK}"/><circle cx="20" cy="21" r="1.1" fill="#FFFDF7"/>
         <circle cx="45" cy="22" r="3.4" fill="${INK}"/><circle cx="46" cy="21" r="1.1" fill="#FFFDF7"/>
         <path d="M23 39 Q32 45 41 39" fill="none" stroke="${INK}" stroke-width="2.6" stroke-linecap="round"/>
-      </svg>`;
+      `);
     case 'bebek':
-      return `<svg viewBox="0 0 64 64" width="${s}" height="${s}" aria-hidden="true">
+      return wrap(`
         <path d="M29 14 Q26 6 33 12 Q37 6 38 14" fill="none" stroke="${INK}" stroke-width="3" stroke-linecap="round"/>
         <circle cx="32" cy="34" r="19" fill="${tintHex}" stroke="${INK}" stroke-width="3.4"/>
         <path d="M16 47 Q32 54 48 47" fill="none" stroke="#FF6B8B" stroke-width="6" stroke-linecap="round"/>
@@ -144,9 +257,9 @@ export function renderPawnAvatarSvg(pawnId: string, tintHex = '#FF86AD', size = 
         <ellipse cx="32" cy="39" rx="10" ry="6" fill="#FF9852" stroke="${INK}" stroke-width="2.8"/>
         <circle cx="24" cy="28" r="3" fill="${INK}"/><circle cx="25" cy="27" r="1" fill="#FFFDF7"/>
         <circle cx="40" cy="28" r="3" fill="${INK}"/><circle cx="41" cy="27" r="1" fill="#FFFDF7"/>
-      </svg>`;
+      `);
     case 'panda':
-      return `<svg viewBox="0 0 64 64" width="${s}" height="${s}" aria-hidden="true">
+      return wrap(`
         <line x1="48" y1="16" x2="54" y2="7" stroke="#5EE2AD" stroke-width="3.2" stroke-linecap="round"/>
         <ellipse cx="55" cy="9" rx="4.5" ry="2.2" transform="rotate(-20 55 9)" fill="#5EE2AD" stroke="${INK}" stroke-width="1.6"/>
         <circle cx="15" cy="18" r="8" fill="${INK}"/><circle cx="49" cy="18" r="8" fill="${INK}"/>
@@ -159,9 +272,9 @@ export function renderPawnAvatarSvg(pawnId: string, tintHex = '#FF86AD', size = 
         <circle cx="23" cy="33" r="1.9" fill="#FFFDF7"/><circle cx="41" cy="33" r="1.9" fill="#FFFDF7"/>
         <ellipse cx="18" cy="41" rx="3.4" ry="2" fill="#FF9BB8"/><ellipse cx="46" cy="41" rx="3.4" ry="2" fill="#FF9BB8"/>
         <path d="M28 43 Q32 46 36 43" fill="none" stroke="${INK}" stroke-width="2.5" stroke-linecap="round"/>
-      </svg>`;
+      `);
     case 'dino':
-      return `<svg viewBox="0 0 64 64" width="${s}" height="${s}" aria-hidden="true">
+      return wrap(`
         <polygon points="22,19 25,8 31,14 36,6 42,14 46,9 46,20" fill="#FFD15C" stroke="${INK}" stroke-width="2.6" stroke-linejoin="round"/>
         <path d="M13 48 C13 22 48 16 50 38 C50 48 44 54 18 54 Z" fill="${tintHex}" stroke="${INK}" stroke-width="3.4"/>
         <polygon points="10,33 16,28 16,38" fill="#FF9852" stroke="${INK}" stroke-width="2"/>
@@ -169,17 +282,17 @@ export function renderPawnAvatarSvg(pawnId: string, tintHex = '#FF86AD', size = 
         <ellipse cx="32" cy="41" rx="4" ry="2.2" fill="#FF9BB8"/>
         <circle cx="37" cy="29" r="3.2" fill="${INK}"/><circle cx="38" cy="28" r="1.1" fill="#FFFDF7"/>
         <path d="M40 38 Q45 40 48 37" fill="none" stroke="${INK}" stroke-width="2.3" stroke-linecap="round"/>
-      </svg>`;
+      `);
     case 'jamur':
     default:
-      return `<svg viewBox="0 0 64 64" width="${s}" height="${s}" aria-hidden="true">
+      return wrap(`
         <rect x="21" y="34" width="22" height="20" rx="9" fill="#FFF6E5" stroke="${INK}" stroke-width="3.2"/>
         <path d="M9 36 C9 11 55 11 55 36 Z" fill="${tintHex}" stroke="${INK}" stroke-width="3.4" stroke-linejoin="round"/>
         <circle cx="20" cy="25" r="4.2" fill="#FFFDF7"/><circle cx="44" cy="24" r="3.8" fill="#FFFDF7"/>
         <polygon points="32,16 34,21 39,21 35,24 36,29 32,26 28,29 29,24 25,21 30,21" fill="#FFD15C" stroke="${INK}" stroke-width="1.6"/>
         <ellipse cx="24" cy="46" rx="2.8" ry="1.7" fill="#FF9BB8"/><ellipse cx="40" cy="46" rx="2.8" ry="1.7" fill="#FF9BB8"/>
         <circle cx="28" cy="42" r="2.4" fill="${INK}"/><circle cx="36" cy="42" r="2.4" fill="${INK}"/>
-      </svg>`;
+      `);
   }
 }
 
