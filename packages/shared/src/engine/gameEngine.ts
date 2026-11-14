@@ -1,6 +1,7 @@
 import {
   getChallengeBonusDurationMs,
   getPlayerShopCost,
+  type AccessoryId,
   type ActiveChallenge,
   type BoardLayout,
   type BotDifficulty,
@@ -32,6 +33,7 @@ export interface CreatePlayerInput {
   name: string;
   pawn: PawnId;
   color: PlayerColorId;
+  accessory?: AccessoryId;
   isBot?: boolean;
   botDifficulty?: BotDifficulty;
 }
@@ -115,6 +117,7 @@ export function createInitialGameState(options: CreateGameOptions): GameState {
       name: p.name,
       pawn: p.pawn,
       color: p.color,
+      accessory: p.accessory ?? 'none',
       position: 1,
       stars: rulePreset === 'kilat' ? 2 : 0,
       items: starterItems,
@@ -685,6 +688,7 @@ export function computePodium(state: GameState): PodiumEntry[] {
     name: p.name,
     pawn: p.pawn,
     color: p.color,
+    accessory: p.accessory ?? 'none',
     position: p.position,
     stars: p.stars,
     isWinner: p.id === state.winnerId,
