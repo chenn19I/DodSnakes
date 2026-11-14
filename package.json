@@ -1,0 +1,20 @@
+{
+  "name": "ular-tangga-doodle-dash",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ular Tangga Doodle Dash - Game web multiplayer 3D semi-doodle dengan tantangan di setiap kotak",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run build --workspace=@doodle-dash/shared && npm run build --workspace=@doodle-dash/server && npm run build --workspace=@doodle-dash/client",
+    "test": "npm test --workspace=@doodle-dash/shared && npm test --workspace=@doodle-dash/server",
+    "generate:tiles": "npm run generate:tiles --workspace=@doodle-dash/shared",
+    "sim": "npm run sim --workspace=@doodle-dash/shared"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}
