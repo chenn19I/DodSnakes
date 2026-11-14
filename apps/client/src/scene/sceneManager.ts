@@ -293,9 +293,40 @@ export class DoodleSceneManager {
     this.onSpeedChange?.(enable);
   }
 
-  public skipCurrentAnimation(): void {
+  public skipCurrentAnimation(flushAll = true): void {
+    if (flushAll) {
+      const pendingCallbacks = this.eventQueue.splice(0, this.eventQueue.length);
+      if (this.activeTimeline) {
+        try {
+          this.activeTimeline.progress(1);
+        } catch {
+          this.activeTimeline.kill();
+        }
+        this.activeTimeline = null;
+      }
+      for (const item of pendingCallbacks) {
+        try {
+          item.onDone?.();
+        } catch {
+          // Ensure stale queued callback never blocks turn unlock
+        }
+      }
+      this.isPlayingQueue = false;
+      this.animatingPawns.clear();
+      if (this.latestGameState) {
+        this.syncPlayersFromState(this.latestGameState);
+      }
+      return;
+    }
     if (this.activeTimeline) {
       this.activeTimeline.progress(1);
+    }
+  }
+
+  public cancelOptimisticDiceShake(): void {
+    if (this.optimisticRollTween) {
+      this.optimisticRollTween.kill();
+      this.optimisticRollTween = null;
     }
   }
 
@@ -436,6 +467,7 @@ export class DoodleSceneManager {
   }
 
   public enqueueEvents(events: GameEvent[], finalState: GameState): Promise<void> {
+    this.latestGameState = finalState;
     this.latestPlayers = finalState.players;
     if (events.length === 0) {
       this.syncPlayersFromState(finalState);
@@ -443,16 +475,31 @@ export class DoodleSceneManager {
     }
     this.board.setPreviewTiles([]);
     return new Promise((resolve) => {
+      let settled = false;
+      let watchdogId: ReturnType<typeof setTimeout> | null = null;
+      const finishBatch = () => {
+        if (settled) return;
+        settled = true;
+        if (watchdogId !== null) {
+          clearTimeout(watchdogId);
+          watchdogId = null;
+        }
+        this.syncPlayersFromState(finalState);
+        resolve();
+      };
+
+      const maxWaitMs = document.hidden ? 900 : Math.max(5500, events.length * 3200);
+      watchdogId = setTimeout(() => {
+        if (settled) return;
+        this.skipCurrentAnimation(true);
+        finishBatch();
+      }, maxWaitMs);
+
       events.forEach((ev, idx) => {
         const isLast = idx === events.length - 1;
         this.eventQueue.push({
           event: ev,
-          onDone: isLast
-            ? () => {
-                this.syncPlayersFromState(finalState);
-                resolve();
-              }
-            : undefined,
+          onDone: isLast ? finishBatch : undefined,
         });
       });
       if (!this.isPlayingQueue) {
@@ -818,7 +865,7 @@ export class DoodleSceneManager {
             duration: 0.75,
             ease: 'power1.inOut',
             onUpdate: () => {
-              const p = gulpProxy.t;
+              const p = Math.min(1, Math.max(0, gulpProxy.t));
               snake.setGulpProgress(p);
               const curvePt = snake.curve.getPointAt(p);
               pv.root.position.set(
