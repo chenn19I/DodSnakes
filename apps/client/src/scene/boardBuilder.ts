@@ -30,6 +30,7 @@ export interface BoardVisuals {
   setTileBoing: (tileId: number, offsetY: number, scaleXZ?: number) => void;
   setActiveTile: (tileId: number | null) => void;
   setPreviewTiles: (previews: TilePreviewMarker[]) => void;
+  setColorblindMode: (enabled: boolean) => void;
   updateIdle: (elapsedSec: number, reducedMotion: boolean) => void;
   getTileWorldTop: (tileId: number) => THREE.Vector3;
 }
@@ -75,7 +76,7 @@ function archetypeBadgeSymbol(tile: Tile): string {
     case 'memory_doodle':
       return '♣';
     case 'spam_tap':
-      return '⚡';
+      return '!';
     case 'swipe_dodge':
       return '⇄';
     case 'shadow_match':
@@ -85,13 +86,13 @@ function archetypeBadgeSymbol(tile: Tile): string {
     case 'word_scramble':
       return 'Az';
     case 'trace_line':
-      return '〰';
+      return '~';
     case 'lucky_wheel':
-      return '☸';
+      return '☼';
     case 'stroop_color':
       return '◈';
     case 'quick_duel':
-      return '⚔';
+      return '×';
     case 'gift_trap':
       return '★';
     case 'bubble_pop':
@@ -101,7 +102,7 @@ function archetypeBadgeSymbol(tile: Tile): string {
     case 'color_count':
       return '❖';
     case 'balance_bar':
-      return '⚖';
+      return '≈';
     default:
       return '•';
   }
@@ -168,6 +169,18 @@ function createTileAtlasTexture(): THREE.CanvasTexture {
       ctx.strokeStyle = 'rgba(43, 40, 56, 0.42)';
       ctx.lineWidth = 3.5;
       ctx.stroke();
+
+      // Colorblind-safe upward triangle marker in bottom-left corner
+      ctx.fillStyle = '#009E73';
+      ctx.strokeStyle = DOODLE_PALETTE.ink;
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.moveTo(x + 42, y + cell - 54);
+      ctx.lineTo(x + 60, y + cell - 24);
+      ctx.lineTo(x + 24, y + cell - 24);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
     } else if (snakeHeads.has(tile.id)) {
       ctx.fillStyle = 'rgba(255, 127, 167, 0.56)';
       ctx.beginPath();
@@ -175,6 +188,18 @@ function createTileAtlasTexture(): THREE.CanvasTexture {
       ctx.fill();
       ctx.strokeStyle = 'rgba(43, 40, 56, 0.42)';
       ctx.lineWidth = 3.5;
+      ctx.stroke();
+
+      // Colorblind-safe downward triangle warning in bottom-left corner
+      ctx.fillStyle = '#D55E00';
+      ctx.strokeStyle = DOODLE_PALETTE.ink;
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.moveTo(x + 42, y + cell - 22);
+      ctx.lineTo(x + 60, y + cell - 52);
+      ctx.lineTo(x + 24, y + cell - 52);
+      ctx.closePath();
+      ctx.fill();
       ctx.stroke();
     }
 
@@ -708,13 +733,24 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
   // Pooled 6 landing-preview halos (used pre-roll & for Golden Dice targets)
   const previewGeo = new THREE.RingGeometry(0.58, 0.79, 24);
   previewGeo.rotateX(-Math.PI / 2);
-  const previewKindColors: Record<TilePreviewMarker['kind'], string> = {
+  const previewKindColorsDefault: Record<TilePreviewMarker['kind'], string> = {
     normal: DOODLE_PALETTE.yellow,
     ladder: DOODLE_PALETTE.mint,
     snake: DOODLE_PALETTE.pink,
     boss: DOODLE_PALETTE.orange,
     bounced: DOODLE_PALETTE.coral,
   };
+  const previewKindColorsCb: Record<TilePreviewMarker['kind'], string> = {
+    normal: '#E69F00',
+    ladder: '#009E73',
+    snake: '#D55E00',
+    boss: '#CC79A7',
+    bounced: '#0072B2',
+  };
+  let colorblindMode = false;
+  let latestPreviews: TilePreviewMarker[] = [];
+  const getPreviewColor = (kind: TilePreviewMarker['kind']): string =>
+    (colorblindMode ? previewKindColorsCb : previewKindColorsDefault)[kind];
   const previewRings = Array.from({ length: 6 }, () => {
     const mat = new THREE.MeshBasicMaterial({
       color: DOODLE_PALETTE.yellow,
@@ -807,17 +843,29 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
       }
     },
     setPreviewTiles: (previews: TilePreviewMarker[]) => {
+      latestPreviews = previews;
       for (let i = 0; i < previewRings.length; i++) {
         const ring = previewRings[i];
         const marker = previews[i];
         if (!marker || marker.tileId < 1 || marker.tileId > 100) {
           ring.visible = false;
+          ring.userData.kind = undefined;
           continue;
         }
         const coord = getTileGridCoord(marker.tileId);
         ring.visible = true;
+        ring.userData.kind = marker.kind;
         ring.position.set(coord.x, (tileTopY[marker.tileId] ?? 0.45) + 0.036, coord.z);
-        (ring.material as THREE.MeshBasicMaterial).color.set(previewKindColors[marker.kind]);
+        (ring.material as THREE.MeshBasicMaterial).color.set(getPreviewColor(marker.kind));
+      }
+    },
+    setColorblindMode: (enabled: boolean) => {
+      colorblindMode = enabled;
+      for (let i = 0; i < previewRings.length; i++) {
+        const ring = previewRings[i];
+        const marker = latestPreviews[i];
+        if (!ring.visible || !marker) continue;
+        (ring.material as THREE.MeshBasicMaterial).color.set(getPreviewColor(marker.kind));
       }
     },
     updateIdle: (elapsedSec: number, reducedMotion: boolean) => {
@@ -843,7 +891,10 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
       for (let i = 0; i < previewRings.length; i++) {
         const ring = previewRings[i];
         if (!ring.visible) continue;
-        const pulse = 1 + Math.sin(elapsedSec * 4.4 + i * 0.7) * 0.08 * amp;
+        const kind = ring.userData.kind as TilePreviewMarker['kind'] | undefined;
+        const speed = colorblindMode && kind === 'snake' ? 7.8 : 4.4;
+        const baseScale = colorblindMode && kind === 'ladder' ? 1.07 : 1;
+        const pulse = baseScale + Math.sin(elapsedSec * speed + i * 0.7) * 0.08 * amp;
         ring.scale.set(pulse, pulse, 1);
       }
       flagGroup.rotation.y = Math.sin(elapsedSec * 2.2) * 0.18 * amp;
