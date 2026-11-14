@@ -11,14 +11,28 @@ import {
   renderItemSvg,
   renderPatternBadge,
   renderPawnAvatarSvg,
+  renderUiIconSvg,
 } from './doodleIcons.js';
 import type { DoodleSoundEngine } from '../audio/soundEngine.js';
+import {
+  COLORBLIND_CHALLENGE_CODES,
+  getLocalizedBubbleColorLabel,
+  getLocalizedColorCountQuestion,
+  getLocalizedGiftVariant,
+  getLocalizedMemoryLabel,
+  getLocalizedQuiz,
+  getLocalizedShadowLabel,
+  getLocalizedStroopLabel,
+  getLocalizedWheelLabel,
+  type AppLanguage,
+} from '../i18n/translations.js';
 
 export interface ChallengeRenderContext {
   challenge: ActiveChallenge;
   playerId: string;
   container: HTMLElement;
   colorblindMode: boolean;
+  language?: AppLanguage;
   sound: DoodleSoundEngine;
   onSubmit: (submission: ChallengeSubmission) => void;
 }
@@ -46,7 +60,7 @@ function makeInputSubmission(
   };
 }
 
-const renderTapTiming: ChallengeRendererFn = ({ challenge, playerId, container, sound, onSubmit }) => {
+const renderTapTiming: ChallengeRendererFn = ({ challenge, playerId, container, colorblindMode, language = 'id', sound, onSubmit }) => {
   const center = Number(challenge.params.zoneCenter ?? 0.5);
   const width = Number(challenge.params.zoneWidth ?? 0.22);
   const speed = Number(challenge.params.speed ?? 1.1);
@@ -57,10 +71,10 @@ const renderTapTiming: ChallengeRendererFn = ({ challenge, playerId, container, 
   container.innerHTML = `
     <div class="mg-wrap">
       <div class="mg-timing-track" id="mg-timing-track">
-        <div class="mg-timing-zone" style="left:${(center - width / 2) * 100}%;width:${width * 100}%"></div>
+        <div class="mg-timing-zone ${colorblindMode ? 'cb-safe-zone' : ''}" style="left:${(center - width / 2) * 100}%;width:${width * 100}%"></div>
         <div class="mg-timing-needle" id="mg-needle"></div>
       </div>
-      <button class="doodle-btn doodle-btn-primary mg-big-btn" id="mg-tap-btn">KETUK SEKARANG!</button>
+      <button class="doodle-btn doodle-btn-primary mg-big-btn" id="mg-tap-btn">${language === 'en' ? 'TAP NOW!' : 'KETUK SEKARANG!'}</button>
     </div>
   `;
 
@@ -162,13 +176,15 @@ const renderFourOptionMcq = (
 };
 
 const renderQuickQuiz: ChallengeRendererFn = (ctx) => {
+  const lang = ctx.language ?? 'id';
   const qId = Number(ctx.challenge.params.questionId ?? 0);
   const q = QUIZ_BANK.find((item) => item.id === qId);
-  const question = String(ctx.challenge.params.question ?? q?.question ?? '');
-  const options = (ctx.challenge.params.options as string[]) ?? q?.options ?? [];
+  const rawQuestion = String(ctx.challenge.params.question ?? q?.question ?? '');
+  const rawOptions = (ctx.challenge.params.options as string[]) ?? q?.options ?? [];
+  const localized = getLocalizedQuiz(qId, rawQuestion, rawOptions, lang);
   return renderFourOptionMcq(
-    `<div class="mg-quiz-text">${question}</div>`,
-    options.map((label) => ({ label })),
+    `<div class="mg-quiz-text">${localized.question}</div>`,
+    localized.options.map((label) => ({ label })),
     q?.correctIndex ?? 0,
   )(ctx);
 };
@@ -185,8 +201,9 @@ const renderQuickMath: ChallengeRendererFn = (ctx) => {
 };
 
 const renderShadowMatch: ChallengeRendererFn = (ctx) => {
+  const lang = ctx.language ?? 'id';
   const targetShape = String(ctx.challenge.params.targetShape ?? 'cat');
-  const options = (ctx.challenge.params.options as Array<{ label: string; shape: string }>) ?? [];
+  const options = (ctx.challenge.params.options as Array<{ id?: string; label: string; shape: string }>) ?? [];
   const correctIndex = Number(ctx.challenge.params.correctIndex ?? 0);
   const startedAt = performance.now();
   let done = false;
@@ -200,7 +217,7 @@ const renderShadowMatch: ChallengeRendererFn = (ctx) => {
             (opt, idx) => `
           <button class="doodle-btn mg-opt-btn mg-shadow-opt" data-idx="${idx}">
             ${renderDoodleSvg(opt.shape, false)}
-            <small>${opt.label}</small>
+            <small>${getLocalizedShadowLabel(opt.id ?? opt.shape, opt.label, lang)}</small>
           </button>`,
           )
           .join('')}
@@ -228,21 +245,28 @@ const renderShadowMatch: ChallengeRendererFn = (ctx) => {
 };
 
 const renderStroopColor: ChallengeRendererFn = (ctx) => {
-  const wordLabel = String(ctx.challenge.params.wordLabel ?? 'MERAH');
+  const lang = ctx.language ?? 'id';
+  const rawWordLabel = String(ctx.challenge.params.wordLabel ?? 'MERAH');
+  const wordLabel = getLocalizedStroopLabel(rawWordLabel, rawWordLabel, lang);
   const inkHex = String(ctx.challenge.params.inkHex ?? '#2B7FFF');
   const inkPattern = String(ctx.challenge.params.inkPattern ?? 'circle');
-  const options = (ctx.challenge.params.options as Array<{ label: string; hex: string; pattern: string }>) ?? [];
+  const options = (ctx.challenge.params.options as Array<{ id?: string; label: string; hex: string; pattern: string }>) ?? [];
   const correctIndex = Number(ctx.challenge.params.correctIndex ?? 0);
 
   const hintBadge = ctx.colorblindMode
-    ? `<span class="mg-cb-badge" title="Penanda buta warna">${renderPatternBadge(inkPattern)}</span>`
+    ? `<span class="mg-cb-badge" title="${lang === 'en' ? 'Colorblind marker' : 'Penanda buta warna'}">${renderPatternBadge(inkPattern)}</span>`
     : '';
+
+  const promptSub =
+    lang === 'en'
+      ? 'Tap the button matching the <b>INK COLOR</b> above!'
+      : 'Ketuk tombol warna <b>TINTA</b> tulisan di atas!';
 
   return renderFourOptionMcq(
     `<div class="mg-stroop-word" style="color:${inkHex}">${wordLabel} ${hintBadge}</div>
-     <div class="mg-sub">Ketuk tombol warna <b>TINTA</b> tulisan di atas!</div>`,
+     <div class="mg-sub">${promptSub}</div>`,
     options.map((o) => ({
-      label: o.label,
+      label: getLocalizedStroopLabel(o.id ?? o.label, o.label, lang),
       badge: ctx.colorblindMode ? renderPatternBadge(o.pattern) : '●',
       style: `border-color:${o.hex}; background:${o.hex}22;`,
     })),
@@ -250,7 +274,7 @@ const renderStroopColor: ChallengeRendererFn = (ctx) => {
   )(ctx);
 };
 
-const renderMemoryDoodle: ChallengeRendererFn = ({ challenge, playerId, container, sound, onSubmit }) => {
+const renderMemoryDoodle: ChallengeRendererFn = ({ challenge, playerId, container, language = 'id', sound, onSubmit }) => {
   const pool = (challenge.params.pool as Array<{ id: string; label: string }>) ?? [];
   const sequence = (challenge.params.sequence as number[]) ?? [];
   const startedAt = performance.now();
@@ -260,7 +284,7 @@ const renderMemoryDoodle: ChallengeRendererFn = ({ challenge, playerId, containe
 
   container.innerHTML = `
     <div class="mg-wrap">
-      <div class="mg-sub" id="mg-mem-status">Perhatikan urutannya dulu ya...</div>
+      <div class="mg-sub" id="mg-mem-status">${language === 'en' ? 'Watch the sequence closely...' : 'Perhatikan urutannya dulu ya...'}</div>
       <div class="mg-mem-dots">${sequence.map((_, i) => `<span class="mg-dot" data-dot="${i}"></span>`).join('')}</div>
       <div class="mg-options-grid">
         ${pool
@@ -268,7 +292,7 @@ const renderMemoryDoodle: ChallengeRendererFn = ({ challenge, playerId, containe
             (item, idx) => `
           <button class="doodle-btn mg-mem-btn" data-idx="${idx}" disabled>
             ${renderDoodleSvg(item.id, false)}
-            <span>${item.label}</span>
+            <span>${getLocalizedMemoryLabel(item.id, item.label, language)}</span>
           </button>`,
           )
           .join('')}
@@ -284,7 +308,10 @@ const renderMemoryDoodle: ChallengeRendererFn = ({ challenge, playerId, containe
   sequence.forEach((poolIdx, step) => {
     const t1 = window.setTimeout(() => {
       if (cancelled) return;
-      statusEl.textContent = `Perhatikan urutan ${step + 1} / ${sequence.length}...`;
+      statusEl.textContent =
+        language === 'en'
+          ? `Watch step ${step + 1} / ${sequence.length}...`
+          : `Perhatikan urutan ${step + 1} / ${sequence.length}...`;
       btns[poolIdx]?.classList.add('mg-mem-flash');
       sound.playBoing(step);
     }, 360 + step * 500);
@@ -298,7 +325,10 @@ const renderMemoryDoodle: ChallengeRendererFn = ({ challenge, playerId, containe
   const readyTimer = window.setTimeout(() => {
     if (cancelled) return;
     canClick = true;
-    statusEl.textContent = `Giliranmu! Ketuk ${sequence.length} gambar secara berurutan!`;
+    statusEl.textContent =
+      language === 'en'
+        ? `Your turn! Tap the ${sequence.length} items in exact order!`
+        : `Giliranmu! Ketuk ${sequence.length} gambar secara berurutan!`;
     btns.forEach((b) => (b.disabled = false));
   }, 400 + sequence.length * 500);
   timers.push(readyTimer);
@@ -327,7 +357,7 @@ const renderMemoryDoodle: ChallengeRendererFn = ({ challenge, playerId, containe
   };
 };
 
-const renderSpamTap: ChallengeRendererFn = ({ challenge, playerId, container, sound, onSubmit }) => {
+const renderSpamTap: ChallengeRendererFn = ({ challenge, playerId, container, language = 'id', sound, onSubmit }) => {
   const target = Number(challenge.params.targetTaps ?? 13);
   const windowMs = Number(challenge.params.windowMs ?? 7000);
   const startedAt = performance.now();
@@ -336,9 +366,9 @@ const renderSpamTap: ChallengeRendererFn = ({ challenge, playerId, container, so
 
   container.innerHTML = `
     <div class="mg-wrap">
-      <div class="mg-spam-count"><span id="mg-taps">0</span> / ${target} ketukan!</div>
+      <div class="mg-spam-count"><span id="mg-taps">0</span> / ${target} ${language === 'en' ? 'taps!' : 'ketukan!'}</div>
       <div class="mg-meter"><div class="mg-meter-fill" id="mg-spam-bar"></div></div>
-      <button class="doodle-btn doodle-btn-primary mg-spam-btn" id="mg-spam-btn">KETUK CEPAT! (Spasi / Klik)</button>
+      <button class="doodle-btn doodle-btn-primary mg-spam-btn" id="mg-spam-btn">${language === 'en' ? 'TAP FAST! (Space / Click)' : 'KETUK CEPAT! (Spasi / Klik)'}</button>
     </div>
   `;
 
@@ -388,7 +418,7 @@ const renderSpamTap: ChallengeRendererFn = ({ challenge, playerId, container, so
   };
 };
 
-const renderSwipeDodge: ChallengeRendererFn = ({ challenge, playerId, container, sound, onSubmit }) => {
+const renderSwipeDodge: ChallengeRendererFn = ({ challenge, playerId, container, language = 'id', sound, onSubmit }) => {
   const obstacles = (challenge.params.obstacles as Array<{ lane: number; timeMs: number }>) ?? [];
   const durationMs = Number(challenge.params.durationMs ?? 6500);
   const maxHitsAllowed = Number(challenge.params.maxHitsAllowed ?? 1);
@@ -401,14 +431,14 @@ const renderSwipeDodge: ChallengeRendererFn = ({ challenge, playerId, container,
 
   container.innerHTML = `
     <div class="mg-wrap">
-      <div class="mg-sub">Maksimal kena: <b>${maxHitsAllowed}x</b> | Kena: <b id="mg-hits">0</b></div>
+      <div class="mg-sub">${language === 'en' ? `Max hits: <b>${maxHitsAllowed}x</b> | Hits:` : `Maksimal kena: <b>${maxHitsAllowed}x</b> | Kena:`} <b id="mg-hits">0</b></div>
       <div class="mg-dodge-arena" id="mg-arena">
         <div class="mg-lane"></div><div class="mg-lane"></div><div class="mg-lane"></div>
         <div class="mg-dodge-player" id="mg-player">${renderPawnAvatarSvg('kucing', '#FFD15C', 34)}</div>
       </div>
       <div class="mg-dodge-controls">
-        <button class="doodle-btn" id="mg-left">← Kiri</button>
-        <button class="doodle-btn" id="mg-right">Kanan →</button>
+        <button class="doodle-btn" id="mg-left">${language === 'en' ? '← Left' : '← Kiri'}</button>
+        <button class="doodle-btn" id="mg-right">${language === 'en' ? 'Right →' : 'Kanan →'}</button>
       </div>
     </div>
   `;
@@ -510,7 +540,7 @@ const renderSwipeDodge: ChallengeRendererFn = ({ challenge, playerId, container,
   };
 };
 
-const renderWordScramble: ChallengeRendererFn = ({ challenge, playerId, container, sound, onSubmit }) => {
+const renderWordScramble: ChallengeRendererFn = ({ challenge, playerId, container, language = 'id', sound, onSubmit }) => {
   const hint = String(challenge.params.hint ?? '');
   const scrambled = (challenge.params.scrambledLetters as string[]) ?? [];
   const word = String(challenge.params.word ?? '');
@@ -531,12 +561,12 @@ const renderWordScramble: ChallengeRendererFn = ({ challenge, playerId, containe
     const readyToSend = pickedIndices.length === word.length;
     container.innerHTML = `
       <div class="mg-wrap">
-        <div class="mg-sub">Petunjuk: <b>${hint}</b> (${word.length} huruf)</div>
+        <div class="mg-sub">${language === 'en' ? `Indonesian word clue: <b>${hint}</b> (${word.length} letters)` : `Petunjuk: <b>${hint}</b> (${word.length} huruf)`}</div>
         <div class="mg-word-slots">
           ${Array.from(
             { length: word.length },
             (_, i) =>
-              `<button type="button" class="mg-letter-slot ${answerText[i] ? 'has-char' : ''}" data-slot="${i}" title="Klik untuk hapus huruf">${answerText[i] ?? '_'}</button>`,
+              `<button type="button" class="mg-letter-slot ${answerText[i] ? 'has-char' : ''}" data-slot="${i}" title="${language === 'en' ? 'Click to remove letter' : 'Klik untuk hapus huruf'}">${answerText[i] ?? '_'}</button>`,
           ).join('')}
         </div>
         <div class="mg-letter-bank">
@@ -548,8 +578,8 @@ const renderWordScramble: ChallengeRendererFn = ({ challenge, playerId, containe
             .join('')}
         </div>
         <div class="mg-word-actions">
-          <button class="doodle-btn" id="mg-word-clear">Ulang</button>
-          <button class="doodle-btn ${readyToSend ? 'doodle-btn-mint' : 'doodle-btn-primary'}" id="mg-word-send">${readyToSend ? '✓ Kirim Jawaban!' : 'Kirim!'}</button>
+          <button class="doodle-btn" id="mg-word-clear">${language === 'en' ? 'Clear' : 'Ulang'}</button>
+          <button class="doodle-btn ${readyToSend ? 'doodle-btn-mint' : 'doodle-btn-primary'}" id="mg-word-send">${readyToSend ? (language === 'en' ? '✓ Submit Answer!' : '✓ Kirim Jawaban!') : language === 'en' ? 'Submit!' : 'Kirim!'}</button>
         </div>
       </div>
     `;
@@ -618,7 +648,7 @@ const renderWordScramble: ChallengeRendererFn = ({ challenge, playerId, containe
   };
 };
 
-const renderTraceLine: ChallengeRendererFn = ({ challenge, playerId, container, sound, onSubmit }) => {
+const renderTraceLine: ChallengeRendererFn = ({ challenge, playerId, container, language = 'id', sound, onSubmit }) => {
   const waypoints = (challenge.params.waypoints as Array<{ x: number; y: number }>) ?? [];
   const minAcc = Number(challenge.params.minAccuracy ?? 0.62);
   const startedAt = performance.now();
@@ -628,11 +658,11 @@ const renderTraceLine: ChallengeRendererFn = ({ challenge, playerId, container, 
 
   container.innerHTML = `
     <div class="mg-wrap">
-      <div class="mg-sub">Tarik garis dari 🟢 ke ★! Target: <b>${Math.round(minAcc * 100)}%</b> | Akurasi: <b id="mg-trace-acc">0%</b></div>
+      <div class="mg-sub">${language === 'en' ? 'Draw from <span class="mg-dot-inline" title="Start point"></span> to ★! Target:' : 'Tarik garis dari <span class="mg-dot-inline" title="Titik mulai"></span> ke ★! Target:'} <b>${Math.round(minAcc * 100)}%</b> | ${language === 'en' ? 'Accuracy:' : 'Akurasi:'} <b id="mg-trace-acc">0%</b></div>
       <canvas class="mg-trace-canvas" id="mg-trace-canvas" width="300" height="190"></canvas>
       <div class="mg-word-actions">
-        <button class="doodle-btn" id="mg-trace-reset">Ulangi Garis</button>
-        <button class="doodle-btn doodle-btn-primary" id="mg-trace-send">Kirim!</button>
+        <button class="doodle-btn" id="mg-trace-reset">${language === 'en' ? 'Redraw' : 'Ulangi Garis'}</button>
+        <button class="doodle-btn doodle-btn-primary" id="mg-trace-send">${language === 'en' ? 'Submit!' : 'Kirim!'}</button>
       </div>
     </div>
   `;
@@ -761,8 +791,8 @@ const renderTraceLine: ChallengeRendererFn = ({ challenge, playerId, container, 
   };
 };
 
-const renderLuckyWheel: ChallengeRendererFn = ({ challenge, playerId, container, sound, onSubmit }) => {
-  const slices = (challenge.params.slices as Array<{ label: string; kind: string }>) ?? [];
+const renderLuckyWheel: ChallengeRendererFn = ({ challenge, playerId, container, language = 'id', sound, onSubmit }) => {
+  const slices = (challenge.params.slices as Array<{ id?: string; label: string; kind: string }>) ?? [];
   const targetIdx = Number(challenge.params.serverOutcomeIndex ?? 0);
   const startedAt = performance.now();
   let spun = false;
@@ -781,13 +811,14 @@ const renderLuckyWheel: ChallengeRendererFn = ({ challenge, playerId, container,
           ${slices
             .map((s, i) => {
               const angle = i * degPerSlice + degPerSlice / 2;
-              return `<div class="mg-wheel-label" style="transform:rotate(${angle}deg) translateY(-58px)">${s.label.split(' ')[0]}</div>`;
+              const loc = getLocalizedWheelLabel(s.id ?? '', s.label, language);
+              return `<div class="mg-wheel-label" style="transform:rotate(${angle}deg) translateY(-58px)">${loc.split(' ')[0]}</div>`;
             })
             .join('')}
         </div>
         <div class="mg-wheel-hub">★</div>
       </div>
-      <button class="doodle-btn doodle-btn-primary mg-big-btn" id="mg-spin-btn">PUTAR RODA KEBERUNTUNGAN!</button>
+      <button class="doodle-btn doodle-btn-primary mg-big-btn" id="mg-spin-btn">${language === 'en' ? 'SPIN LUCKY WHEEL!' : 'PUTAR RODA KEBERUNTUNGAN!'}</button>
     </div>
   `;
 
@@ -824,7 +855,7 @@ const renderLuckyWheel: ChallengeRendererFn = ({ challenge, playerId, container,
   };
 };
 
-const renderQuickDuel: ChallengeRendererFn = ({ challenge, playerId, container, sound, onSubmit }) => {
+const renderQuickDuel: ChallengeRendererFn = ({ challenge, playerId, container, language = 'id', sound, onSubmit }) => {
   const signalDelayMs = Number(challenge.params.signalDelayMs ?? 1700);
   const startedAt = performance.now();
   let signalAt = 0;
@@ -833,8 +864,8 @@ const renderQuickDuel: ChallengeRendererFn = ({ challenge, playerId, container, 
 
   container.innerHTML = `
     <div class="mg-wrap">
-      <div class="mg-duel-banner" id="mg-duel-box">👀 Tunggu tanda... jangan curi start!</div>
-      <button class="doodle-btn doodle-btn-primary mg-big-btn" id="mg-duel-btn">SIAP...</button>
+      <div class="mg-duel-banner" id="mg-duel-box">${renderUiIconSvg('eye', 20)} ${language === 'en' ? 'Wait for the flash... don’t jump the gun!' : 'Tunggu tanda... jangan curi start!'}</div>
+      <button class="doodle-btn doodle-btn-primary mg-big-btn" id="mg-duel-btn">${language === 'en' ? 'READY...' : 'SIAP...'}</button>
     </div>
   `;
 
@@ -845,9 +876,9 @@ const renderQuickDuel: ChallengeRendererFn = ({ challenge, playerId, container, 
     if (done) return;
     signalShown = true;
     signalAt = performance.now();
-    box.textContent = '⚡ TANGKAP SEKARANG!! ⚡';
+    box.innerHTML = `${renderUiIconSvg('bolt', 20)} ${language === 'en' ? 'CATCH NOW!!' : 'TANGKAP SEKARANG!!'}`;
     box.classList.add('mg-duel-go');
-    btn.textContent = 'TANGKAP!';
+    btn.textContent = language === 'en' ? 'CATCH!' : 'TANGKAP!';
     sound.playBoing(4);
   }, signalDelayMs);
 
@@ -872,12 +903,13 @@ const renderQuickDuel: ChallengeRendererFn = ({ challenge, playerId, container, 
   };
 };
 
-const renderGiftTrap: ChallengeRendererFn = ({ challenge, playerId, container, sound, onSubmit }) => {
-  const variant = (challenge.params.variant as { kind: string; title: string; flavorText: string }) ?? {
+const renderGiftTrap: ChallengeRendererFn = ({ challenge, playerId, container, language = 'id', sound, onSubmit }) => {
+  const variant = (challenge.params.variant as { id?: string; kind: string; title: string; flavorText: string }) ?? {
     kind: 'gift',
     title: 'Kejutan!',
     flavorText: 'Ada sesuatu di kotak ini!',
   };
+  const locVariant = getLocalizedGiftVariant(variant.id, variant.title, variant.flavorText, language);
   const startedAt = performance.now();
   let opened = false;
   let done = false;
@@ -887,10 +919,10 @@ const renderGiftTrap: ChallengeRendererFn = ({ challenge, playerId, container, s
     <div class="mg-wrap">
       <div class="mg-gift-card is-sealed" id="mg-gift-card">
         <div class="mg-gift-art" id="mg-gift-art">${renderGiftBoxSvg(false, false)}</div>
-        <h3 id="mg-gift-title">Kotak Misteri Tertutup!</h3>
-        <p id="mg-gift-desc">Ketuk kotak untuk membukanya...</p>
+        <h3 id="mg-gift-title">${language === 'en' ? 'Sealed Mystery Box!' : 'Kotak Misteri Tertutup!'}</h3>
+        <p id="mg-gift-desc">${language === 'en' ? 'Tap the box to open it...' : 'Ketuk kotak untuk membukanya...'}</p>
       </div>
-      <button class="doodle-btn doodle-btn-primary" id="mg-gift-ok">BUKA KOTAK!</button>
+      <button class="doodle-btn doodle-btn-primary" id="mg-gift-ok">${language === 'en' ? 'OPEN BOX!' : 'BUKA KOTAK!'}</button>
     </div>
   `;
 
@@ -913,9 +945,9 @@ const renderGiftTrap: ChallengeRendererFn = ({ challenge, playerId, container, s
     card.classList.remove('is-sealed');
     card.classList.add(isGift ? 'is-gift' : 'is-trap');
     art.innerHTML = renderGiftBoxSvg(!isGift, true);
-    titleEl.textContent = variant.title;
-    descEl.textContent = variant.flavorText;
-    btn.textContent = 'Ambil Hasil!';
+    titleEl.textContent = locVariant.title;
+    descEl.textContent = locVariant.flavorText;
+    btn.textContent = language === 'en' ? 'Collect Result!' : 'Ambil Hasil!';
     btn.onclick = submit;
     if (isGift) sound.playChallengeSuccess();
     else sound.playChallengeFail();
@@ -933,7 +965,7 @@ const renderGiftTrap: ChallengeRendererFn = ({ challenge, playerId, container, s
   };
 };
 
-const renderBossDoodle: ChallengeRendererFn = ({ challenge, playerId, container, sound, onSubmit }) => {
+const renderBossDoodle: ChallengeRendererFn = ({ challenge, playerId, container, colorblindMode, language = 'id', sound, onSubmit }) => {
   const math = challenge.params.math as { expression: string; options: number[]; correctIndex: number };
   const timing = challenge.params.timing as { zoneCenter: number; zoneWidth: number; speed: number };
   const targetTaps = Number(challenge.params.targetTaps ?? 6);
@@ -952,7 +984,7 @@ const renderBossDoodle: ChallengeRendererFn = ({ challenge, playerId, container,
       <div class="mg-boss-header">
         <div class="mg-boss-sprite">${renderBossDoodleSvg(ratio)}</div>
         <div class="mg-boss-hp-col">
-          <div class="mg-boss-name">BOS DOODLE (Kastil Awan)</div>
+          <div class="mg-boss-name">${language === 'en' ? 'BOSS DOODLE (Cloud Castle)' : 'BOS DOODLE (Kastil Awan)'}</div>
           <div class="mg-boss-hp-track">
             <div class="mg-boss-hp-fill" style="width:${Math.max(5, Math.round(ratio * 100))}%"></div>
           </div>
@@ -969,7 +1001,7 @@ const renderBossDoodle: ChallengeRendererFn = ({ challenge, playerId, container,
       container.innerHTML = `
         <div class="mg-wrap">
           ${bossBanner(3)}
-          <div class="mg-sub">Tahap 1/3: Hitung Cepat Pertahanan Bos!</div>
+          <div class="mg-sub">${language === 'en' ? 'Stage 1/3: Crack the Boss Shield Math!' : 'Tahap 1/3: Hitung Cepat Pertahanan Bos!'}</div>
           <div class="mg-math-expr">${math.expression} = ?</div>
           <div class="mg-options-grid">
             ${math.options.map((n, i) => `<button class="doodle-btn mg-opt-btn" data-idx="${i}">${n}</button>`).join('')}
@@ -988,12 +1020,12 @@ const renderBossDoodle: ChallengeRendererFn = ({ challenge, playerId, container,
       container.innerHTML = `
         <div class="mg-wrap">
           ${bossBanner(2)}
-          <div class="mg-sub">Tahap 2/3: Bidik Perisai Bos! (Klik / Spasi)</div>
+          <div class="mg-sub">${language === 'en' ? 'Stage 2/3: Strike the Boss Shield! (Click / Space)' : 'Tahap 2/3: Bidik Perisai Bos! (Klik / Spasi)'}</div>
           <div class="mg-timing-track" id="mg-boss-track">
-            <div class="mg-timing-zone" style="left:${(timing.zoneCenter - timing.zoneWidth / 2) * 100}%;width:${timing.zoneWidth * 100}%"></div>
+            <div class="mg-timing-zone ${colorblindMode ? 'cb-safe-zone' : ''}" style="left:${(timing.zoneCenter - timing.zoneWidth / 2) * 100}%;width:${timing.zoneWidth * 100}%"></div>
             <div class="mg-timing-needle" id="mg-boss-needle"></div>
           </div>
-          <button class="doodle-btn doodle-btn-primary mg-big-btn" id="mg-boss-tap">SERANG PERISAI!</button>
+          <button class="doodle-btn doodle-btn-primary mg-big-btn" id="mg-boss-tap">${language === 'en' ? 'STRIKE SHIELD!' : 'SERANG PERISAI!'}</button>
         </div>
       `;
       const track = container.querySelector<HTMLElement>('#mg-boss-track')!;
@@ -1018,9 +1050,9 @@ const renderBossDoodle: ChallengeRendererFn = ({ challenge, playerId, container,
       container.innerHTML = `
         <div class="mg-wrap">
           ${bossBanner(1)}
-          <div class="mg-sub">Tahap 3/3: Ketuk ${targetTaps}x (Klik / Spasi) untuk menumbangkan Bos Doodle!</div>
+          <div class="mg-sub">${language === 'en' ? `Stage 3/3: Tap ${targetTaps}x (Click / Space) to defeat Boss Doodle!` : `Tahap 3/3: Ketuk ${targetTaps}x (Klik / Spasi) untuk menumbangkan Bos Doodle!`}</div>
           <div class="mg-spam-count"><span id="mg-boss-taps">0</span> / ${targetTaps}</div>
-          <button class="doodle-btn doodle-btn-primary mg-spam-btn" id="mg-boss-spam">SERANG AKHIR!</button>
+          <button class="doodle-btn doodle-btn-primary mg-spam-btn" id="mg-boss-spam">${language === 'en' ? 'FINAL STRIKE!' : 'SERANG AKHIR!'}</button>
         </div>
       `;
       const countEl = container.querySelector<HTMLElement>('#mg-boss-taps')!;
@@ -1069,10 +1101,12 @@ const renderBossDoodle: ChallengeRendererFn = ({ challenge, playerId, container,
   };
 };
 
-const renderBubblePop: ChallengeRendererFn = ({ challenge, playerId, container, sound, onSubmit }) => {
-  const targetColor = (challenge.params.targetColor as { label: string; hex: string }) ?? {
+const renderBubblePop: ChallengeRendererFn = ({ challenge, playerId, container, colorblindMode, language = 'id', sound, onSubmit }) => {
+  const targetColor = (challenge.params.targetColor as { id?: string; label: string; hex: string; pattern?: string }) ?? {
+    id: 'pink',
     label: 'Merah Muda',
     hex: '#ff6b8b',
+    pattern: 'diamond',
   };
   const targetPops = Number(challenge.params.targetPops ?? 5);
   const maxBombHits = Number(challenge.params.maxBombHits ?? 1);
@@ -1104,22 +1138,25 @@ const renderBubblePop: ChallengeRendererFn = ({ challenge, playerId, container, 
     );
   };
 
+  const targetColorLabel = getLocalizedBubbleColorLabel(targetColor, language);
+  const targetPattern = renderPatternBadge(targetColor.pattern ?? 'diamond');
+
   container.innerHTML = `
     <div class="mg-wrap">
       <div class="mg-sub">
-        Pecah <b id="mg-bpop-count">0</b> / ${targetPops} ★ (<span style="color:${targetColor.hex};font-weight:700">${targetColor.label}</span>)
-        | Bom: <b id="mg-bpop-bomb">0</b>/${maxBombHits}
+        ${language === 'en' ? 'Pop' : 'Pecah'} <b id="mg-bpop-count">0</b> / ${targetPops} ★ (<span style="color:${targetColor.hex};font-weight:700">${targetColorLabel}</span>${colorblindMode ? ` <span class="mg-cb-badge">${targetPattern}</span>` : ''})
+        | ${language === 'en' ? 'Bombs' : 'Bom'}: <b id="mg-bpop-bomb">0</b>/${maxBombHits}
       </div>
       <div class="mg-bubble-arena" id="mg-bubble-arena">
         ${bubbles
           .map(
             (b) => `
           <button
-            class="mg-bubble-btn ${b.kind === 'bomb' ? 'is-bomb' : 'is-good'}"
+            class="mg-bubble-btn ${b.kind === 'bomb' ? 'is-bomb' : 'is-good'} ${colorblindMode ? 'is-cb' : ''}"
             data-id="${b.id}"
             data-kind="${b.kind}"
             style="left:${b.xPct}%;top:${b.yPct}%;width:${b.sizePx}px;height:${b.sizePx}px;background:${b.colorHex};animation-delay:${(b.id % 5) * 0.2}s"
-          >${b.kind === 'bomb' ? renderItemSvg('sabotage', 22) : '★'}</button>
+          >${b.kind === 'bomb' ? (colorblindMode ? '<span class="mg-cb-bomb-x">X</span>' : renderItemSvg('sabotage', 22)) : colorblindMode ? `★<small class="mg-cb-dot">${targetPattern}</small>` : '★'}</button>
         `,
           )
           .join('')}
@@ -1163,7 +1200,7 @@ const renderBubblePop: ChallengeRendererFn = ({ challenge, playerId, container, 
   };
 };
 
-const renderRhythmClap: ChallengeRendererFn = ({ challenge, playerId, container, sound, onSubmit }) => {
+const renderRhythmClap: ChallengeRendererFn = ({ challenge, playerId, container, language = 'id', sound, onSubmit }) => {
   const beatTargetsMs = (challenge.params.beatTargetsMs as number[]) ?? [1050, 1900, 2750, 3600];
   const toleranceMs = Number(challenge.params.toleranceMs ?? 280);
   const requiredHits = Number(challenge.params.requiredHits ?? 3);
@@ -1173,13 +1210,13 @@ const renderRhythmClap: ChallengeRendererFn = ({ challenge, playerId, container,
 
   container.innerHTML = `
     <div class="mg-wrap">
-      <div class="mg-sub">Ketuk drum saat not jatuh masuk ke zona garis! Target: <b>${requiredHits}/${beatTargetsMs.length}</b></div>
+      <div class="mg-sub">${language === 'en' ? 'Tap drum when notes enter the line zone! Target:' : 'Ketuk drum saat not jatuh masuk ke zona garis! Target:'} <b>${requiredHits}/${beatTargetsMs.length}</b></div>
       <div class="mg-rhythm-lane" id="mg-rhythm-lane">
         <div class="mg-rhythm-target">DRUM</div>
         ${beatTargetsMs.map((_, i) => `<div class="mg-rhythm-note" id="mg-rnote-${i}">♪</div>`).join('')}
       </div>
-      <div class="mg-sub" id="mg-rhythm-feedback">Siap-siap dengar & lihat ketukan...</div>
-      <button class="doodle-btn doodle-btn-primary mg-big-btn" id="mg-rhythm-btn">TEPUK IRAMA! (Spasi)</button>
+      <div class="mg-sub" id="mg-rhythm-feedback">${language === 'en' ? 'Get ready to watch & hear the beat...' : 'Siap-siap dengar & lihat ketukan...'}</div>
+      <button class="doodle-btn doodle-btn-primary mg-big-btn" id="mg-rhythm-btn">${language === 'en' ? 'CLAP BEAT! (Space)' : 'TEPUK IRAMA! (Spasi)'}</button>
     </div>
   `;
 
@@ -1225,10 +1262,10 @@ const renderRhythmClap: ChallengeRendererFn = ({ challenge, playerId, container,
     const hitClose = beatTargetsMs.some((target) => Math.abs(target - t) <= toleranceMs);
     if (hitClose) {
       sound.playBubblePop(tapTimestamps.length);
-      fb.textContent = '✨ PAS IRAMA!';
+      fb.textContent = language === 'en' ? 'ON THE BEAT!' : 'PAS IRAMA!';
     } else {
       sound.playUiClick();
-      fb.textContent = '😅 Agak meleset!';
+      fb.textContent = language === 'en' ? 'Slightly off beat!' : 'Agak meleset!';
     }
   };
 
@@ -1274,37 +1311,51 @@ const renderRhythmClap: ChallengeRendererFn = ({ challenge, playerId, container,
 };
 
 const renderColorCount: ChallengeRendererFn = (ctx) => {
-  const questionText = String(ctx.challenge.params.questionText ?? 'Hitung stiker target!');
+  const lang = ctx.language ?? 'id';
+  const questionText = getLocalizedColorCountQuestion(ctx.challenge.params, lang);
+  const targetColor = ctx.challenge.params.targetColor as
+    | { id?: string; pattern?: string; cbCode?: string }
+    | undefined;
+  const targetShape = ctx.challenge.params.targetShape as { symbol?: string } | undefined;
   const items = (ctx.challenge.params.items as Array<{
     symbol: string;
     colorHex: string;
     colorId: string;
+    colorPattern?: string;
+    colorCode?: string;
     rotDeg: number;
   }>) ?? [];
   const options = (ctx.challenge.params.options as number[]) ?? [2, 3, 4, 5];
   const correctIndex = Number(ctx.challenge.params.correctIndex ?? 0);
 
+  const targetCbMeta = targetColor?.id ? COLORBLIND_CHALLENGE_CODES[targetColor.id] : undefined;
+  const targetBadge = ctx.colorblindMode
+    ? `<span class="mg-cb-badge">${targetShape?.symbol ?? ''} ${targetColor?.cbCode ?? targetCbMeta?.code ?? ''} ${renderPatternBadge(targetColor?.pattern ?? targetCbMeta?.pattern ?? 'circle')}</span>`
+    : '';
+
   const canvasHtml = `
-    <div style="margin-bottom:8px;font-weight:700">${questionText}</div>
+    <div style="margin-bottom:8px;font-weight:700">${questionText} ${targetBadge}</div>
     <div class="mg-count-box">
       ${items
-        .map(
-          (item) => `
+        .map((item) => {
+          const cbMeta = COLORBLIND_CHALLENGE_CODES[item.colorId];
+          const code = item.colorCode ?? cbMeta?.code ?? item.colorId[0].toUpperCase();
+          return `
         <span class="mg-count-item" style="color:${item.colorHex};transform:rotate(${item.rotDeg}deg)">
-          ${item.symbol}${ctx.colorblindMode ? `<small class="mg-cb-tag">${item.colorId[0].toUpperCase()}</small>` : ''}
-        </span>`,
-        )
+          ${item.symbol}${ctx.colorblindMode ? `<small class="mg-cb-tag">${code}</small>` : ''}
+        </span>`;
+        })
         .join('')}
     </div>
   `;
   return renderFourOptionMcq(
     canvasHtml,
-    options.map((n) => ({ label: `${n} buah` })),
+    options.map((n) => ({ label: lang === 'en' ? `${n} items` : `${n} buah` })),
     correctIndex,
   )(ctx);
 };
 
-const renderBalanceBar: ChallengeRendererFn = ({ challenge, playerId, container, sound, onSubmit }) => {
+const renderBalanceBar: ChallengeRendererFn = ({ challenge, playerId, container, colorblindMode, language = 'id', sound, onSubmit }) => {
   const safeWidthPct = Number(challenge.params.safeWidthPct ?? 36);
   const targetRatio = Number(challenge.params.targetRatio ?? 0.54);
   const maxDrops = Number(challenge.params.maxDrops ?? 2);
@@ -1326,15 +1377,15 @@ const renderBalanceBar: ChallengeRendererFn = ({ challenge, playerId, container,
 
   container.innerHTML = `
     <div class="mg-wrap">
-      <div class="mg-sub">Pertahankan di zona hijau (${Math.round(targetRatio * 100)}%)! Jatuh: <b id="mg-bal-drops">0</b>/${maxDrops}</div>
+      <div class="mg-sub">${language === 'en' ? `Keep inside safe zone (${Math.round(targetRatio * 100)}%)! Drops:` : `Pertahankan di zona hijau (${Math.round(targetRatio * 100)}%)! Jatuh:`} <b id="mg-bal-drops">0</b>/${maxDrops}</div>
       <div class="mg-balance-track" id="mg-balance-track">
-        <div class="mg-timing-zone" style="left:${safeMin}%;width:${safeWidthPct}%"></div>
+        <div class="mg-timing-zone ${colorblindMode ? 'cb-safe-zone' : ''}" style="left:${safeMin}%;width:${safeWidthPct}%"></div>
         <div class="mg-balance-marker" id="mg-bal-marker">PEN</div>
       </div>
-      <div class="mg-sub">Kestabilan: <b id="mg-bal-pct">100%</b></div>
+      <div class="mg-sub">${language === 'en' ? 'Stability:' : 'Kestabilan:'} <b id="mg-bal-pct">100%</b></div>
       <div class="mg-dodge-controls">
-        <button class="doodle-btn" id="mg-bal-left">← Kiri (A)</button>
-        <button class="doodle-btn" id="mg-bal-right">Kanan (D) →</button>
+        <button class="doodle-btn" id="mg-bal-left">${language === 'en' ? '← Left (A)' : '← Kiri (A)'}</button>
+        <button class="doodle-btn" id="mg-bal-right">${language === 'en' ? 'Right (D) →' : 'Kanan (D) →'}</button>
       </div>
     </div>
   `;
