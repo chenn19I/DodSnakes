@@ -1,0 +1,73 @@
+# Environment variables & sensitive local credentials
+.env
+.env.*
+!.env.example
+*.local
+*.secret
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.jks
+.npmrc
+secrets/
+private/
+credentials*.json
+*service-account*.json
+*token*.json
+
+# Dependencies & caches
+node_modules/
+.pnp
+.pnp.js
+.cache/
+.eslintcache
+.parcel-cache/
+
+# Build & compilation artifacts
+dist/
+build/
+out/
+.vite/
+.vitest/
+coverage/
+*.tsbuildinfo
+
+# Logs & runtime data
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.sqlite
+*.db
+*.pid
+*.seed
+
+# Test & automation reports
+test-results/
+playwright-report/
+blob-report/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# IDE & editor local configs
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.sublime-workspace
+*.swp
+*.swo
+*~
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
