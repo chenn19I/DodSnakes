@@ -1204,9 +1204,170 @@ export const ARCHETYPE_REGISTRY: Record<ChallengeArchetype, ArchetypeSpec> = {
       };
     },
   },
+
+  pair_flip: {
+    id: 'pair_flip',
+    displayName: 'Cari Pasangan Kartu',
+    instruction: 'Buka dan cocokkan semua pasangan kartu stiker yang sama!',
+    baseDurationMs: 12000,
+    allowedModes: ['all_play', 'solo'],
+    buildParams: (rng, difficulty) => {
+      const pairCount = difficulty >= 3 ? 4 : 3;
+      const pool = ['cat', 'duck', 'star', 'cloud', 'mushroom', 'crown', 'lollipop', 'rocket', 'fish', 'banana'];
+      const chosen = rng.shuffle(pool).slice(0, pairCount);
+      const cards = rng.shuffle([...chosen, ...chosen]);
+      return { cards, pairCount, difficulty };
+    },
+    validate: (params, sub) => {
+      const pairCount = Number(params.pairCount ?? 3);
+      const matched = Number(sub.inputLog.extra?.pairsMatched ?? 0);
+      const elapsed = sub.inputLog.completedAt - sub.inputLog.startedAt;
+      if (elapsed < 600) {
+        return { success: false, score: 0, reason: 'Kartu terlalu cepat diselesaikan' };
+      }
+      const ok = matched >= pairCount && sub.claimedSuccess;
+      return {
+        success: ok,
+        score: Math.round((Math.min(matched, pairCount) / pairCount) * 100),
+        reason: `Cocok ${matched}/${pairCount} pasang`,
+      };
+    },
+    simulateBot: (params, botDiff, rng) => {
+      const difficulty = Number(params.difficulty ?? 2);
+      const pairCount = Number(params.pairCount ?? 3);
+      const win = rng.chance(botSuccessRate(botDiff, difficulty));
+      const reactionMs = rng.nextInt(2400, 5200);
+      const matched = win ? pairCount : Math.max(1, pairCount - 1);
+      return {
+        startedAt: 0,
+        completedAt: reactionMs,
+        reactionMs,
+        sequenceIndices: Array.from({ length: matched * 2 }, (_, i) => i),
+        extra: { pairsMatched: matched },
+        claimedSuccess: win,
+        score: win ? 100 : Math.round((matched / pairCount) * 80),
+      };
+    },
+  },
+
+  number_order: {
+    id: 'number_order',
+    displayName: 'Urutkan Angka',
+    instruction: 'Ketuk kartu angka sesuai urutan kecil-ke-besar atau sebaliknya!',
+    baseDurationMs: 9000,
+    allowedModes: ['all_play', 'solo'],
+    buildParams: (rng, difficulty) => {
+      const count = difficulty >= 3 ? 6 : 5;
+      const picked = new Set<number>();
+      while (picked.size < count) {
+        picked.add(rng.nextInt(2, 98));
+      }
+      const values = rng.shuffle([...picked]);
+      const descending = rng.chance(0.45);
+      const expectedIndices = values
+        .map((v, idx) => ({ v, idx }))
+        .sort((a, b) => (descending ? b.v - a.v : a.v - b.v))
+        .map((entry) => entry.idx);
+      return { values, expectedIndices, descending, difficulty };
+    },
+    validate: (params, sub) => {
+      const expected = (params.expectedIndices as number[]) ?? [];
+      const seq = sub.inputLog.sequenceIndices ?? [];
+      const reaction = sub.inputLog.reactionMs ?? sub.inputLog.completedAt - sub.inputLog.startedAt;
+      if (reaction < 350) {
+        return { success: false, score: 0, reason: 'Urutan angka terlalu cepat' };
+      }
+      const exact = seq.length === expected.length && expected.every((v, i) => seq[i] === v);
+      return {
+        success: exact,
+        score: exact ? Math.max(55, Math.round(115 - reaction / 90)) : 20,
+        reason: exact ? 'Urutan angka tepat!' : 'Urutan angka kurang tepat',
+      };
+    },
+    simulateBot: (params, botDiff, rng) => {
+      const difficulty = Number(params.difficulty ?? 2);
+      const expected = (params.expectedIndices as number[]) ?? [0, 1, 2, 3, 4];
+      const win = rng.chance(botSuccessRate(botDiff, difficulty));
+      const reactionMs = rng.nextInt(1400, 3800);
+      const seq = win ? [...expected] : [...expected.slice(1), expected[0]];
+      return {
+        startedAt: 0,
+        completedAt: reactionMs,
+        reactionMs,
+        sequenceIndices: seq,
+        claimedSuccess: win,
+        score: win ? 85 : 20,
+      };
+    },
+  },
+
+  odd_one_out: {
+    id: 'odd_one_out',
+    displayName: 'Cari Yang Beda',
+    instruction: 'Temukan 1 stiker yang berbeda di antara kumpulan lainnya!',
+    baseDurationMs: 7500,
+    allowedModes: ['all_play', 'solo'],
+    buildParams: (rng, difficulty) => {
+      const shapes = ['cat', 'duck', 'star', 'cloud', 'mushroom', 'crown', 'lollipop', 'rocket', 'fish', 'banana'];
+      const colorDefs = [
+        { colorId: 'pink', hex: '#ff6b8b', pattern: 'diamond', cbCode: 'PK' },
+        { colorId: 'biru', hex: '#4ea8de', pattern: 'triangle', cbCode: 'BR' },
+        { colorId: 'kuning', hex: '#f4a261', pattern: 'star', cbCode: 'KN' },
+        { colorId: 'mint', hex: '#38b000', pattern: 'square', cbCode: 'HJ' },
+        { colorId: 'ungu', hex: '#9b5de5', pattern: 'circle', cbCode: 'UN' },
+      ];
+      const total = difficulty >= 3 ? 9 : 6;
+      const variant: 'shape' | 'color' = rng.chance(0.55) ? 'shape' : 'color';
+      const [baseShape, oddShape] = rng.shuffle(shapes);
+      const [baseColor, oddColor] = rng.shuffle(colorDefs);
+      const correctIndex = rng.nextInt(0, total - 1);
+
+      const items = Array.from({ length: total }, (_, idx) => {
+        const isOdd = idx === correctIndex;
+        const c = variant === 'color' && isOdd ? oddColor : baseColor;
+        const s = variant === 'shape' && isOdd ? oddShape : baseShape;
+        return {
+          shape: s,
+          colorId: c.colorId,
+          hex: c.hex,
+          pattern: c.pattern,
+          cbCode: c.cbCode,
+        };
+      });
+      return { variant, items, correctIndex, difficulty };
+    },
+    validate: (params, sub) => {
+      const correctIdx = Number(params.correctIndex ?? 0);
+      const reaction = sub.inputLog.reactionMs ?? sub.inputLog.completedAt - sub.inputLog.startedAt;
+      if (reaction < MIN_REACTION_MS) {
+        return { success: false, score: 0, reason: 'Respon terlalu cepat' };
+      }
+      const ok = sub.inputLog.answerIndex === correctIdx;
+      return {
+        success: ok,
+        score: ok ? Math.max(55, Math.round(115 - reaction / 60)) : 0,
+        reason: ok ? 'Ketemu si paling beda!' : 'Bukan yang itu',
+      };
+    },
+    simulateBot: (params, botDiff, rng) => {
+      const difficulty = Number(params.difficulty ?? 2);
+      const correctIdx = Number(params.correctIndex ?? 0);
+      const total = ((params.items as unknown[]) ?? []).length || 6;
+      const win = rng.chance(botSuccessRate(botDiff, difficulty));
+      const reactionMs = rng.nextInt(900, 2600);
+      return {
+        startedAt: 0,
+        completedAt: reactionMs,
+        reactionMs,
+        answerIndex: win ? correctIdx : (correctIdx + 1) % total,
+        claimedSuccess: win,
+        score: win ? 85 : 0,
+      };
+    },
+  },
 };
 
-export const PLAYABLE_TILE_ARCHETYPES: ChallengeArchetype[] = [
+export const PLAYABLE_TILE_ARCHETYPES: Array<Exclude<ChallengeArchetype, 'start'>> = [
   'tap_timing',
   'quick_quiz',
   'memory_doodle',
@@ -1224,6 +1385,9 @@ export const PLAYABLE_TILE_ARCHETYPES: ChallengeArchetype[] = [
   'rhythm_clap',
   'color_count',
   'balance_bar',
+  'pair_flip',
+  'number_order',
+  'odd_one_out',
 ];
 
 export function deriveChallengeRuntimeSeed(matchSeed: number, eventSeq: number, tileId: number): number {
