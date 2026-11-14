@@ -190,7 +190,7 @@ function getSnakeBodyRadiusAt(t: number): number {
   // Smooth C1 cosine-stepped taper toward a neat rounded tail tip
   const k = (u - 0.45) / 0.55;
   const smoothK = k * k * (3 - 2 * k);
-  return 0.182 - (0.182 - 0.048) * smoothK;
+  return 0.182 - (0.182 - 0.052) * smoothK;
 }
 
 /**
@@ -206,8 +206,8 @@ function buildTaperedSnakeGeometry(
   const frames = curve.computeFrenetFrames(tubularSegments, false);
   const curveLen = Math.max(0.5, curve.getLength());
   const tailBaseRadius = getSnakeBodyRadiusAt(1);
-  const tailCapLen = 0.075;
-  const tailCapRings = 4;
+  const tailCapLen = 0.052;
+  const tailCapRings = 5;
 
   // Ensure (N, B, T) forms a right-handed frame everywhere along the curve
   const crossCheck = new THREE.Vector3()
@@ -375,7 +375,11 @@ function buildSnake(
   idx: number,
 ): SnakeVisual {
   const headPos = board.getTileWorldTop(def.from).add(new THREE.Vector3(0, 0.25, 0));
-  const tailPos = board.getTileWorldTop(def.to).add(new THREE.Vector3(0, 0.16, 0));
+  const rawTailCenter = board.getTileWorldTop(def.to).add(new THREE.Vector3(0, 0.17, 0));
+  const flatStep = new THREE.Vector3().subVectors(rawTailCenter, headPos).setY(0);
+  const flatLen = flatStep.length() || 1;
+  // Pull visual tail end slightly back from the tile center so tile numbers stay readable
+  const tailPos = rawTailCenter.clone().addScaledVector(flatStep, -Math.min(0.2, 0.22 / flatLen));
 
   const dir = new THREE.Vector3().subVectors(tailPos, headPos);
   const len = dir.length();
