@@ -2323,3 +2323,60 @@ body.colorblind-mode .lobby-ready-pill.is-ready {
 body.colorblind-mode .lobby-ready-pill.is-wait {
   border-style: dashed;
 }
+
+.doodle-btn-pink {
+  background: #FFB6CD;
+}
+
+.menu-util-row {
+  display: flex;
+  gap: 6px;
+}
+
+.menu-util-row .doodle-btn {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 0.86rem;
+  min-height: 40px;
+  white-space: nowrap;
+}
+
+.support-modal-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.support-qr-frame {
+  background: #FFFFFF;
+  border: 3.5px solid var(--ink);
+  border-radius: 18px;
+  padding: 10px;
+  box-shadow: 0 4px 0 var(--ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.support-qr-img {
+  display: block;
+  width: min(210px, 54vw);
+  height: min(210px, 54vw);
+  object-fit: contain;
+}
+
+.support-desc {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.35;
+  color: var(--ink);
+}
+
+.support-note {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.3;
+  opacity: 0.82;
+}
