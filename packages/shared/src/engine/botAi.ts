@@ -1,6 +1,12 @@
 import { getPlayerShopCost, type GameState, type Player } from '../types.js';
 import type { SeededRng } from '../rng.js';
-import { computeEffectiveDiceSteps, computeMove, findLadderAt, findSnakeAt } from './boardUtils.js';
+import {
+  computeEffectiveDiceSteps,
+  computeMove,
+  findLadderAt,
+  findSnakeAt,
+  getBoardSpecialTile,
+} from './boardUtils.js';
 
 function scoreLandingTile(state: GameState, player: Player, diceFace: number, usedTurbo: boolean): number {
   const steps = computeEffectiveDiceSteps(diceFace, usedTurbo, player.pawn);
@@ -24,6 +30,10 @@ function scoreLandingTile(state: GameState, player: Player, diceFace: number, us
   if (snake) {
     const hasShield = player.shields > 0 || player.items.includes('shield');
     score -= hasShield ? 8 : (snake.from - snake.to) * 2.2 + 30;
+  }
+
+  if (getBoardSpecialTile(move.to)) {
+    score += 18;
   }
 
   if (diceFace === 6 && player.consecutiveSixes < 2) {
@@ -93,6 +103,21 @@ export function decideBotPreRollItemIndex(
 
     if (item === 'surprise' && player.position < 96) {
       if (rng.chance(0.55) || player.items.length >= 2) {
+        return rng.chance(activationGate) ? i : null;
+      }
+    }
+
+    if (item === 'star_multiplier' && !player.activeDoubleStars) {
+      if (!nearSnakeAhead || nearLadderSix || player.items.length >= 2) {
+        return rng.chance(activationGate) ? i : null;
+      }
+    }
+
+    if (item === 'rival_brake') {
+      const anyFrontRival = state.players.some(
+        (p) => p.id !== player.id && !p.activeBrake && p.position >= player.position,
+      );
+      if (anyFrontRival || player.items.length >= 2) {
         return rng.chance(activationGate) ? i : null;
       }
     }
