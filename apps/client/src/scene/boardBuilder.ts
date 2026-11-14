@@ -109,6 +109,10 @@ function archetypeBadgeSymbol(tile: Tile): string {
       return '#';
     case 'odd_one_out':
       return '✧';
+    case 'pattern_next':
+      return '⊞';
+    case 'math_compare':
+      return '><';
     default:
       return '•';
   }
