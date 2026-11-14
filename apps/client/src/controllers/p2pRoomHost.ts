@@ -233,6 +233,11 @@ export class P2pRoomHost {
           this.sendEmote(senderId, parsed.emoteId);
           break;
         }
+        case 'game:sync_request':
+          if (this.inGame && this.gameState) {
+            this.emit('game:sync', { state: this.gameState }, senderId);
+          }
+          break;
         case 'room:leave':
           this.handlePeerLeave(senderId);
           break;
@@ -240,6 +245,9 @@ export class P2pRoomHost {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Aksi gagal diproses.';
       this.emit('error', { code: 'ACTION_FAILED', message }, senderId);
+      if (this.inGame && this.gameState) {
+        this.emit('game:sync', { state: this.gameState }, senderId);
+      }
     }
   }
 
@@ -460,6 +468,14 @@ export class P2pRoomHost {
   private roll(senderId: string, forcedDice?: number): void {
     if (!this.gameState || !this.inGame) return;
     const slot = this.getSlot(senderId);
+    const activeId = this.gameState.turnOrder[this.gameState.currentTurnIndex];
+    if (activeId !== slot.id) {
+      throw new Error('Bukan giliranmu!');
+    }
+    if (this.gameState.phase !== 'TURN_BEGIN') {
+      throw new Error('Belum siap lempar dadu pada fase ini.');
+    }
+    this.clearTimers();
     const res = rollDice(this.gameState, slot.id, forcedDice);
     this.gameState = res.state;
     this.emitGameEvents(res.events);
