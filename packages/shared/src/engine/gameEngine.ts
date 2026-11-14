@@ -11,6 +11,8 @@ import {
   type GameModePreset,
   type GameState,
   type ItemType,
+  type MatchMission,
+  type MatchMissionKind,
   type PawnId,
   type Player,
   type PlayerColorId,
@@ -27,7 +29,13 @@ import {
 } from '../content/archetypes.js';
 import { TILES } from '../data/boardData.js';
 import { GIFT_TRAP_VARIANTS } from '../content/wordBank.js';
-import { computeEffectiveDiceSteps, computeMove, findLadderAt, findSnakeAt } from './boardUtils.js';
+import {
+  computeEffectiveDiceSteps,
+  computeMove,
+  findLadderAt,
+  findSnakeAt,
+  getBoardSpecialTile,
+} from './boardUtils.js';
 import {
   buildChallengeRuntimeParams,
   simulateBotChallengeSubmission,
@@ -58,7 +66,68 @@ const ALL_ITEMS: ItemType[] = [
   'surprise',
   'magnet_star',
   'swap_turbo',
+  'star_multiplier',
+  'rival_brake',
 ];
+
+const MISSION_TEMPLATES: Array<{ kind: MatchMissionKind; target: number }> = [
+  { kind: 'climb_2', target: 2 },
+  { kind: 'win_3', target: 3 },
+  { kind: 'streak_2', target: 2 },
+  { kind: 'use_2_items', target: 2 },
+];
+
+function createPlayerMission(matchSeed: number, playerIndex: number): MatchMission {
+  const rng = deriveRng(matchSeed >>> 0, playerIndex + 1, 'player_mission');
+  const picked = rng.pick(MISSION_TEMPLATES);
+  return {
+    kind: picked.kind,
+    progress: 0,
+    target: picked.target,
+    completed: false,
+  };
+}
+
+function updatePlayerMission(
+  state: GameState,
+  player: Player,
+  kind: MatchMissionKind,
+  events: GameEvent[],
+  absoluteProgress?: number,
+): void {
+  if (!player.mission || player.mission.completed || player.mission.kind !== kind) {
+    return;
+  }
+  const nextProgress =
+    absoluteProgress !== undefined
+      ? Math.max(player.mission.progress, absoluteProgress)
+      : player.mission.progress + 1;
+  player.mission.progress = Math.min(player.mission.target, nextProgress);
+  if (player.mission.progress < player.mission.target) {
+    return;
+  }
+
+  player.mission.completed = true;
+  const starsDelta = 3;
+  player.stars += starsDelta;
+
+  const granted = tryGrantItem(state, player, 'mission', events, 1);
+  let shieldsDelta: number | undefined;
+  if (!granted) {
+    player.shields += 1;
+    shieldsDelta = 1;
+  }
+
+  events.push({
+    type: 'MissionCompleted',
+    seq: nextSeq(state),
+    playerId: player.id,
+    kind,
+    starsDelta,
+    grantedItem: granted ?? undefined,
+    shieldsDelta,
+  });
+}
 
 function cloneState(state: GameState): GameState {
   return {
@@ -67,6 +136,7 @@ function cloneState(state: GameState): GameState {
     players: state.players.map((p) => ({
       ...p,
       items: [...p.items],
+      mission: p.mission ? { ...p.mission } : undefined,
       stats: { ...p.stats },
     })),
     turnOrder: [...state.turnOrder],
@@ -138,6 +208,8 @@ export function createInitialGameState(options: CreateGameOptions): GameState {
       activeGoldenDice: false,
       activeBrake: false,
       activeTurbo: false,
+      activeDoubleStars: false,
+      mission: createPlayerMission(options.matchSeed, idx),
       isBot: Boolean(p.isBot),
       botDifficulty: p.botDifficulty ?? 'pintar',
       connected: true,
@@ -378,7 +450,44 @@ export function applyItem(
       item,
       effectDescription: 'Sepatu Turbo aktif! +2 langkah ekstra pada lemparan berikutnya!',
     });
+  } else if (item === 'star_multiplier') {
+    active.activeDoubleStars = true;
+    events.push({
+      type: 'ItemUsed',
+      seq: nextSeq(state),
+      playerId,
+      item,
+      effectDescription: 'Jimat Ganda aktif! Hadiah bintang tantangan giliran ini 2x lipat!',
+    });
+  } else if (item === 'rival_brake') {
+    const rivals = state.players
+      .filter((p) => p.id !== playerId)
+      .sort((a, b) => b.position - a.position || b.stars - a.stars);
+    const target = rivals[0];
+    if (target) {
+      target.activeBrake = true;
+      events.push({
+        type: 'ItemUsed',
+        seq: nextSeq(state),
+        playerId,
+        item,
+        targetPlayerId: target.id,
+        effectDescription: `Jebakan Rem dipasang ke ${target.name}! Dadu berikutnya maksimal 3!`,
+      });
+    } else {
+      active.stars += 1;
+      events.push({
+        type: 'ItemUsed',
+        seq: nextSeq(state),
+        playerId,
+        item,
+        starsDelta: 1,
+        effectDescription: 'Tidak ada lawan di papan, Jebakan Rem memberi +1 ★ bonus!',
+      });
+    }
   }
+
+  updatePlayerMission(state, active, 'use_2_items', events);
 
   state.stateVersion += 1;
   return { state, events };
@@ -527,7 +636,7 @@ export function resolveTile(
     throw new Error(`resolveTile called in invalid phase ${state.phase}`);
   }
   const active = getActivePlayer(state);
-  const tile = tiles.find((t) => t.id === active.position);
+  let tile = tiles.find((t) => t.id === active.position);
   if (!tile) {
     throw new Error(`Tile ${active.position} not found`);
   }
@@ -542,19 +651,72 @@ export function resolveTile(
   }
 
   const isLiveBoard = tiles === TILES;
+  if (isLiveBoard && tile.id > 1 && tile.id < 100) {
+    const special = getBoardSpecialTile(tile.id);
+    if (special) {
+      if (special.kind === 'star_fountain') {
+        active.stars += 2;
+        events.push({
+          type: 'BoardSpecialTriggered',
+          seq: nextSeq(state),
+          playerId: active.id,
+          tileId: tile.id,
+          kind: special.kind,
+          starsDelta: 2,
+        });
+      } else if (special.kind === 'supply_crate') {
+        const granted = tryGrantItem(state, active, 'board_event', events, 1);
+        if (!granted) {
+          active.stars += 2;
+        }
+        events.push({
+          type: 'BoardSpecialTriggered',
+          seq: nextSeq(state),
+          playerId: active.id,
+          tileId: tile.id,
+          kind: special.kind,
+          grantedItem: granted ?? undefined,
+          starsDelta: granted ? undefined : 2,
+        });
+      } else if (special.kind === 'shield_shrine') {
+        active.shields += 1;
+        events.push({
+          type: 'BoardSpecialTriggered',
+          seq: nextSeq(state),
+          playerId: active.id,
+          tileId: tile.id,
+          kind: special.kind,
+          shieldsDelta: 1,
+        });
+      } else if (special.kind === 'tailwind') {
+        const originTileId = tile.id;
+        movePlayerDirect(state, active, 2, 'bonus_advance', events);
+        const shiftedTile = tiles.find((t) => t.id === active.position);
+        if (shiftedTile) {
+          tile = shiftedTile;
+        }
+        events.push({
+          type: 'BoardSpecialTriggered',
+          seq: nextSeq(state),
+          playerId: active.id,
+          tileId: originTileId,
+          kind: special.kind,
+          movedTo: active.position,
+        });
+      }
+    }
+  }
+
   const runtimeSeed = deriveChallengeRuntimeSeed(state.matchSeed, state.eventSeq + 1, tile.id);
-  const pickRng = new SeededRng(
-    hashSeed(state.matchSeed, state.eventSeq + 1, state.turnNumber, tile.id, 'dyn_pick'),
-  );
+  const isJunction = Boolean(findLadderAt(state.board, tile.id) || findSnakeAt(state.board, tile.id));
 
   let chosenArchetype = tile.archetype;
   let chosenMode = tile.mode;
 
   if (isLiveBoard && tile.id > 1 && tile.id < 100) {
-    // True shuffled epoch deck indexed by cumulative rolls guarantees all 20 challenges cycle cleanly without repeats
-    const isJunction = Boolean(findLadderAt(state.board, tile.id) || findSnakeAt(state.board, tile.id));
+    // Shuffled epoch deck cycles challenges cleanly; ladders and snakes strictly run solo challenges.
     const pool = isJunction
-      ? PLAYABLE_TILE_ARCHETYPES.filter((a) => a !== 'gift_trap' && a !== 'lucky_wheel')
+      ? PLAYABLE_TILE_ARCHETYPES.filter((a) => a !== 'gift_trap' && a !== 'lucky_wheel' && a !== 'quick_duel')
       : PLAYABLE_TILE_ARCHETYPES;
     const totalRolls = Math.max(
       1,
@@ -576,21 +738,15 @@ export function resolveTile(
       }
     }
     chosenArchetype = epochDeck[posInEpoch];
-
-    const pickedSpec = ARCHETYPE_REGISTRY[chosenArchetype];
-    if (chosenArchetype === 'quick_duel') {
-      chosenMode = state.players.length >= 2 ? 'duel' : 'solo';
-    } else if (state.players.length >= 2) {
-      if (pickedSpec.allowedModes.includes('duel') && pickRng.chance(0.14)) {
-        chosenMode = 'duel';
-      } else if (pickedSpec.allowedModes.includes('all_play') && pickRng.chance(0.26)) {
-        chosenMode = 'all_play';
-      } else {
-        chosenMode = 'solo';
-      }
-    } else {
-      chosenMode = 'solo';
-    }
+    chosenMode = chosenArchetype === 'quick_duel' && state.players.length >= 2 && !isJunction ? 'duel' : 'solo';
+  } else if (tile.id === 100) {
+    chosenArchetype = 'boss_doodle';
+    chosenMode = 'solo';
+  } else {
+    chosenMode =
+      (chosenArchetype === 'quick_duel' || tile.mode === 'duel') && state.players.length >= 2 && !isJunction
+        ? 'duel'
+        : 'solo';
   }
 
   const spec = ARCHETYPE_REGISTRY[chosenArchetype];
@@ -605,17 +761,25 @@ export function resolveTile(
 
   let participantIds: string[] = [active.id];
   let resolvedOpponentId: string | undefined;
+  let awaitingDuelPick = false;
 
-  if (chosenMode === 'all_play') {
-    participantIds = state.players.map((p) => p.id);
-  } else if (chosenMode === 'duel') {
+  if (chosenMode === 'duel') {
     const candidates = state.players.filter((p) => p.id !== active.id);
-    const picked =
-      candidates.find((c) => c.id === duelOpponentId) ??
-      candidates.sort((a, b) => b.position - a.position)[0];
-    if (picked) {
-      resolvedOpponentId = picked.id;
-      participantIds = [active.id, picked.id];
+    const explicitOpp = duelOpponentId ? candidates.find((c) => c.id === duelOpponentId) : undefined;
+    if (explicitOpp) {
+      resolvedOpponentId = explicitOpp.id;
+      participantIds = [active.id, explicitOpp.id];
+    } else if (active.isBot && candidates.length > 0) {
+      const botOpp = [...candidates].sort((a, b) => b.position - a.position || b.stars - a.stars)[0];
+      resolvedOpponentId = botOpp.id;
+      participantIds = [active.id, botOpp.id];
+    } else if (candidates.length > 0) {
+      // Wait for challenger to choose a rival before exposing the duel to any opponent.
+      resolvedOpponentId = undefined;
+      participantIds = [active.id];
+      awaitingDuelPick = true;
+    } else {
+      chosenMode = 'solo';
     }
   }
 
@@ -633,9 +797,10 @@ export function resolveTile(
     penalty: tile.penalty,
     ownerPlayerId: active.id,
     opponentId: resolvedOpponentId,
+    awaitingDuelPick: awaitingDuelPick || undefined,
     participantIds,
     submissions: {},
-    deadlineAt: nowMs + durationMs + 1500,
+    deadlineAt: nowMs + (awaitingDuelPick ? 12_000 + durationMs : durationMs + 1500),
     durationMs,
   };
 
@@ -652,6 +817,42 @@ export function resolveTile(
   return { state, events };
 }
 
+export function selectDuelOpponent(
+  inputState: GameState,
+  ownerPlayerId: string,
+  opponentId?: string,
+  nowMs = Date.now(),
+): GameState {
+  const state = cloneState(inputState);
+  if (state.phase !== 'CHALLENGE' || !state.activeChallenge) {
+    throw new Error('No active challenge to select duel opponent for');
+  }
+  const ch = state.activeChallenge;
+  if (ch.mode !== 'duel') {
+    throw new Error('Only duel challenges allow selecting an opponent');
+  }
+  if (ch.ownerPlayerId !== ownerPlayerId) {
+    throw new Error('Only challenge owner can choose the duel opponent');
+  }
+  const candidates = state.players.filter((p) => p.id !== ch.ownerPlayerId);
+  if (candidates.length === 0) {
+    ch.awaitingDuelPick = false;
+    ch.opponentId = undefined;
+    ch.participantIds = [ch.ownerPlayerId];
+    state.stateVersion += 1;
+    return state;
+  }
+  const picked =
+    (opponentId ? candidates.find((c) => c.id === opponentId) : undefined) ??
+    [...candidates].sort((a, b) => b.position - a.position || b.stars - a.stars)[0];
+  ch.opponentId = picked.id;
+  ch.participantIds = [ch.ownerPlayerId, picked.id];
+  ch.awaitingDuelPick = false;
+  ch.deadlineAt = nowMs + ch.durationMs + 1500;
+  state.stateVersion += 1;
+  return state;
+}
+
 export function recordChallengeSubmission(
   inputState: GameState,
   submission: ChallengeSubmission,
@@ -660,10 +861,21 @@ export function recordChallengeSubmission(
   if (state.phase !== 'CHALLENGE' || !state.activeChallenge) {
     throw new Error('No active challenge to submit to');
   }
-  if (!state.activeChallenge.participantIds.includes(submission.playerId)) {
+  const ch = state.activeChallenge;
+  if (ch.awaitingDuelPick) {
+    throw new Error('Waiting for challenger to select duel opponent');
+  }
+  const allowed =
+    ch.participantIds.includes(submission.playerId) &&
+    (ch.mode === 'duel'
+      ? submission.playerId === ch.ownerPlayerId || submission.playerId === ch.opponentId
+      : ch.mode === 'solo'
+        ? submission.playerId === ch.ownerPlayerId
+        : true);
+  if (!allowed) {
     throw new Error(`Player ${submission.playerId} is not a participant in this challenge`);
   }
-  state.activeChallenge.submissions[submission.playerId] = submission;
+  ch.submissions[submission.playerId] = submission;
   state.stateVersion += 1;
   return state;
 }
@@ -671,11 +883,11 @@ export function recordChallengeSubmission(
 function tryGrantItem(
   state: GameState,
   player: Player,
-  source: 'challenge' | 'trailing_bonus' | 'wheel' | 'gift',
+  source: 'challenge' | 'trailing_bonus' | 'wheel' | 'gift' | 'board_event' | 'mission',
   events: GameEvent[],
   forcedChance?: number,
-): boolean {
-  if (player.items.length >= 2) return false;
+): ItemType | null {
+  if (player.items.length >= 2) return null;
 
   const minPos = Math.min(...state.players.map((p) => p.position));
   const maxPos = Math.max(...state.players.map((p) => p.position));
@@ -687,7 +899,7 @@ function tryGrantItem(
   const presetNormal =
     state.rulePreset === 'pesta_item' ? 0.58 : state.rulePreset === 'kilat' ? 0.4 : 0.22;
   const chance = forcedChance ?? (isTrailing ? presetTrailing : presetNormal);
-  if (!rng.chance(chance)) return false;
+  if (!rng.chance(chance)) return null;
 
   const item = rng.pick(ALL_ITEMS);
   player.items.push(item);
@@ -698,7 +910,7 @@ function tryGrantItem(
     item,
     source: isTrailing && forcedChance === undefined ? 'trailing_bonus' : source,
   });
-  return true;
+  return item;
 }
 
 function movePlayerDirect(
@@ -761,6 +973,7 @@ function resolveJunctionAtPosition(
       from: ladder.from,
       to: ladder.to,
     });
+    updatePlayerMission(state, owner, 'climb_2', events);
     return 'ladder';
   }
 
@@ -931,6 +1144,8 @@ export function applyChallengeResult(inputState: GameState): StepResult {
   let penaltyApplied: string | undefined;
   let antiFrustrationSaved = false;
   let serverSummaryText = '';
+  const usedDoubleStars = Boolean(owner.activeDoubleStars);
+  owner.activeDoubleStars = false;
 
   // Award all-play participants
   if (challenge.mode === 'all_play') {
@@ -963,18 +1178,22 @@ export function applyChallengeResult(inputState: GameState): StepResult {
     }>;
     const idx = Number(challenge.params.serverOutcomeIndex ?? 0);
     const slice = slices[idx] ?? slices[0];
-    owner.stars = Math.max(0, owner.stars + slice.stars);
-    starsDelta[owner.id] = slice.stars;
+    const awardedStars = usedDoubleStars && slice.stars > 0 ? slice.stars * 2 : slice.stars;
+    owner.stars = Math.max(0, owner.stars + awardedStars);
+    starsDelta[owner.id] = awardedStars;
+    if (usedDoubleStars && slice.stars > 0) {
+      bonusApplied = 'Jimat 2x ★';
+    }
     if (slice.kind === 'shield') {
       owner.shields += 1;
       shieldsDelta[owner.id] = (shieldsDelta[owner.id] ?? 0) + 1;
-      bonusApplied = 'Perisai Anti-Ular';
+      bonusApplied = bonusApplied ? `${bonusApplied} • Perisai Anti-Ular` : 'Perisai Anti-Ular';
     } else if (slice.kind === 'item') {
       tryGrantItem(state, owner, 'wheel', events, 1);
-      bonusApplied = 'Item Acak';
+      bonusApplied = bonusApplied ? `${bonusApplied} • Item Acak` : 'Item Acak';
     } else if (slice.advance > 0) {
       deferredAdvance = slice.advance;
-      bonusApplied = `Maju ${slice.advance} kotak`;
+      bonusApplied = bonusApplied ? `${bonusApplied} • Maju ${slice.advance} kotak` : `Maju ${slice.advance} kotak`;
     } else if (slice.advance < 0) {
       deferredRetreat = Math.abs(slice.advance);
       penaltyApplied = `Mundur ${deferredRetreat} kotak`;
@@ -983,20 +1202,25 @@ export function applyChallengeResult(inputState: GameState): StepResult {
     owner.consecutivePenalties = slice.kind === 'slip' ? owner.consecutivePenalties + 1 : 0;
   } else if (challenge.archetype === 'gift_trap') {
     const variant = challenge.params.variant as (typeof GIFT_TRAP_VARIANTS)[number];
-    owner.stars = Math.max(0, owner.stars + variant.starsDelta);
-    starsDelta[owner.id] = variant.starsDelta;
+    const awardedStars =
+      usedDoubleStars && variant.starsDelta > 0 ? variant.starsDelta * 2 : variant.starsDelta;
+    owner.stars = Math.max(0, owner.stars + awardedStars);
+    starsDelta[owner.id] = awardedStars;
+    if (usedDoubleStars && variant.starsDelta > 0) {
+      bonusApplied = 'Jimat 2x ★';
+    }
     if (variant.grantShield) {
       owner.shields += 1;
       shieldsDelta[owner.id] = (shieldsDelta[owner.id] ?? 0) + 1;
-      bonusApplied = 'Perisai Anti-Ular';
+      bonusApplied = bonusApplied ? `${bonusApplied} • Perisai Anti-Ular` : 'Perisai Anti-Ular';
     }
     if (variant.grantItem) {
       tryGrantItem(state, owner, 'gift', events, 1);
-      bonusApplied = 'Item Kejutan';
+      bonusApplied = bonusApplied ? `${bonusApplied} • Item Kejutan` : 'Item Kejutan';
     }
     if (variant.moveDelta > 0) {
       deferredAdvance = variant.moveDelta;
-      bonusApplied = `Maju +${variant.moveDelta}`;
+      bonusApplied = bonusApplied ? `${bonusApplied} • Maju +${variant.moveDelta}` : `Maju +${variant.moveDelta}`;
       owner.consecutivePenalties = 0;
     } else if (variant.moveDelta < 0) {
       if (owner.consecutivePenalties >= 2) {
@@ -1015,21 +1239,25 @@ export function applyChallengeResult(inputState: GameState): StepResult {
     owner.consecutivePenalties = 0;
     owner.challengeStreak += 1;
     if (challenge.mode !== 'all_play') {
-      owner.stars += challenge.reward.stars;
-      starsDelta[owner.id] = challenge.reward.stars;
+      const wonBaseStars = usedDoubleStars ? challenge.reward.stars * 2 : challenge.reward.stars;
+      owner.stars += wonBaseStars;
+      starsDelta[owner.id] = wonBaseStars;
+      if (usedDoubleStars && challenge.reward.stars > 0) {
+        bonusApplied = 'Jimat 2x ★';
+      }
     } else {
       starsDelta[owner.id] = starsDelta[owner.id] ?? 0;
     }
     if (challenge.reward.bonusType === 'advance') {
       deferredAdvance = challenge.reward.bonusValue ?? 1;
-      bonusApplied = `Maju +${deferredAdvance} kotak`;
+      bonusApplied = bonusApplied ? `${bonusApplied} • Maju +${deferredAdvance} kotak` : `Maju +${deferredAdvance} kotak`;
     } else if (challenge.reward.bonusType === 'shield') {
       owner.shields += 1;
       shieldsDelta[owner.id] = (shieldsDelta[owner.id] ?? 0) + 1;
-      bonusApplied = 'Perisai Anti-Ular';
+      bonusApplied = bonusApplied ? `${bonusApplied} • Perisai Anti-Ular` : 'Perisai Anti-Ular';
     } else if (challenge.reward.bonusType === 'extra_dice') {
       owner.extraRollsPending += 1;
-      bonusApplied = 'Dadu Ekstra!';
+      bonusApplied = bonusApplied ? `${bonusApplied} • Dadu Ekstra!` : 'Dadu Ekstra!';
       events.push({
         type: 'ExtraRollGranted',
         seq: nextSeq(state),
@@ -1121,6 +1349,13 @@ export function applyChallengeResult(inputState: GameState): StepResult {
     antiFrustrationSaved,
     serverSummaryText,
   });
+
+  if (ownerOutcome.success) {
+    updatePlayerMission(state, owner, 'win_3', events);
+    if (owner.challengeStreak > 0) {
+      updatePlayerMission(state, owner, 'streak_2', events, owner.challengeStreak);
+    }
+  }
 
   // Check Tile 100 Victory!
   if (landedTile === 100 && ownerOutcome.success) {
@@ -1248,6 +1483,7 @@ export function nextTurn(inputState: GameState, turnDeadlineAt: number | null = 
   }
 
   prevPlayer.consecutiveSixes = 0;
+  prevPlayer.activeDoubleStars = false;
 
   let attempts = 0;
   let nextIdx = state.currentTurnIndex;
