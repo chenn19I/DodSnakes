@@ -19,6 +19,7 @@ import {
   shouldBotBuyStarItem,
   simulateBotChallengeSubmission,
   startGame,
+  validateUsername,
   type AccessoryId,
   type ActiveChallenge,
   type BotDifficulty,
@@ -145,6 +146,11 @@ export class RoomManager {
     socketId: string,
     payload: { playerName: string; pawn: PawnId; color: PlayerColorId; accessory?: AccessoryId },
   ): { roomCode: string; playerId: string; reconnectToken: string } {
+    const nameCheck = validateUsername(payload.playerName);
+    if (!nameCheck.ok) {
+      throw new Error(nameCheck.error ?? 'Username tidak diizinkan.');
+    }
+
     const code = this.generateRoomCode();
     const playerId = this.newId('p');
     const reconnectToken = randomBytes(16).toString('hex');
@@ -153,7 +159,7 @@ export class RoomManager {
       id: playerId,
       socketId,
       reconnectToken,
-      name: payload.playerName,
+      name: nameCheck.sanitized,
       pawn: payload.pawn,
       color: payload.color,
       accessory: payload.accessory ?? 'none',
@@ -265,6 +271,11 @@ export class RoomManager {
       ? ALL_COLORS.find((x) => !usedColors.has(x)) ?? payload.color
       : payload.color;
 
+    const nameCheck = validateUsername(payload.playerName);
+    if (!nameCheck.ok) {
+      throw new Error(nameCheck.error ?? 'Username tidak diizinkan.');
+    }
+
     const playerId = this.newId('p');
     const reconnectToken = randomBytes(16).toString('hex');
 
@@ -272,7 +283,7 @@ export class RoomManager {
       id: playerId,
       socketId,
       reconnectToken,
-      name: payload.playerName,
+      name: nameCheck.sanitized,
       pawn,
       color,
       accessory: payload.accessory ?? 'none',
@@ -314,7 +325,13 @@ export class RoomManager {
   ): void {
     const { room, player } = this.getContext(socketId);
     if (!player || room.inGame) return;
-    if (patch.playerName) player.name = patch.playerName;
+    if (patch.playerName !== undefined) {
+      const nameCheck = validateUsername(patch.playerName);
+      if (!nameCheck.ok) {
+        throw new Error(nameCheck.error ?? 'Username tidak diizinkan.');
+      }
+      player.name = nameCheck.sanitized;
+    }
     if (patch.pawn) player.pawn = patch.pawn;
     if (patch.color) player.color = patch.color;
     if (patch.accessory !== undefined) player.accessory = patch.accessory;
