@@ -1,4 +1,22 @@
 import { z } from 'zod';
+import {
+  USERNAME_POLICY_ERROR,
+  isUsernameAllowed,
+  sanitizeUsernameRaw,
+} from './moderation/usernameFilter.js';
+
+export const SafePlayerNameSchema = z
+  .string()
+  .transform((val) => sanitizeUsernameRaw(val))
+  .refine((val) => val.length >= 1 && val.length <= 18, {
+    message: 'Nama pemain harus 1–18 karakter.',
+  })
+  .refine((val) => /[a-zA-Z0-9]/.test(val), {
+    message: 'Nama pemain harus mengandung huruf atau angka.',
+  })
+  .refine((val) => isUsernameAllowed(val), {
+    message: USERNAME_POLICY_ERROR,
+  });
 
 export const PawnIdSchema = z.enum(['kucing', 'kodok', 'bebek', 'panda', 'dino', 'jamur']);
 export const PlayerColorIdSchema = z.enum(['pink', 'kuning', 'mint', 'biru', 'oranye', 'ungu']);
@@ -16,7 +34,7 @@ export const GameModePresetSchema = z.enum(['klasik', 'kilat', 'pesta_item']);
 export const EmoteIdSchema = z.enum(['jempol', 'ketawa', 'kaget', 'nangis', 'api', 'mahkota']);
 
 export const RoomCreateSchema = z.object({
-  playerName: z.string().trim().min(1).max(18),
+  playerName: SafePlayerNameSchema,
   pawn: PawnIdSchema,
   color: PlayerColorIdSchema,
   accessory: AccessoryIdSchema.optional(),
@@ -24,7 +42,7 @@ export const RoomCreateSchema = z.object({
 
 export const RoomJoinSchema = z.object({
   roomCode: z.string().trim().toUpperCase().length(4),
-  playerName: z.string().trim().min(1).max(18),
+  playerName: SafePlayerNameSchema,
   pawn: PawnIdSchema,
   color: PlayerColorIdSchema,
   accessory: AccessoryIdSchema.optional(),
@@ -37,7 +55,7 @@ export const PlayerReadySchema = z.object({
 });
 
 export const PlayerCustomizeSchema = z.object({
-  playerName: z.string().trim().min(1).max(18).optional(),
+  playerName: SafePlayerNameSchema.optional(),
   pawn: PawnIdSchema.optional(),
   color: PlayerColorIdSchema.optional(),
   accessory: AccessoryIdSchema.optional(),
