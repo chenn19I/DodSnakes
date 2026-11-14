@@ -30,6 +30,8 @@ import {
   startGame,
   validateBoardLayout,
   validateChallengeSubmission,
+  validateUsername,
+  sanitizeUsernameOrFallback,
   type GameEvent,
   type GameState,
   type Tile,
@@ -957,5 +959,154 @@ describe('Challenge validation & Replay determinism', () => {
       ['p2', 'none'],
       ['p3', 'backpack'],
     ]);
+  });
+
+  it('rejects profanity, porn, SARA slurs, insults, and obfuscated bypasses in usernames while allowing normal names', () => {
+    const blocked = [
+      'anjing',
+      'A.n.j.1.n.g',
+      'k0nt0l',
+      'B o k e p',
+      'p0rn_king',
+      'g0bl0k99',
+      'nigger',
+      'kafir123',
+      'asu123',
+      'bego99',
+      'sex2025',
+      'pecundang',
+      'mmk_gg',
+      'a s u',
+      '---',
+      '   ',
+    ];
+    for (const bad of blocked) {
+      expect({ bad, ok: validateUsername(bad).ok }).toEqual({ bad, ok: false });
+    }
+
+    const allowed = [
+      'Chenn',
+      'Koko',
+      'Mochi',
+      'Pemain 1',
+      'Cassie',
+      'Hasan',
+      'Nasution',
+      'Sasuke',
+      'CoklatManis',
+      'Lucina',
+      'Analisa',
+      'BabiesRock',
+      'Perekonomian',
+    ];
+    for (const good of allowed) {
+      expect({ good, ok: validateUsername(good).ok }).toEqual({ good, ok: true });
+    }
+
+    const badState = createInitialGameState({
+      matchSeed: 707,
+      board: BOARD_LAYOUT,
+      players: [
+        { id: 'p1', name: 'k0nt0l', pawn: 'kucing', color: 'pink' },
+        { id: 'p2', name: 'Chenn', pawn: 'kodok', color: 'mint' },
+      ],
+    });
+    expect(badState.players[0].name).toBe('Pemain 1');
+    expect(badState.players[1].name).toBe('Chenn');
+    expect(sanitizeUsernameOrFallback('b4b1', 'Pemain')).toBe('Pemain');
+  });
+
+  it('triggers ladder climb and snake slide when deferred advance or retreat lands on them', () => {
+    const firstLadder = BOARD_LAYOUT.ladders[0]; // tile 4 -> 25
+    const preLadderTileId = firstLadder.from - 1;
+    const customTiles: Tile[] = TILES.map((t) =>
+      t.id === preLadderTileId
+        ? {
+            ...t,
+            archetype: 'quick_math',
+            mode: 'solo',
+            params: SAMPLE_MATH_PARAMS,
+            reward: { stars: 2, bonusType: 'advance', bonusValue: 1 },
+          }
+        : t,
+    );
+
+    let advState = startGame(
+      createInitialGameState({
+        matchSeed: 808,
+        board: BOARD_LAYOUT,
+        players: makeTestPlayers(2),
+      }),
+    ).state;
+    advState.players[0].position = preLadderTileId - 2;
+    advState = rollDice(advState, advState.turnOrder[advState.currentTurnIndex], 2).state;
+    advState = resolveTile(advState, customTiles, Date.now()).state;
+    advState = recordChallengeSubmission(
+      advState,
+      makeWinningSubmission(advState, advState.turnOrder[advState.currentTurnIndex]),
+    );
+    const ladderAfterAdvance = applyChallengeResult(advState);
+    expect(ladderAfterAdvance.state.players[0].position).toBe(firstLadder.to);
+    expect(
+      ladderAfterAdvance.events.some(
+        (e) => e.type === 'LadderClimbed' && e.from === firstLadder.from && e.to === firstLadder.to,
+      ),
+    ).toBe(true);
+
+    // Deferred retreat landing on a snake head must also trigger snake slide (unless shielded)
+    const firstSnake = BOARD_LAYOUT.snakes[0]; // tile 17 -> 7
+    const postSnakeTileId = firstSnake.from + 1;
+    const retreatTiles: Tile[] = TILES.map((t) =>
+      t.id === postSnakeTileId
+        ? {
+            ...t,
+            archetype: 'quick_math',
+            mode: 'solo',
+            params: SAMPLE_MATH_PARAMS,
+            penalty: { type: 'retreat', value: 1 },
+          }
+        : t,
+    );
+
+    let retState = startGame(
+      createInitialGameState({
+        matchSeed: 809,
+        board: BOARD_LAYOUT,
+        players: makeTestPlayers(2),
+      }),
+    ).state;
+    retState.players[0].position = postSnakeTileId - 2;
+    retState = rollDice(retState, retState.turnOrder[retState.currentTurnIndex], 2).state;
+    retState = resolveTile(retState, retreatTiles, Date.now()).state;
+    retState = recordChallengeSubmission(
+      retState,
+      makeFailingSubmission(retState, retState.turnOrder[retState.currentTurnIndex]),
+    );
+    const snakeAfterRetreat = applyChallengeResult(retState);
+    expect(snakeAfterRetreat.state.players[0].position).toBe(firstSnake.to);
+    expect(
+      snakeAfterRetreat.events.some(
+        (e) =>
+          e.type === 'SnakeBitten' &&
+          e.from === firstSnake.from &&
+          e.to === firstSnake.to &&
+          !e.dodgedByChallenge,
+      ),
+    ).toBe(true);
+  });
+
+  it('includes unambiguous colorblind pattern codes on color challenges', () => {
+    const rng = new SeededRng(4242);
+    const ccParams = ARCHETYPE_REGISTRY.color_count.buildParams(rng, 2, 12);
+    const targetColor = ccParams.targetColor as { pattern?: string; cbCode?: string };
+    expect(typeof targetColor.pattern).toBe('string');
+    expect(typeof targetColor.cbCode).toBe('string');
+    const items = ccParams.items as Array<{ colorPattern?: string; colorCode?: string }>;
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every((it) => Boolean(it.colorPattern) && Boolean(it.colorCode))).toBe(true);
+
+    const bpParams = ARCHETYPE_REGISTRY.bubble_pop.buildParams(rng, 2, 15);
+    const bpColor = bpParams.targetColor as { pattern?: string };
+    expect(typeof bpColor.pattern).toBe('string');
   });
 });
