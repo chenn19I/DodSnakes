@@ -5,19 +5,24 @@ let cachedGradientMap: THREE.DataTexture | null = null;
 const cachedMaterials = new Map<string, THREE.MeshToonMaterial>();
 
 /**
- * 4-band crisp storybook cel-shading ramp for consistent non-muddy shadows.
+ * Soft painterly cel-shading ramp with gentle transitions so curved characters
+ * and accessories look smooth and sculptural rather than harshly stepped.
  */
 export function getToonGradientMap(): THREE.DataTexture {
   if (cachedGradientMap) return cachedGradientMap;
   const data = new Uint8Array([
-    132, 126, 138, 255,
-    184, 180, 190, 255,
-    232, 230, 236, 255,
+    148, 144, 156, 255,
+    172, 169, 180, 255,
+    196, 194, 204, 255,
+    218, 216, 224, 255,
+    236, 234, 240, 255,
+    247, 246, 250, 255,
+    253, 252, 255, 255,
     255, 255, 255, 255,
   ]);
-  const tex = new THREE.DataTexture(data, 4, 1, THREE.RGBAFormat);
-  tex.minFilter = THREE.NearestFilter;
-  tex.magFilter = THREE.NearestFilter;
+  const tex = new THREE.DataTexture(data, 8, 1, THREE.RGBAFormat);
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
   tex.generateMipmaps = false;
   tex.needsUpdate = true;
   cachedGradientMap = tex;
@@ -79,17 +84,11 @@ function buildOutlineShaderMaterial(
       uniform float uBoilStep;
       uniform float uBoilAmplitude;
 
-      float hash3(vec3 p) {
-        p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3));
-        p *= 17.0;
-        return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
-      }
-
       void main() {
-        vec3 quantizedPos = floor(position * 20.0) / 20.0;
-        float n1 = hash3(quantizedPos + vec3(uBoilStep * 0.31));
-        float variableThick = uThickness * (0.88 + 0.28 * n1);
-        float boilOffset = (n1 - 0.5) * uBoilAmplitude;
+        float wave = sin(position.x * 5.2 + position.y * 4.4 + uBoilStep * 0.42)
+                   * cos(position.z * 5.0 - uBoilStep * 0.35);
+        float variableThick = uThickness * (0.94 + 0.09 * wave);
+        float boilOffset = wave * uBoilAmplitude;
         vec3 displaced = position + normalize(normal) * (variableThick + boilOffset);
 
         vec4 mvPosition = vec4(displaced, 1.0);
@@ -109,10 +108,10 @@ function buildOutlineShaderMaterial(
   });
 }
 
-export function createOutlineController(thickness = 0.038): DoodleOutlineController {
+export function createOutlineController(thickness = 0.032): DoodleOutlineController {
   const shared = {
     uBoilStep: { value: 0 },
-    uBoilAmplitude: { value: 0.008 },
+    uBoilAmplitude: { value: 0.0022 },
   };
   const material = buildOutlineShaderMaterial(thickness, DOODLE_PALETTE.ink, shared);
   const instancedMaterial = buildOutlineShaderMaterial(thickness * 0.88, DOODLE_PALETTE.ink, shared);
@@ -124,7 +123,7 @@ export function createOutlineController(thickness = 0.038): DoodleOutlineControl
       shared.uBoilStep.value = step;
     },
     setReducedMotion: (reduced: boolean) => {
-      shared.uBoilAmplitude.value = reduced ? 0 : 0.008;
+      shared.uBoilAmplitude.value = reduced ? 0 : 0.0022;
     },
   };
 }
