@@ -1854,6 +1854,195 @@ const renderMathCompare: ChallengeRendererFn = ({
   };
 };
 
+const renderTargetSum: ChallengeRendererFn = ({
+  challenge,
+  playerId,
+  container,
+  language,
+  sound,
+  onSubmit,
+}) => {
+  const startedAt = performance.now();
+  let submitted = false;
+  const target = Number(challenge.params.target ?? 10);
+  const options = ((challenge.params.options as number[]) ?? [3, 7, 2, 9]).slice(0, 4);
+  const selected: number[] = [];
+  const en = language === 'en';
+
+  container.innerHTML = `
+    <div class="mg-wrap">
+      <div class="mg-target-badge">
+        <span>${en ? 'Target Sum' : 'Jumlah Target'}</span>
+        <strong class="tabular-num">${target}</strong>
+      </div>
+      <div class="mg-sub" id="mg-sum-status">${en ? 'Pick 2 number cards!' : 'Ketuk tepat 2 kartu angka!'}</div>
+      <div class="mg-sum-grid">
+        ${options
+          .map(
+            (val, idx) => `
+          <button class="doodle-btn mg-sum-card" data-sum-idx="${idx}">
+            <span class="mg-key-pill">${idx + 1}</span>
+            <span class="tabular-num" style="font-size:1.35rem;font-weight:700">${val}</span>
+          </button>`,
+          )
+          .join('')}
+      </div>
+    </div>
+  `;
+
+  const btns = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-sum-idx]'));
+  const statusEl = container.querySelector<HTMLElement>('#mg-sum-status');
+
+  const refreshSelection = (): void => {
+    btns.forEach((btn, idx) => {
+      const picked = selected.includes(idx);
+      btn.classList.toggle('is-picked', picked);
+      btn.classList.toggle('doodle-btn-yellow', picked);
+    });
+    if (statusEl) {
+      if (selected.length === 1) {
+        const firstVal = options[selected[0]];
+        statusEl.textContent = en ? `${firstVal} + ? = ${target}` : `${firstVal} + ? = ${target}`;
+      } else {
+        statusEl.textContent = en ? 'Pick 2 number cards!' : 'Ketuk tepat 2 kartu angka!';
+      }
+    }
+  };
+
+  btns.forEach((btn, idx) => {
+    btn.onclick = () => {
+      if (submitted) return;
+      sound.playUiClick();
+      const pos = selected.indexOf(idx);
+      if (pos >= 0) {
+        selected.splice(pos, 1);
+        refreshSelection();
+        return;
+      }
+      selected.push(idx);
+      refreshSelection();
+      if (selected.length === 2) {
+        submitted = true;
+        onSubmit(
+          makeInputSubmission(playerId, true, 90, startedAt, {
+            sequenceIndices: [...selected],
+          }),
+        );
+      }
+    };
+  });
+
+  const unbindKeys = bindChoiceKeyShortcuts(btns, () => submitted);
+
+  return () => {
+    submitted = true;
+    unbindKeys();
+  };
+};
+
+function renderArrowSvg(dir: number, size = 24): string {
+  const rot = dir === 1 ? 90 : dir === 2 ? 180 : dir === 3 ? 270 : 0;
+  return `<svg viewBox="0 0 36 36" width="${size}" height="${size}" aria-hidden="true" style="transform:rotate(${rot}deg)">
+    <polygon points="18,4 31,18 23,18 23,32 13,32 13,18 5,18" fill="currentColor" stroke="#2B2838" stroke-width="2.6" stroke-linejoin="round"/>
+  </svg>`;
+}
+
+const renderArrowBlitz: ChallengeRendererFn = ({
+  challenge,
+  playerId,
+  container,
+  colorblindMode,
+  language,
+  sound,
+  onSubmit,
+}) => {
+  const startedAt = performance.now();
+  let submitted = false;
+  const sequence = ((challenge.params.sequence as number[]) ?? [0, 1, 2, 3]).slice(0, 8);
+  const entered: number[] = [];
+  const en = language === 'en';
+  const dirColors = colorblindMode
+    ? ['#56B4E9', '#009E73', '#E69F00', '#CC79A7']
+    : ['#72C0FF', '#5EE2AD', '#FF86AD', '#FFD15C'];
+  const dirNames = en ? ['Up', 'Right', 'Down', 'Left'] : ['Atas', 'Kanan', 'Bawah', 'Kiri'];
+
+  container.innerHTML = `
+    <div class="mg-wrap">
+      <div class="mg-sub">${en ? 'Repeat the arrow sequence (Tap or Arrow/WASD keys)' : 'Ketuk urutan panah di atas (atau tombol Arah/WASD)'}</div>
+      <div class="mg-arrow-seq" id="mg-arrow-seq">
+        ${sequence
+          .map(
+            (dir, idx) => `
+          <span class="mg-arrow-step ${idx === 0 ? 'is-current' : ''}" data-step="${idx}" style="color:${dirColors[dir % 4]}">
+            ${renderArrowSvg(dir, 24)}
+          </span>`,
+          )
+          .join('')}
+      </div>
+      <div class="mg-arrow-pad">
+        <span aria-hidden="true"></span>
+        <button class="doodle-btn mg-arrow-btn" data-arrow-dir="0" aria-label="${dirNames[0]}" style="color:${dirColors[0]}">${renderArrowSvg(0, 26)}</button>
+        <span aria-hidden="true"></span>
+        <button class="doodle-btn mg-arrow-btn" data-arrow-dir="3" aria-label="${dirNames[3]}" style="color:${dirColors[3]}">${renderArrowSvg(3, 26)}</button>
+        <button class="doodle-btn mg-arrow-btn" data-arrow-dir="2" aria-label="${dirNames[2]}" style="color:${dirColors[2]}">${renderArrowSvg(2, 26)}</button>
+        <button class="doodle-btn mg-arrow-btn" data-arrow-dir="1" aria-label="${dirNames[1]}" style="color:${dirColors[1]}">${renderArrowSvg(1, 26)}</button>
+      </div>
+    </div>
+  `;
+
+  const stepEls = Array.from(container.querySelectorAll<HTMLElement>('[data-step]'));
+  const pushDir = (dir: number): void => {
+    if (submitted) return;
+    sound.playUiClick();
+    const stepIdx = entered.length;
+    entered.push(dir);
+    const el = stepEls[stepIdx];
+    if (el) {
+      el.classList.remove('is-current');
+      el.classList.add(sequence[stepIdx] === dir ? 'is-done' : 'is-wrong');
+    }
+    const nxt = stepEls[entered.length];
+    if (nxt) nxt.classList.add('is-current');
+
+    if (entered.length >= sequence.length) {
+      submitted = true;
+      onSubmit(
+        makeInputSubmission(playerId, true, 90, startedAt, {
+          sequenceIndices: [...entered],
+        }),
+      );
+    }
+  };
+
+  container.querySelectorAll<HTMLButtonElement>('[data-arrow-dir]').forEach((btn) => {
+    btn.onclick = () => {
+      pushDir(Number(btn.dataset.arrowDir));
+    };
+  });
+
+  const onKeyDown = (ev: KeyboardEvent): void => {
+    if (submitted) return;
+    const tag = (ev.target as HTMLElement | null)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    const key = ev.key.toLowerCase();
+    let dir: number | null = null;
+    if (ev.key === 'ArrowUp' || key === 'w') dir = 0;
+    else if (ev.key === 'ArrowRight' || key === 'd') dir = 1;
+    else if (ev.key === 'ArrowDown' || key === 's') dir = 2;
+    else if (ev.key === 'ArrowLeft' || key === 'a') dir = 3;
+    if (dir !== null) {
+      ev.preventDefault();
+      pushDir(dir);
+    }
+  };
+  window.addEventListener('keydown', onKeyDown);
+
+  return () => {
+    submitted = true;
+    window.removeEventListener('keydown', onKeyDown);
+  };
+};
+
 export const CLIENT_CHALLENGE_RENDERERS: Record<string, ChallengeRendererFn> = {
   tap_timing: renderTapTiming,
   quick_quiz: renderQuickQuiz,
@@ -1877,5 +2066,7 @@ export const CLIENT_CHALLENGE_RENDERERS: Record<string, ChallengeRendererFn> = {
   odd_one_out: renderOddOneOut,
   pattern_next: renderPatternNext,
   math_compare: renderMathCompare,
+  target_sum: renderTargetSum,
+  arrow_blitz: renderArrowBlitz,
   boss_doodle: renderBossDoodle,
 };
