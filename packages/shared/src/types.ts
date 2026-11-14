@@ -192,6 +192,8 @@ export type ChallengeArchetype =
   | 'odd_one_out'
   | 'pattern_next'
   | 'math_compare'
+  | 'target_sum'
+  | 'arrow_blitz'
   | 'boss_doodle';
 
 export type ChallengeMode = 'solo' | 'duel' | 'all_play';
@@ -223,7 +225,37 @@ export interface Tile {
   penalty: ChallengePenalty;
 }
 
-export type ItemType = 'shield' | 'golden_dice' | 'brake' | 'surprise' | 'magnet_star' | 'swap_turbo';
+export type ItemType =
+  | 'shield'
+  | 'golden_dice'
+  | 'brake'
+  | 'surprise'
+  | 'magnet_star'
+  | 'swap_turbo'
+  | 'star_multiplier'
+  | 'rival_brake';
+
+export type BoardSpecialKind =
+  | 'star_fountain'
+  | 'supply_crate'
+  | 'shield_shrine'
+  | 'tailwind';
+
+export interface BoardSpecialTile {
+  tileId: number;
+  kind: BoardSpecialKind;
+  name: string;
+  description: string;
+}
+
+export type MatchMissionKind = 'climb_2' | 'win_3' | 'streak_2' | 'use_2_items';
+
+export interface MatchMission {
+  kind: MatchMissionKind;
+  progress: number;
+  target: number;
+  completed: boolean;
+}
 
 export type GameModePreset = 'klasik' | 'kilat' | 'pesta_item';
 
@@ -273,6 +305,16 @@ export const ITEM_META: Record<ItemType, { name: string; description: string; ic
     description: 'Tambahkan +2 langkah ekstra pada lemparan dadu berikutnya!',
     icon: 'swap_turbo',
   },
+  star_multiplier: {
+    name: 'Jimat Ganda',
+    description: 'Gandakan hadiah bintang (+2x) jika menang tantangan giliran ini!',
+    icon: 'star_multiplier',
+  },
+  rival_brake: {
+    name: 'Jebakan Rem',
+    description: 'Pasang Rem ke lawan terdepan agar lemparan berikutnya maksimal angka 3!',
+    icon: 'rival_brake',
+  },
 };
 
 export const STAR_SHOP_COST = 4;
@@ -319,6 +361,8 @@ export interface Player {
   activeGoldenDice: boolean;
   activeBrake: boolean;
   activeTurbo: boolean;
+  activeDoubleStars?: boolean;
+  mission?: MatchMission;
   isBot: boolean;
   botDifficulty: BotDifficulty;
   connected: boolean;
@@ -376,6 +420,7 @@ export interface ActiveChallenge {
   penalty: ChallengePenalty;
   ownerPlayerId: string;
   opponentId?: string; // for duel
+  awaitingDuelPick?: boolean;
   participantIds: string[];
   submissions: Record<string, ChallengeSubmission>;
   deadlineAt: number;
@@ -517,7 +562,7 @@ export type GameEvent =
       seq: number;
       playerId: string;
       item: ItemType;
-      source: 'challenge' | 'trailing_bonus' | 'wheel' | 'gift' | 'starter' | 'star_shop';
+      source: 'challenge' | 'trailing_bonus' | 'wheel' | 'gift' | 'starter' | 'star_shop' | 'board_event' | 'mission';
       starsCost?: number;
     }
   | {
@@ -528,6 +573,26 @@ export type GameEvent =
       effectDescription: string;
       targetPlayerId?: string;
       starsDelta?: number;
+      shieldsDelta?: number;
+    }
+  | {
+      type: 'BoardSpecialTriggered';
+      seq: number;
+      playerId: string;
+      tileId: number;
+      kind: BoardSpecialKind;
+      starsDelta?: number;
+      shieldsDelta?: number;
+      grantedItem?: ItemType;
+      movedTo?: number;
+    }
+  | {
+      type: 'MissionCompleted';
+      seq: number;
+      playerId: string;
+      kind: MatchMissionKind;
+      starsDelta: number;
+      grantedItem?: ItemType;
       shieldsDelta?: number;
     }
   | {
