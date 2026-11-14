@@ -863,10 +863,10 @@ export const ARCHETYPE_REGISTRY: Record<ChallengeArchetype, ArchetypeSpec> = {
     allowedModes: ['solo'],
     buildParams: (rng, difficulty) => {
       const targetColors = [
-        { id: 'pink', label: 'Merah Muda', hex: '#ff6b8b' },
-        { id: 'biru', label: 'Biru Langit', hex: '#4ea8de' },
-        { id: 'mint', label: 'Hijau Mint', hex: '#38b000' },
-        { id: 'kuning', label: 'Kuning Cerah', hex: '#f4a261' },
+        { id: 'pink', label: 'Merah Muda', hex: '#ff6b8b', pattern: 'diamond' },
+        { id: 'biru', label: 'Biru Langit', hex: '#4ea8de', pattern: 'triangle' },
+        { id: 'mint', label: 'Hijau Mint', hex: '#38b000', pattern: 'square' },
+        { id: 'kuning', label: 'Kuning Cerah', hex: '#f4a261', pattern: 'star' },
       ];
       const targetColor = rng.pick(targetColors);
       const goodCount = 6 + difficulty;
@@ -1047,10 +1047,10 @@ export const ARCHETYPE_REGISTRY: Record<ChallengeArchetype, ArchetypeSpec> = {
         { id: 'kancing', label: 'Lingkaran', symbol: '●' },
       ];
       const colors = [
-        { id: 'pink', label: 'Merah Muda', hex: '#ff6b8b' },
-        { id: 'biru', label: 'Biru', hex: '#4ea8de' },
-        { id: 'kuning', label: 'Kuning', hex: '#f4a261' },
-        { id: 'mint', label: 'Hijau Mint', hex: '#38b000' },
+        { id: 'pink', label: 'Merah Muda', hex: '#ff6b8b', pattern: 'diamond', cbCode: 'PK' },
+        { id: 'biru', label: 'Biru', hex: '#4ea8de', pattern: 'triangle', cbCode: 'BR' },
+        { id: 'kuning', label: 'Kuning', hex: '#f4a261', pattern: 'star', cbCode: 'KN' },
+        { id: 'mint', label: 'Hijau Mint', hex: '#38b000', pattern: 'square', cbCode: 'HJ' },
       ];
 
       const targetShape = rng.pick(shapes);
@@ -1063,6 +1063,8 @@ export const ARCHETYPE_REGISTRY: Record<ChallengeArchetype, ArchetypeSpec> = {
         symbol: string;
         colorId: string;
         colorHex: string;
+        colorPattern: string;
+        colorCode: string;
         rotDeg: number;
       }> = [];
 
@@ -1072,6 +1074,8 @@ export const ARCHETYPE_REGISTRY: Record<ChallengeArchetype, ArchetypeSpec> = {
           symbol: targetShape.symbol,
           colorId: targetColor.id,
           colorHex: targetColor.hex,
+          colorPattern: targetColor.pattern,
+          colorCode: targetColor.cbCode,
           rotDeg: rng.nextInt(-18, 18),
         });
       }
@@ -1085,6 +1089,8 @@ export const ARCHETYPE_REGISTRY: Record<ChallengeArchetype, ArchetypeSpec> = {
           symbol: s.symbol,
           colorId: c.id,
           colorHex: c.hex,
+          colorPattern: c.pattern,
+          colorCode: c.cbCode,
           rotDeg: rng.nextInt(-18, 18),
         });
       }
