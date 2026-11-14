@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ACCESSORY_META,
   ARCHETYPE_REGISTRY,
   BOARD_LAYOUT,
   PAWN_META,
@@ -14,6 +15,7 @@ import {
   chooseBotGoldenDiceIndex,
   chooseDice,
   computeMove,
+  computePodium,
   createInitialGameState,
   decideBotPreRollItemIndex,
   getChallengeBonusDurationMs,
@@ -920,5 +922,40 @@ describe('Challenge validation & Replay determinism', () => {
     toadyState = recordChallengeSubmission(toadyState, makeWinningSubmission(toadyState, 'toady'));
     const toadyRes = applyChallengeResult(toadyState);
     expect(toadyRes.state.players[1].stars).toBe(3); // 2 reward + 1 Toady snake-dodge perk
+  });
+
+  it('preserves accessory customization with none default through game state and podium', () => {
+    expect(Object.keys(ACCESSORY_META)).toEqual([
+      'none',
+      'crown',
+      'glasses',
+      'scarf',
+      'headset',
+      'flower',
+      'backpack',
+    ]);
+
+    const state = createInitialGameState({
+      matchSeed: 808,
+      board: BOARD_LAYOUT,
+      players: [
+        { id: 'p1', name: 'Mochi', pawn: 'kucing', color: 'pink', accessory: 'crown' },
+        { id: 'p2', name: 'Koko', pawn: 'kodok', color: 'mint' },
+        { id: 'p3', name: 'Boba', pawn: 'panda', color: 'biru', accessory: 'backpack' },
+      ],
+    });
+
+    expect(state.players.map((p) => p.accessory)).toEqual(['crown', 'none', 'backpack']);
+
+    state.players[0].position = 100;
+    state.players[0].stars = 6;
+    state.players[1].position = 82;
+    state.players[2].position = 64;
+    const podium = computePodium(state, 'p1');
+    expect(podium.map((entry) => [entry.playerId, entry.accessory])).toEqual([
+      ['p1', 'crown'],
+      ['p2', 'none'],
+      ['p3', 'backpack'],
+    ]);
   });
 });
