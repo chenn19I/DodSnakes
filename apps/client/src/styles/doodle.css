@@ -46,6 +46,16 @@ body.large-text .doodle-btn {
   display: block;
 }
 
+#app.canvas-fallback-2d {
+  background-color: #EFE2CA;
+  background-image:
+    radial-gradient(circle at 20% 25%, rgba(255, 209, 92, 0.28), transparent 45%),
+    radial-gradient(circle at 82% 75%, rgba(94, 226, 173, 0.25), transparent 45%),
+    linear-gradient(rgba(36, 34, 45, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(36, 34, 45, 0.055) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 28px 28px, 28px 28px;
+}
+
 #paper-vignette {
   position: fixed;
   inset: 0;
@@ -61,6 +71,15 @@ body.large-text .doodle-btn {
   pointer-events: none;
   display: flex;
   flex-direction: column;
+}
+
+#layer-main {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
 }
 
 .ui-interactive {
@@ -138,8 +157,8 @@ body.large-text .doodle-btn {
 /* Staggered UI entry */
 @keyframes popIn {
   from {
-    opacity: 0;
-    transform: translateY(16px) scale(0.92);
+    opacity: 0.92;
+    transform: translateY(12px) scale(0.95);
   }
   to {
     opacity: 1;
