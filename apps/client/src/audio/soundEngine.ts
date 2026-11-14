@@ -611,4 +611,13 @@ export class DoodleSoundEngine {
     });
     this.vibrate([25, 25, 55]);
   }
+
+  public playTurnReady(): void {
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    this.playMarimbaNote(N.C5, 0.12, 0.13, t, 'sfx', 3600);
+    this.playMarimbaNote(N.F5, 0.22, 0.16, t + 0.075, 'sfx', 4200);
+    this.vibrate(12);
+  }
 }
