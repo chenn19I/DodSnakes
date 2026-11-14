@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src/**/*.ts", "src/**/*.json"],
+  "exclude": ["src/generator/runGenerate.ts", "src/sim/runSimulation.ts"]
+}

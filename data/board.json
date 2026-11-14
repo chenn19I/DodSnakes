@@ -1,0 +1,63 @@
+{
+  "size": 100,
+  "gridWidth": 10,
+  "gridHeight": 10,
+  "zones": [
+    {
+      "id": "taman_permen",
+      "name": "Taman Permen",
+      "startTile": 1,
+      "endTile": 25,
+      "accentColor": "#FF8FB1",
+      "secondaryColor": "#FFD166",
+      "description": "Kotak manis penuh lolipop dan kue doodle!"
+    },
+    {
+      "id": "hutan_ngantuk",
+      "name": "Hutan Ngantuk",
+      "startTile": 26,
+      "endTile": 50,
+      "accentColor": "#6EE7B7",
+      "secondaryColor": "#FFD166",
+      "description": "Pohon menguap, jamur gemas, dan tupai tidur."
+    },
+    {
+      "id": "gunung_es",
+      "name": "Gunung Es Cemong",
+      "startTile": 51,
+      "endTile": 75,
+      "accentColor": "#7CC6FE",
+      "secondaryColor": "#B69CFF",
+      "description": "Licin-licin dingin tapi tetep ceria!"
+    },
+    {
+      "id": "kastil_awan",
+      "name": "Kastil Awan",
+      "startTile": 76,
+      "endTile": 100,
+      "accentColor": "#B69CFF",
+      "secondaryColor": "#FF9F5A",
+      "description": "Menara langit menuju takhta Bos Doodle!"
+    }
+  ],
+  "ladders": [
+    { "id": "L1", "from": 4, "to": 25 },
+    { "id": "L2", "from": 9, "to": 31 },
+    { "id": "L3", "from": 20, "to": 42 },
+    { "id": "L4", "from": 28, "to": 56 },
+    { "id": "L5", "from": 40, "to": 59 },
+    { "id": "L6", "from": 51, "to": 67 },
+    { "id": "L7", "from": 63, "to": 81 },
+    { "id": "L8", "from": 71, "to": 91 }
+  ],
+  "snakes": [
+    { "id": "S1", "from": 17, "to": 7, "personality": "usil" },
+    { "id": "S2", "from": 34, "to": 13, "personality": "ngantuk" },
+    { "id": "S3", "from": 47, "to": 26, "personality": "kaget" },
+    { "id": "S4", "from": 54, "to": 36, "personality": "kenyang" },
+    { "id": "S5", "from": 62, "to": 19, "personality": "usil" },
+    { "id": "S6", "from": 87, "to": 57, "personality": "ngantuk" },
+    { "id": "S7", "from": 93, "to": 73, "personality": "kaget" },
+    { "id": "S8", "from": 98, "to": 79, "personality": "kenyang" }
+  ]
+}
