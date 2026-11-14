@@ -27,7 +27,15 @@ function buildValidClientInput(ch: ActiveChallenge, playerId: string) {
     const q = QUIZ_BANK.find((x) => x.id === Number(ch.params.questionId))!;
     sim.answerIndex = q.correctIndex;
     sim.reactionMs = 520;
-  } else if (ch.archetype === 'shadow_match' || ch.archetype === 'quick_math' || ch.archetype === 'stroop_color' || ch.archetype === 'color_count' || ch.archetype === 'odd_one_out') {
+  } else if (
+    ch.archetype === 'shadow_match' ||
+    ch.archetype === 'quick_math' ||
+    ch.archetype === 'stroop_color' ||
+    ch.archetype === 'color_count' ||
+    ch.archetype === 'odd_one_out' ||
+    ch.archetype === 'pattern_next' ||
+    ch.archetype === 'math_compare'
+  ) {
     sim.answerIndex = Number(ch.params.correctIndex);
     sim.reactionMs = 450;
   } else if (ch.archetype === 'pair_flip') {
