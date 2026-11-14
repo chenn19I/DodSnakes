@@ -10,6 +10,8 @@ import {
   STAR_SHOP_COST,
   getPlayerShopCost,
   previewDiceLanding,
+  sanitizeUsernameOrFallback,
+  validateUsername,
   type AccessoryId,
   type ActiveChallenge,
   type BotDifficulty,
@@ -31,13 +33,32 @@ import type { DoodleSoundEngine } from '../audio/soundEngine.js';
 import { CLIENT_CHALLENGE_RENDERERS } from '../challenges/challengeRenderer.js';
 import {
   renderAccessorySvg,
+  renderEmoteSvg,
   renderItemSvg,
   renderPawnAvatarSvg,
   renderUiIconSvg,
+  type UiIconKind,
 } from '../challenges/doodleIcons.js';
 import { LocalGameController, buildBotPlayers } from '../controllers/localGameController.js';
 import { OnlineGameController } from '../controllers/onlineGameController.js';
 import type { GameSessionController, SessionCallbacks } from '../controllers/gameTypes.js';
+import {
+  COLORBLIND_SHAPES,
+  formatEventFeedText,
+  getAccessoryMeta,
+  getArchetypeMeta,
+  getBotDiffLabel,
+  getColorName,
+  getEmoteLabel,
+  getItemMeta,
+  getLocalizedGiftVariant,
+  getModeMeta,
+  getPawnMeta,
+  localizeText,
+  tr,
+  type AppLanguage,
+  type UiKey,
+} from '../i18n/translations.js';
 
 type ScreenKind = 'splash' | 'menu' | 'online_setup' | 'local_setup' | 'bot_setup' | 'lobby' | 'game';
 
@@ -48,6 +69,7 @@ interface AccessibilitySettings {
   colorblindMode: boolean;
   largeText: boolean;
   reducedMotion: boolean;
+  language: AppLanguage;
 }
 
 interface CareerStats {
@@ -60,14 +82,30 @@ interface CareerStats {
 const SETTINGS_STORAGE_KEY = 'doodle_dash_settings_v3';
 const CAREER_STORAGE_KEY = 'doodle_dash_career_v1';
 
-const EMOTE_LIST: Array<{ id: EmoteId; icon: string; label: string }> = [
-  { id: 'jempol', icon: '👍', label: 'Mantap!' },
-  { id: 'ketawa', icon: '😂', label: 'Wkwk!' },
-  { id: 'kaget', icon: '😱', label: 'Waduh!' },
-  { id: 'nangis', icon: '😭', label: 'Huwaa!' },
-  { id: 'api', icon: '🔥', label: 'Gass!' },
-  { id: 'mahkota', icon: '👑', label: 'Juara!' },
+const EMOTE_LIST: Array<{ id: EmoteId; label: string }> = [
+  { id: 'jempol', label: 'Mantap!' },
+  { id: 'ketawa', label: 'Wkwk!' },
+  { id: 'kaget', label: 'Waduh!' },
+  { id: 'nangis', label: 'Huwaa!' },
+  { id: 'api', label: 'Gass!' },
+  { id: 'mahkota', label: 'Juara!' },
 ];
+
+interface ActivityEntry {
+  icon: UiIconKind | { item: ItemType };
+  text: string;
+}
+
+interface FloatingEmoteState {
+  playerName: string;
+  emoteId: EmoteId;
+  label: string;
+}
+
+interface SuperlativeAward {
+  icon: UiIconKind | { item: ItemType };
+  label: string;
+}
 
 function escapeHtml(text: string): string {
   return text
@@ -105,17 +143,18 @@ export class DoodleAppShell {
   private showHowToPlay = false;
   private showSettings = false;
   private emoteTrayOpen = false;
-  private feedOpen = true;
+  private feedOpen = typeof window === 'undefined' ? true : window.innerWidth >= 880;
+  private hudCompact = false;
   private speed2x = false;
   private isAnimating = false;
   private toastMessage: string | null = null;
   private toastTimer: number | null = null;
   private turnBannerText: string | null = null;
   private turnBannerTimer: number | null = null;
-  private floatingEmoteText: string | null = null;
+  private floatingEmote: FloatingEmoteState | null = null;
   private floatingEmoteTimer: number | null = null;
   private debugStats: SceneDebugStats = { fps: 60, drawCalls: 0, triangles: 0 };
-  private activityFeed: string[] = [];
+  private activityFeed: ActivityEntry[] = [];
 
   private activeChallengeModal: {
     challenge: ActiveChallenge;
@@ -160,14 +199,15 @@ export class DoodleAppShell {
   private turnCountdownInterval: number | null = null;
   private displayedStars = new Map<string, number>();
   private starTickerId: number | null = null;
-  private readonly colorShapes: Record<PlayerColorId, string> = {
-    pink: '●',
-    kuning: '▲',
-    mint: '■',
-    biru: '★',
-    oranye: '◆',
-    ungu: '✚',
-  };
+  private readonly colorShapes = COLORBLIND_SHAPES;
+
+  private get lang(): AppLanguage {
+    return this.settings.language;
+  }
+
+  private t(key: UiKey, vars?: Record<string, string | number>): string {
+    return tr(this.settings.language, key, vars);
+  }
 
   constructor(root: HTMLElement, scene: DoodleSceneManager, sound: DoodleSoundEngine) {
     this.root = root;
@@ -233,10 +273,13 @@ export class DoodleAppShell {
       colorblindMode: false,
       largeText: false,
       reducedMotion: prefersReduced,
+      language: 'id',
     };
     try {
       const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
-      return raw ? { ...defaults, ...(JSON.parse(raw) as Partial<AccessibilitySettings>) } : defaults;
+      const parsed = raw ? { ...defaults, ...(JSON.parse(raw) as Partial<AccessibilitySettings>) } : defaults;
+      parsed.language = parsed.language === 'en' ? 'en' : 'id';
+      return parsed;
     } catch {
       return defaults;
     }
@@ -290,54 +333,49 @@ export class DoodleAppShell {
     this.sound.setVolume(this.settings.volume);
     this.sound.setMusicEnabled(this.settings.musicEnabled);
     this.scene.setReducedMotion(this.settings.reducedMotion);
+    this.scene.setColorblindMode(this.settings.colorblindMode);
+    this.scene.setLanguage(this.settings.language);
+    document.documentElement.lang = this.settings.language;
     document.body.classList.toggle('large-text', this.settings.largeText);
     document.body.classList.toggle('reduced-motion', this.settings.reducedMotion);
     document.body.classList.toggle('colorblind-mode', this.settings.colorblindMode);
     this.saveSettings();
   }
 
-  private pushActivity(line: string): void {
-    this.activityFeed.unshift(line);
+  private pushActivity(icon: UiIconKind | { item: ItemType }, text: string): void {
+    this.activityFeed.unshift({ icon, text });
     if (this.activityFeed.length > 10) {
       this.activityFeed.length = 10;
     }
   }
 
+  private renderActivityIcon(icon: UiIconKind | { item: ItemType }, size = 14): string {
+    return typeof icon === 'string' ? renderUiIconSvg(icon, size) : renderItemSvg(icon.item, size);
+  }
+
   private ingestEventsIntoFeed(events: GameEvent[], state: GameState): void {
-    const playerOf = (id: string) => state.players.find((p) => p.id === id);
-    const nameOf = (id: string) => playerOf(id)?.name ?? 'Pemain';
     for (const ev of events) {
-      if (ev.type === 'DiceRolled') {
-        const vals = ev.diceValues.join(' & ');
-        const tag = ev.usedTurbo ? ' (+2 Turbo!)' : ev.usedBrake ? ' (Rem)' : '';
-        const p = playerOf(ev.playerId);
-        const hopNote = p?.pawn === 'kodok' && ev.diceValues.length === 1 && ev.diceValues[0] === 1 ? ' (+1 Lompatan Kodok!)' : '';
-        this.pushActivity(`🎲 ${nameOf(ev.playerId)} lempar ${vals}${tag}${hopNote}`);
-      } else if (ev.type === 'LadderClimbed') {
-        const p = playerOf(ev.playerId);
-        const bonus = p?.pawn === 'kucing' ? ' (+1★ Kaki Gesit!)' : '';
-        this.pushActivity(`🪜 ${nameOf(ev.playerId)} naik tangga ${ev.from}→${ev.to}!${bonus}`);
-      } else if (ev.type === 'SnakeBitten') {
-        const p = playerOf(ev.playerId);
-        const luckyNote = p?.pawn === 'jamur' ? ' (+1★ Aura Hoki!)' : '';
-        if (ev.dodgedByChallenge) {
-          this.pushActivity(`😄 ${nameOf(ev.playerId)} bikin ular ketawa di ${ev.from}!${luckyNote}`);
-        } else if (ev.blockedByShield) {
-          this.pushActivity(`🛡️ ${nameOf(ev.playerId)} tangkis gigitan ular!${luckyNote}`);
-        } else {
-          this.pushActivity(`🐍 ${nameOf(ev.playerId)} tergigit ular ${ev.from}→${ev.to}`);
-        }
-      } else if (ev.type === 'ItemUsed') {
-        this.pushActivity(`Item: ${ev.effectDescription}`);
-      } else if (ev.type === 'ItemGained') {
-        const shopTag = ev.source === 'star_shop' ? ` (-${ev.starsCost ?? STAR_SHOP_COST}★)` : '';
-        this.pushActivity(`${nameOf(ev.playerId)} dapat ${ITEM_META[ev.item].name}${shopTag}`);
-      } else if (ev.type === 'ChallengeResolved' && ev.serverSummaryText.includes('Kombo')) {
-        this.pushActivity(ev.serverSummaryText);
+      const formatted = formatEventFeedText(ev, state, this.lang);
+      if (!formatted) continue;
+
+      let icon: UiIconKind | { item: ItemType } = 'spark';
+      if (ev.type === 'DiceRolled') icon = 'dice';
+      else if (ev.type === 'LadderClimbed') icon = 'ladder';
+      else if (ev.type === 'SnakeBitten') {
+        icon = ev.dodgedByChallenge ? 'spark' : ev.blockedByShield ? { item: 'shield' } : 'snake';
+      } else if (ev.type === 'ItemUsed' || ev.type === 'ItemGained') {
+        icon = { item: ev.item };
+      } else if (ev.type === 'ChallengeResolved') {
+        icon = 'flame';
       } else if (ev.type === 'TurnSkipped') {
-        this.pushActivity(`⏭️ ${nameOf(ev.playerId)} lewat 1 giliran`);
+        icon = 'skip';
       } else if (ev.type === 'GameWon') {
-        this.pushActivity(`🏆 ${nameOf(ev.winnerId)} MENANG!!`);
+        icon = 'trophy';
+      }
+
+      this.pushActivity(icon, formatted.text);
+      if (formatted.toast) {
+        this.showToast(formatted.toast);
       }
     }
   }
@@ -402,8 +440,9 @@ export class DoodleAppShell {
       onChallengeStamp: (success, summary) => {
         this.activeChallengeModal?.cleanup?.();
         cancelAnimationFrame(this.challengeTimerRaf);
+        const localizedSummary = localizeText(summary, this.lang);
         if (this.activeChallengeModal) {
-          this.activeChallengeModal.stamp = { success, summary };
+          this.activeChallengeModal.stamp = { success, summary: localizedSummary };
         } else {
           this.activeChallengeModal = {
             challenge: this.gameState?.activeChallenge ?? {
@@ -411,8 +450,8 @@ export class DoodleAppShell {
               archetype: 'gift_trap',
               mode: 'solo',
               difficulty: 1,
-              title: 'Giliran Bot',
-              flavorText: summary,
+              title: this.lang === 'en' ? 'Bot Turn' : 'Giliran Bot',
+              flavorText: localizedSummary,
               seed: 1,
               params: {},
               reward: { stars: 0, bonusType: 'none' },
@@ -425,7 +464,7 @@ export class DoodleAppShell {
             },
             localParticipantId: '',
             duelPicked: true,
-            stamp: { success, summary },
+            stamp: { success, summary: localizedSummary },
           };
         }
         if (success) this.sound.playChallengeSuccess();
@@ -449,19 +488,32 @@ export class DoodleAppShell {
       },
       onEmote: (playerId, emoteId) => {
         const player = this.gameState?.players.find((p) => p.id === playerId);
-        const em = EMOTE_LIST.find((e) => e.id === emoteId);
-        this.floatingEmoteText = `${player?.name ?? 'Pemain'}: ${em?.icon ?? ''} ${em?.label ?? ''}`;
+        this.floatingEmote = {
+          playerName: player?.name ?? (this.lang === 'en' ? 'Player' : 'Pemain'),
+          emoteId,
+          label: getEmoteLabel(emoteId, this.lang),
+        };
         this.sound.playUiClick();
         if (this.floatingEmoteTimer) clearTimeout(this.floatingEmoteTimer);
         this.renderOverlaysOnly();
         this.floatingEmoteTimer = window.setTimeout(() => {
-          this.floatingEmoteText = null;
+          this.floatingEmote = null;
           this.renderOverlaysOnly();
         }, 2200);
       },
-      onError: (msg) => this.showToast(msg),
+      onError: (msg) => {
+        const localized = localizeText(msg, this.lang);
+        if (this.screen === 'lobby' && !this.roomState) {
+          this.onlineController?.leave();
+          this.screen = 'online_setup';
+          this.render();
+          this.showToast(localized);
+        } else {
+          this.showToast(localized);
+        }
+      },
       onTurnBanner: (playerName) => {
-        this.turnBannerText = `Giliran ${playerName}!`;
+        this.turnBannerText = this.lang === 'en' ? `${playerName}'s Turn!` : `Giliran ${playerName}!`;
         if (this.turnBannerTimer) clearTimeout(this.turnBannerTimer);
         this.renderOverlaysOnly();
         this.turnBannerTimer = window.setTimeout(() => {
@@ -492,6 +544,8 @@ export class DoodleAppShell {
         this.roomState = null;
         this.gameState = null;
         this.activityFeed = [];
+        this.floatingEmote = null;
+        this.hudCompact = false;
         this.scene.setPreferredCameraMode('overview');
         this.screen = 'menu';
         this.render();
@@ -544,13 +598,24 @@ export class DoodleAppShell {
   private renderTransientOverlaysHtml(): string {
     return `
       ${this.turnBannerText ? `<div class="turn-banner">${escapeHtml(this.turnBannerText)}</div>` : ''}
-      ${this.floatingEmoteText ? `<div class="floating-emote">${escapeHtml(this.floatingEmoteText)}</div>` : ''}
+      ${
+        this.floatingEmote
+          ? `<div class="floating-emote">
+               <span class="floating-emote-ico">${renderEmoteSvg(this.floatingEmote.emoteId, 20)}</span>
+               <span><strong>${escapeHtml(this.floatingEmote.playerName)}:</strong> ${escapeHtml(this.floatingEmote.label)}</span>
+             </div>`
+          : ''
+      }
       ${this.toastMessage ? `<div class="floating-emote" style="background:var(--pink)">${escapeHtml(this.toastMessage)}</div>` : ''}
       ${
         this.isAnimating
           ? `<div class="anim-controls-pill">
-               <button class="doodle-btn" id="btn-speed-2x">${this.speed2x ? '⏩ 2x Aktif' : '⏩ Percepat 2x'}</button>
-               <button class="doodle-btn" id="btn-skip-anim">⏭️ Lewati</button>
+               <button class="doodle-btn" id="btn-speed-2x">
+                 <span class="ui-ico-row">${renderUiIconSvg('play', 14)}<span>${this.speed2x ? (this.lang === 'en' ? '2x Active' : '2x Aktif') : this.t('speed2x')}</span></span>
+               </button>
+               <button class="doodle-btn" id="btn-skip-anim">
+                 <span class="ui-ico-row">${renderUiIconSvg('skip', 14)}<span>${this.t('skip')}</span></span>
+               </button>
              </div>`
           : ''
       }
@@ -658,6 +723,7 @@ export class DoodleAppShell {
             playerId: modal.localParticipantId,
             container: body,
             colorblindMode: this.settings.colorblindMode,
+            language: this.settings.language,
             sound: this.sound,
             onSubmit: (sub) => {
               this.controller?.submitChallenge(sub);
@@ -767,7 +833,7 @@ export class DoodleAppShell {
         return;
       }
       el.style.display = 'flex';
-      el.textContent = `⏱️ ${sec}s`;
+      el.innerHTML = `<span class="ui-ico-row">${renderUiIconSvg('timer', 14)}<span>${sec}s</span></span>`;
       el.style.background = sec <= 8 ? 'var(--pink)' : 'rgba(255, 246, 229, 0.95)';
     };
 
@@ -775,63 +841,77 @@ export class DoodleAppShell {
     this.turnCountdownInterval = window.setInterval(updateBadge, 250);
   }
 
+  private renderLangToggleBtnHtml(): string {
+    return `<button class="lang-toggle-btn" id="btn-toggle-lang" title="${this.t('languageSettingLabel')}">${renderUiIconSvg('globe', 13)}<span>${this.settings.language === 'en' ? 'EN' : 'ID'}</span></button>`;
+  }
+
   private renderSplash(): string {
     const saved = OnlineGameController.getSavedSession();
+    const en = this.lang === 'en';
     return `
       <div class="screen-showcase">
         <div class="doodle-card sketchbook-panel menu-box stagger-item">
-          <div class="showcase-badge">${renderUiIconSvg('dice', 18)} Ular Tangga Sketchbook 3D</div>
+          ${this.renderLangToggleBtnHtml()}
+          <div class="showcase-badge">${renderUiIconSvg('dice', 18)} ${en ? '3D Sketchbook Snakes & Ladders' : 'Ular Tangga Sketchbook 3D'}</div>
           <h1 class="game-logo">DodSnake</h1>
-          <p class="subtitle">100 kotak tantangan kilat, studio karakter & aksesoris 3D, Kantin Bintang, dan duel seru bersama teman atau bot!</p>
+          <p class="subtitle">${this.t('tagline')}</p>
           <button class="doodle-btn doodle-btn-primary stagger-item stagger-1" id="btn-splash-play">
-            ${renderUiIconSvg('dice', 22)} Ayo Main!
+            ${renderUiIconSvg('dice', 22)} ${en ? 'Play Now!' : 'Ayo Main!'}
           </button>
           ${
             saved
-              ? `<button class="doodle-btn doodle-btn-mint stagger-item stagger-2" id="btn-splash-reconnect">Sambung Lagi (${saved.roomCode})</button>`
+              ? `<button class="doodle-btn doodle-btn-mint stagger-item stagger-2" id="btn-splash-reconnect">${this.t('rejoinRoom')} (${saved.roomCode})</button>`
               : ''
           }
-          <div class="showcase-hint">Tarik papan 3D untuk mengintip sudut lain • Scroll untuk zoom</div>
+          <div class="showcase-hint">${en ? 'Drag the 3D board to orbit • Scroll to zoom' : 'Tarik papan 3D untuk mengintip sudut lain • Scroll untuk zoom'}</div>
         </div>
       </div>
     `;
   }
 
   private renderMenu(): string {
-    const activeMeta = PAWN_META[this.draftPawn];
-    const accMeta = ACCESSORY_META[this.draftAccessory];
+    const activeMeta = getPawnMeta(this.draftPawn, this.lang);
+    const accMeta = getAccessoryMeta(this.draftAccessory, this.lang);
+    const en = this.lang === 'en';
     return `
       <div class="screen-showcase">
         <div class="doodle-card sketchbook-panel menu-box">
-          <div class="showcase-badge">${renderUiIconSvg('trophy', 16)} Mode Petualangan</div>
-          <h1 class="game-logo">Ular Tangga<br/>Doodle Dash</h1>
-          <p class="subtitle">Pilih mode bermain favoritmu!</p>
-          <button class="doodle-btn menu-profile-card stagger-item" id="btn-menu-studio" title="Buka Studio Karakter & Aksesoris 3D">
-            <span class="menu-profile-avatar">${pawnSvg(this.draftPawn, this.draftColor, 42, this.draftAccessory)}</span>
+          ${this.renderLangToggleBtnHtml()}
+          <div class="showcase-badge">${renderUiIconSvg('trophy', 15)} ${en ? 'Adventure Mode' : 'Mode Petualangan'}</div>
+          <h1 class="game-logo">DodSnake</h1>
+          <p class="subtitle">${en ? 'Pick your favorite way to play!' : 'Pilih mode bermain favoritmu!'}</p>
+          <button class="doodle-btn menu-profile-card stagger-item" id="btn-menu-studio" title="${this.t('studioTitle')}">
+            <span class="menu-profile-avatar">${pawnSvg(this.draftPawn, this.draftColor, 38, this.draftAccessory)}</span>
             <span class="menu-profile-meta">
               <b>${escapeHtml(this.draftName)} • ${escapeHtml(activeMeta.shortName)}</b>
               <small>${escapeHtml(accMeta.name)} • ${escapeHtml(activeMeta.perkTitle)}</small>
             </span>
-            <span class="menu-profile-cta">Ganti Gaya</span>
+            <span class="menu-profile-cta">${en ? 'Customize' : 'Ganti Gaya'}</span>
           </button>
           ${
             this.career.matches > 0
               ? `<div class="career-banner tabular-num">
-                   <span>Main: <b>${this.career.matches}</b></span>
-                   <span>Menang: <b>${this.career.wins}</b></span>
-                   <span>${renderUiIconSvg('star', 15)} <b>${this.career.starsEarned}</b></span>
-                   <span>Tantangan: <b>${this.career.challengesWon}</b></span>
+                   <span>${en ? 'Matches' : 'Main'}: <b>${this.career.matches}</b></span>
+                   <span>${en ? 'Wins' : 'Menang'}: <b>${this.career.wins}</b></span>
+                   <span>${renderUiIconSvg('star', 14)} <b>${this.career.starsEarned}</b></span>
+                   <span>${en ? 'Won' : 'Duel'}: <b>${this.career.challengesWon}</b></span>
                  </div>`
               : ''
           }
-          <button class="doodle-btn doodle-btn-primary stagger-item stagger-1" id="btn-menu-online">Main Online (2–6 Orang)</button>
-          <button class="doodle-btn doodle-btn-mint stagger-item stagger-2" id="btn-menu-local">Main Lokal (1 Perangkat)</button>
-          <button class="doodle-btn doodle-btn-blue stagger-item stagger-3" id="btn-menu-bot">Lawan Bot Cerdas</button>
+          <button class="doodle-btn doodle-btn-primary stagger-item stagger-1" id="btn-menu-online">
+            ${renderUiIconSvg('globe', 18)} ${this.t('playOnline')} (2–6)
+          </button>
+          <button class="doodle-btn doodle-btn-mint stagger-item stagger-2" id="btn-menu-local">
+            ${renderUiIconSvg('users', 18)} ${this.t('playLocal')}
+          </button>
+          <button class="doodle-btn doodle-btn-blue stagger-item stagger-3" id="btn-menu-bot">
+            ${renderUiIconSvg('bot', 18)} ${this.t('playBot')}
+          </button>
           <div style="display:flex;gap:8px" class="stagger-item stagger-4">
-            <button class="doodle-btn" style="flex:1" id="btn-menu-howto">${renderUiIconSvg('help', 18)} Cara Main</button>
-            <button class="doodle-btn" style="flex:1" id="btn-menu-settings">${renderUiIconSvg('settings', 18)} Pengaturan</button>
+            <button class="doodle-btn" style="flex:1" id="btn-menu-howto">${renderUiIconSvg('help', 16)} ${this.t('howToPlay')}</button>
+            <button class="doodle-btn" style="flex:1" id="btn-menu-settings">${renderUiIconSvg('settings', 16)} ${this.t('settings')}</button>
           </div>
-          <div class="showcase-hint">Tarik papan 3D di sebelah kanan untuk lihat diorama</div>
+          <div class="showcase-hint">${en ? 'Drag the 3D board to orbit the diorama' : 'Tarik papan 3D untuk mengintip diorama'}</div>
         </div>
       </div>
     `;
@@ -839,42 +919,53 @@ export class DoodleAppShell {
 
   private renderRulePresetPickerHtml(canEdit: boolean): string {
     const presets: GameModePreset[] = ['klasik', 'kilat', 'pesta_item'];
+    const currentMeta = getModeMeta(this.draftRulePreset, this.lang);
     return `
-      <label><b>Mode Aturan:</b></label>
-      <div style="display:flex;gap:6px">
+      <label><b>${this.t('modeRules')}</b></label>
+      <div style="display:flex;gap:5px">
         ${presets
-          .map(
-            (id) => `
-          <button class="doodle-btn ${this.draftRulePreset === id ? 'doodle-btn-blue' : ''}" style="flex:1;font-size:0.85rem;padding:6px" data-rule-preset="${id}" ${canEdit ? '' : 'disabled'} title="${GAME_MODE_META[id].description}">
-            ${GAME_MODE_META[id].name.split(' ')[0]}
-          </button>`,
-          )
+          .map((id) => {
+            const m = getModeMeta(id, this.lang);
+            return `
+          <button class="doodle-btn ${this.draftRulePreset === id ? 'doodle-btn-blue' : ''}" style="flex:1;min-height:36px;font-size:0.84rem;padding:4px 6px" data-rule-preset="${id}" ${canEdit ? '' : 'disabled'} title="${escapeHtml(m.description)}">
+            ${escapeHtml(m.shortLabel)}
+          </button>`;
+          })
           .join('')}
       </div>
-      <div style="font-size:0.82rem;opacity:0.82;text-align:center">${GAME_MODE_META[this.draftRulePreset].description}</div>
+      <div style="font-size:0.78rem;opacity:0.82;text-align:center;line-height:1.25">${escapeHtml(currentMeta.description)}</div>
     `;
+  }
+
+  private getLiveNameError(name: string): string | null {
+    if (name.trim().length === 0) return null;
+    const res = validateUsername(name);
+    return res.ok ? null : localizeText(res.error ?? 'Nama pemain tidak diizinkan.', this.lang);
   }
 
   private renderCustomizationDraftHtml(): string {
     const pawns = Object.keys(PAWN_META) as PawnId[];
     const accessories = Object.keys(ACCESSORY_META) as AccessoryId[];
     const colors = Object.keys(PLAYER_COLORS) as PlayerColorId[];
-    const selectedMeta = PAWN_META[this.draftPawn];
-    const selectedAcc = ACCESSORY_META[this.draftAccessory];
+    const selectedMeta = getPawnMeta(this.draftPawn, this.lang);
+    const selectedAcc = getAccessoryMeta(this.draftAccessory, this.lang);
+    const nameErr = this.getLiveNameError(this.draftName);
     return `
       <div class="setup-name-row">
-        <input class="doodle-input" id="inp-name" maxlength="18" value="${escapeHtml(this.draftName)}" placeholder="Nama Kamu" />
-        <button class="doodle-btn doodle-btn-blue" id="btn-open-studio-profile" style="white-space:nowrap;padding:8px 12px" title="Buka Pratinjau 3D Karakter & Aksesoris">Studio 3D</button>
+        <input class="doodle-input ${nameErr ? 'is-invalid' : ''}" id="inp-name" maxlength="18" value="${escapeHtml(this.draftName)}" placeholder="${this.t('yourName')}" />
+        <button class="doodle-btn doodle-btn-blue" id="btn-open-studio-profile" style="white-space:nowrap;padding:6px 10px" title="${this.t('studioTitle')}">${this.t('studio3dBtn')}</button>
       </div>
+      <div class="name-error-hint" id="draft-name-error" style="${nameErr ? '' : 'display:none'}">${escapeHtml(nameErr ?? '')}</div>
       <div class="picker-grid">
         ${pawns
-          .map(
-            (p) => `
-          <button class="doodle-btn pawn-chip ${this.draftPawn === p ? 'selected' : ''}" data-pick-pawn="${p}" title="${PAWN_META[p].name} — ${PAWN_META[p].perkTitle}">
-            <span>${pawnSvg(p, this.draftColor, 28, p === this.draftPawn ? this.draftAccessory : 'none')}</span>
-            <span>${PAWN_META[p].shortName}</span>
-          </button>`,
-          )
+          .map((p) => {
+            const pm = getPawnMeta(p, this.lang);
+            return `
+          <button class="doodle-btn pawn-chip ${this.draftPawn === p ? 'selected' : ''}" data-pick-pawn="${p}" title="${escapeHtml(pm.name)} — ${escapeHtml(pm.perkTitle)}">
+            <span>${pawnSvg(p, this.draftColor, 24, p === this.draftPawn ? this.draftAccessory : 'none')}</span>
+            <span>${escapeHtml(pm.shortName)}</span>
+          </button>`;
+          })
           .join('')}
       </div>
       <div class="char-bio-card">
@@ -882,31 +973,32 @@ export class DoodleAppShell {
           <b>${escapeHtml(selectedMeta.name)}</b>
           <span class="char-role-tag">${escapeHtml(selectedMeta.title)}</span>
         </div>
-        <div style="font-size:0.8rem;opacity:0.82">${escapeHtml(selectedMeta.tagline)}</div>
         <div class="char-perk-pill"><b>${escapeHtml(selectedMeta.perkTitle)}:</b> ${escapeHtml(selectedMeta.perkDesc)}</div>
       </div>
       <div class="acc-strip-header">
-        <b>Aksesoris:</b>
+        <b>${this.t('accessories')}</b>
         <span>${escapeHtml(selectedAcc.name)}</span>
       </div>
       <div class="acc-strip">
         ${accessories
-          .map(
-            (acc) => `
-          <button class="doodle-btn acc-chip ${this.draftAccessory === acc ? 'selected' : ''}" data-pick-acc="${acc}" title="${ACCESSORY_META[acc].name}: ${ACCESSORY_META[acc].description}">
-            ${renderAccessorySvg(acc, PLAYER_COLORS[this.draftColor].hex, 24)}
-          </button>`,
-          )
+          .map((acc) => {
+            const am = getAccessoryMeta(acc, this.lang);
+            return `
+          <button class="doodle-btn acc-chip ${this.draftAccessory === acc ? 'selected' : ''}" data-pick-acc="${acc}" title="${escapeHtml(am.name)}: ${escapeHtml(am.description)}">
+            ${renderAccessorySvg(acc, PLAYER_COLORS[this.draftColor].hex, 22)}
+          </button>`;
+          })
           .join('')}
       </div>
       <div class="color-row">
         ${colors
-          .map(
-            (c) => `
-          <button class="color-dot ${this.draftColor === c ? 'selected' : ''}" data-pick-color="${c}" style="background:${PLAYER_COLORS[c].hex}" title="${PLAYER_COLORS[c].name}">
+          .map((c) => {
+            const cname = getColorName(c, this.lang);
+            return `
+          <button class="color-dot ${this.draftColor === c ? 'selected' : ''}" data-pick-color="${c}" style="background:${PLAYER_COLORS[c].hex}" title="${escapeHtml(cname)}">
             ${this.settings.colorblindMode ? this.colorShapes[c] : ''}
-          </button>`,
-          )
+          </button>`;
+          })
           .join('')}
       </div>
     `;
@@ -916,23 +1008,25 @@ export class DoodleAppShell {
     const hasServer = OnlineGameController.hasConfiguredServer();
     return `
       <div class="screen-center">
-        <div class="doodle-card menu-box stagger-item">
-          <h2 style="margin:0;text-align:center">🌐 Main Online</h2>
-          ${
-            !hasServer
-              ? `<div class="online-info-note">
-                   Mode Online membutuhkan server backend aktif (<code>VITE_SERVER_URL</code>). Untuk langsung bermain di browser tanpa server, pilih <b>Main Lokal</b> atau <b>Lawan Bot</b> di menu utama!
-                 </div>`
-              : ''
-          }
-          ${this.renderCustomizationDraftHtml()}
-          <button class="doodle-btn doodle-btn-primary" id="btn-create-room">✨ Buat Room Baru</button>
-          <div style="display:flex;gap:8px;align-items:center">
-            <input class="doodle-input" id="inp-room-code" maxlength="4" placeholder="KODE (4 HURUF)" value="${escapeHtml(this.draftRoomCode)}" style="text-transform:uppercase;flex:1" />
-            <button class="doodle-btn doodle-btn-mint" id="btn-join-room">Gabung</button>
+        <div class="doodle-card menu-box setup-card stagger-item">
+          <h2 class="modal-heading">${renderUiIconSvg('globe', 20)} <span>${this.t('playOnline')}</span></h2>
+          <div class="online-info-note is-ready">
+            <span class="ui-ico-row">${renderUiIconSvg('globe', 15)}<span>${escapeHtml(hasServer ? this.t('serverConnectedNote') : this.t('relayNote'))}</span></span>
           </div>
-          <button class="doodle-btn doodle-btn-blue" id="btn-join-spectator">👀 Masuk Sebagai Penonton</button>
-          <button class="doodle-btn" id="btn-back-menu">⬅️ Kembali</button>
+          <div class="setup-grid">
+            <div class="setup-col">${this.renderCustomizationDraftHtml()}</div>
+            <div class="setup-col setup-col-actions">
+              <div class="setup-action-card">
+                <button class="doodle-btn doodle-btn-primary" id="btn-create-room">${renderUiIconSvg('play', 18)} ${this.t('createRoom')}</button>
+                <div style="display:flex;gap:8px;align-items:center">
+                  <input class="doodle-input" id="inp-room-code" maxlength="4" placeholder="${this.t('roomCodePlaceholder')}" value="${escapeHtml(this.draftRoomCode)}" style="text-transform:uppercase;flex:1" />
+                  <button class="doodle-btn doodle-btn-mint" id="btn-join-room">${this.t('join')}</button>
+                </div>
+                <button class="doodle-btn doodle-btn-blue" id="btn-join-spectator">${renderUiIconSvg('eye', 18)} ${this.t('joinSpectator')}</button>
+              </div>
+              <button class="doodle-btn" id="btn-back-menu">${renderUiIconSvg('back', 16)} ${this.t('back')}</button>
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -941,35 +1035,52 @@ export class DoodleAppShell {
   private renderLocalSetup(): string {
     return `
       <div class="screen-center">
-        <div class="doodle-card menu-box stagger-item">
-          <h2 style="margin:0;text-align:center">📱 Main Lokal (Hot-Seat)</h2>
-          <label><b>Jumlah Pemain (${this.draftLocalCount}):</b></label>
-          <div style="display:flex;gap:6px">
-            ${[2, 3, 4, 5, 6]
-              .map(
-                (n) => `<button class="doodle-btn ${this.draftLocalCount === n ? 'doodle-btn-primary' : ''}" style="flex:1" data-local-count="${n}">${n}</button>`,
-              )
-              .join('')}
+        <div class="doodle-card menu-box setup-card-compact stagger-item">
+          <h2 class="modal-heading">${renderUiIconSvg('users', 20)} <span>${this.t('localHotSeat')}</span></h2>
+          <div class="setup-inline-bar">
+            <div class="setup-inline-group">
+              <label><b>${this.t('playersCount')} (${this.draftLocalCount}):</b></label>
+              <div style="display:flex;gap:5px">
+                ${[2, 3, 4, 5, 6]
+                  .map(
+                    (n) => `<button class="doodle-btn ${this.draftLocalCount === n ? 'doodle-btn-primary' : ''}" style="flex:1;min-height:36px;padding:4px 6px" data-local-count="${n}">${n}</button>`,
+                  )
+                  .join('')}
+              </div>
+            </div>
+            <div class="setup-inline-group">
+              ${this.renderRulePresetPickerHtml(true)}
+            </div>
           </div>
-          ${this.renderRulePresetPickerHtml(true)}
           <div class="lobby-list">
             ${Array.from({ length: this.draftLocalCount }, (_, i) => {
               const p = this.draftLocalPawns[i];
               const c = this.draftLocalColors[i];
               const acc = this.draftLocalAccessories[i];
-              const meta = PAWN_META[p];
-              const accMeta = ACCESSORY_META[acc];
+              const meta = getPawnMeta(p, this.lang);
+              const accMeta = getAccessoryMeta(acc, this.lang);
+              const err = this.getLiveNameError(this.draftLocalNames[i]);
               return `<div class="lobby-row" style="gap:6px;flex-wrap:wrap">
-                <button class="doodle-btn" style="min-height:36px;padding:4px 8px" data-local-pawn="${i}" title="Ganti Karakter (${meta.name})">${pawnSvg(p, c, 26, acc)}</button>
-                <button class="doodle-btn" style="min-height:36px;width:36px;padding:0;background:${PLAYER_COLORS[c].hex}" data-local-color="${i}" title="Ganti Warna">${this.settings.colorblindMode ? this.colorShapes[c] : ''}</button>
-                <input class="doodle-input" style="min-height:36px;padding:4px 10px;flex:1;min-width:95px" data-local-name="${i}" value="${escapeHtml(this.draftLocalNames[i])}" maxlength="16" />
-                <button class="doodle-btn doodle-btn-blue" style="min-height:36px;padding:4px 10px;font-size:0.8rem" data-local-studio="${i}" title="Pilih Karakter & Aksesoris 3D">Gaya</button>
-                <div style="width:100%;font-size:0.74rem;opacity:0.82;padding-left:4px"><b>${escapeHtml(meta.name)}</b> • ${escapeHtml(accMeta.shortName)} • ${escapeHtml(meta.perkTitle)}: ${escapeHtml(meta.perkDesc)}</div>
+                <button class="doodle-btn" style="min-height:34px;padding:3px 7px" data-local-pawn="${i}" title="${escapeHtml(meta.name)}">${pawnSvg(p, c, 24, acc)}</button>
+                <button class="doodle-btn" style="min-height:34px;width:34px;padding:0;background:${PLAYER_COLORS[c].hex}" data-local-color="${i}" title="${escapeHtml(getColorName(c, this.lang))}">${this.settings.colorblindMode ? this.colorShapes[c] : ''}</button>
+                <input class="doodle-input ${err ? 'is-invalid' : ''}" style="min-height:34px;padding:4px 10px;flex:1;min-width:95px" data-local-name="${i}" value="${escapeHtml(this.draftLocalNames[i])}" maxlength="18" />
+                <button class="doodle-btn doodle-btn-blue" style="min-height:34px;padding:3px 10px;font-size:0.8rem" data-local-studio="${i}" title="${this.t('studioTitle')}">${this.t('styleBtn')}</button>
+                <div class="lobby-submeta"><b>${escapeHtml(meta.shortName)}</b> • ${escapeHtml(accMeta.shortName)} • ${escapeHtml(meta.perkTitle)}</div>
               </div>`;
             }).join('')}
           </div>
-          <button class="doodle-btn doodle-btn-primary" id="btn-start-local">🎲 Mulai Main!</button>
-          <button class="doodle-btn" id="btn-back-menu">⬅️ Kembali</button>
+          ${(() => {
+            const firstErrIdx = Array.from({ length: this.draftLocalCount }, (_, i) => i).find(
+              (i) => this.getLiveNameError(this.draftLocalNames[i]) !== null,
+            );
+            const firstErr =
+              firstErrIdx !== undefined ? this.getLiveNameError(this.draftLocalNames[firstErrIdx]) : null;
+            return `<div class="name-error-hint" id="local-name-error" style="${firstErr ? '' : 'display:none'}">${firstErr ? `${this.lang === 'en' ? 'Player' : 'Pemain'} ${firstErrIdx! + 1}: ${escapeHtml(firstErr)}` : ''}</div>`;
+          })()}
+          <div class="setup-footer-row">
+            <button class="doodle-btn" id="btn-back-menu">${renderUiIconSvg('back', 16)} ${this.t('back')}</button>
+            <button class="doodle-btn doodle-btn-primary" style="flex:2" id="btn-start-local">${renderUiIconSvg('dice', 18)} ${this.t('startGame')}</button>
+          </div>
         </div>
       </div>
     `;
@@ -978,24 +1089,32 @@ export class DoodleAppShell {
   private renderBotSetup(): string {
     return `
       <div class="screen-center">
-        <div class="doodle-card menu-box stagger-item">
-          <h2 style="margin:0;text-align:center">🤖 Lawan Bot</h2>
-          ${this.renderCustomizationDraftHtml()}
-          <label><b>Jumlah Lawan Bot:</b></label>
-          <div style="display:flex;gap:6px">
-            ${[1, 2, 3, 4, 5]
-              .map((n) => `<button class="doodle-btn ${this.draftBotCount === n ? 'doodle-btn-primary' : ''}" style="flex:1" data-bot-count="${n}">${n}</button>`)
-              .join('')}
+        <div class="doodle-card menu-box setup-card stagger-item">
+          <h2 class="modal-heading">${renderUiIconSvg('bot', 20)} <span>${this.t('vsBotTitle')}</span></h2>
+          <div class="setup-grid">
+            <div class="setup-col">${this.renderCustomizationDraftHtml()}</div>
+            <div class="setup-col setup-col-actions">
+              <div class="setup-action-card">
+                <label><b>${this.t('botCount')}</b></label>
+                <div style="display:flex;gap:5px">
+                  ${[1, 2, 3, 4, 5]
+                    .map((n) => `<button class="doodle-btn ${this.draftBotCount === n ? 'doodle-btn-primary' : ''}" style="flex:1;min-height:36px;padding:4px" data-bot-count="${n}">${n}</button>`)
+                    .join('')}
+                </div>
+                <label><b>${this.t('botDiff')}</b></label>
+                <div style="display:flex;gap:5px">
+                  ${(['santai', 'pintar', 'juara'] as BotDifficulty[])
+                    .map((d) => `<button class="doodle-btn ${this.draftBotDiff === d ? 'doodle-btn-mint' : ''}" style="flex:1;min-height:36px;padding:4px 6px;font-size:0.82rem" data-bot-diff="${d}">${getBotDiffLabel(d, this.lang).toUpperCase()}</button>`)
+                    .join('')}
+                </div>
+                ${this.renderRulePresetPickerHtml(true)}
+              </div>
+              <div class="setup-footer-row">
+                <button class="doodle-btn" id="btn-back-menu">${renderUiIconSvg('back', 16)} ${this.t('back')}</button>
+                <button class="doodle-btn doodle-btn-primary" style="flex:2" id="btn-start-bot">${renderUiIconSvg('play', 18)} ${this.t('startMatch')}</button>
+              </div>
+            </div>
           </div>
-          <label><b>Tingkat Kepintaran Bot:</b></label>
-          <div style="display:flex;gap:6px">
-            ${(['santai', 'pintar', 'juara'] as BotDifficulty[])
-              .map((d) => `<button class="doodle-btn ${this.draftBotDiff === d ? 'doodle-btn-mint' : ''}" style="flex:1" data-bot-diff="${d}">${d.toUpperCase()}</button>`)
-              .join('')}
-          </div>
-          ${this.renderRulePresetPickerHtml(true)}
-          <button class="doodle-btn doodle-btn-primary" id="btn-start-bot">🚀 Mulai Lawan Bot!</button>
-          <button class="doodle-btn" id="btn-back-menu">⬅️ Kembali</button>
         </div>
       </div>
     `;
@@ -1004,7 +1123,7 @@ export class DoodleAppShell {
   private renderLobby(): string {
     const room = this.roomState;
     if (!room) {
-      return `<div class="screen-center"><div class="doodle-card menu-box"><p>Menghubungkan ke room...</p><button class="doodle-btn" id="btn-leave-lobby">Batal</button></div></div>`;
+      return `<div class="screen-center"><div class="doodle-card menu-box"><p>${this.t('connectingRoom')}</p><button class="doodle-btn" id="btn-leave-lobby">${this.t('cancel')}</button></div></div>`;
     }
     const myId = this.onlineController?.getLocalPlayerId();
     const isHost = myId === room.hostId;
@@ -1012,38 +1131,41 @@ export class DoodleAppShell {
 
     return `
       <div class="screen-center">
-        <div class="doodle-card menu-box stagger-item">
+        <div class="doodle-card menu-box setup-card-compact stagger-item">
           <div style="display:flex;justify-content:space-between;align-items:center">
-            <h2 style="margin:0">Lobby Room</h2>
-            <span style="font-size:0.9rem">👀 Penonton: ${room.spectatorCount}</span>
+            <h2 style="margin:0">${this.t('lobbyTitle')}</h2>
+            <span class="ui-ico-row" style="font-size:0.88rem">${renderUiIconSvg('eye', 16)} <span>${this.t('spectators')} ${room.spectatorCount}</span></span>
           </div>
           <div style="display:flex;gap:8px;align-items:center;justify-content:center">
             <div class="room-badge" style="margin:0">${room.roomCode}</div>
-            <button class="doodle-btn doodle-btn-mint" id="btn-copy-invite" title="Salin link undangan">🔗 Salin</button>
+            <button class="doodle-btn doodle-btn-mint" id="btn-copy-invite" title="${this.t('copyInvite')}">${renderUiIconSvg('link', 16)} ${this.t('copyInvite')}</button>
           </div>
           ${this.renderRulePresetPickerHtml(isHost)}
           <div class="lobby-list">
             ${room.players
-              .map(
-                (p) => `
+              .map((p) => {
+                const pMeta = getPawnMeta(p.pawn, this.lang);
+                const accMeta = p.accessory && p.accessory !== 'none' ? getAccessoryMeta(p.accessory, this.lang) : null;
+                return `
               <div class="lobby-row">
                 <div style="display:flex;align-items:center;gap:6px">
-                  <span style="width:14px;height:14px;border-radius:50%;background:${PLAYER_COLORS[p.color].hex};border:2px solid var(--ink);display:inline-block"></span>
-                  <span>${pawnSvg(p.pawn, p.color, 26, p.accessory ?? 'none')}</span>
+                  <span style="width:12px;height:12px;border-radius:50%;background:${PLAYER_COLORS[p.color].hex};border:2px solid var(--ink);display:inline-block"></span>
+                  ${this.settings.colorblindMode ? `<span class="cb-shape">${this.colorShapes[p.color]}</span>` : ''}
+                  <span>${pawnSvg(p.pawn, p.color, 24, p.accessory ?? 'none')}</span>
                   <b>${escapeHtml(p.name)}</b>
-                  <span style="font-size:0.75rem;opacity:0.72">(${escapeHtml(PAWN_META[p.pawn].shortName)}${p.accessory && p.accessory !== 'none' ? ` • ${escapeHtml(ACCESSORY_META[p.accessory].shortName)}` : ''})</span>
-                  ${p.id === room.hostId ? renderUiIconSvg('trophy', 15) : ''}
-                  ${p.isBot ? '<span style="font-size:0.75rem;padding:0 5px;border:1.5px solid var(--ink);border-radius:6px;background:var(--blue)">BOT</span>' : ''}
+                  <span style="font-size:0.74rem;opacity:0.72">(${escapeHtml(pMeta.shortName)}${accMeta ? ` • ${escapeHtml(accMeta.shortName)}` : ''})</span>
+                  ${p.id === room.hostId ? renderUiIconSvg('trophy', 14) : ''}
+                  ${p.isBot ? '<span style="font-size:0.72rem;padding:0 5px;border:1.5px solid var(--ink);border-radius:6px;background:var(--blue)">BOT</span>' : ''}
                 </div>
                 <div style="display:flex;align-items:center;gap:6px">
-                  ${p.id === myId ? `<button class="doodle-btn doodle-btn-blue" style="min-height:32px;padding:3px 10px;font-size:0.8rem" id="btn-lobby-studio" title="Pilih Karakter & Aksesoris">Gaya</button>` : ''}
-                  ${isHost && p.isBot ? `<button class="doodle-btn doodle-btn-pink" style="min-height:30px;padding:2px 8px;font-size:0.8rem" data-remove-bot="${p.id}" title="Hapus Bot">✕</button>` : ''}
-                  <span style="padding:3px 10px;border-radius:10px;border:2px solid var(--ink);background:${p.ready ? 'var(--mint)' : '#EEE'}">
-                    ${p.ready ? 'Siap!' : 'Belum'}
+                  ${p.id === myId ? `<button class="doodle-btn doodle-btn-blue" style="min-height:30px;padding:3px 9px;font-size:0.78rem" id="btn-lobby-studio" title="${this.t('studioTitle')}">${this.t('styleBtn')}</button>` : ''}
+                  ${isHost && p.isBot ? `<button class="doodle-btn doodle-btn-pink" style="min-height:28px;padding:2px 8px;font-size:0.78rem" data-remove-bot="${p.id}" title="Remove Bot">✕</button>` : ''}
+                  <span class="lobby-ready-pill ${p.ready ? 'is-ready' : 'is-wait'}">
+                    ${p.ready ? this.t('readyTag') : this.t('notReadyTag')}
                   </span>
                 </div>
-              </div>`,
-              )
+              </div>`;
+              })
               .join('')}
           </div>
           ${
@@ -1052,20 +1174,20 @@ export class DoodleAppShell {
                   ${
                     isHost
                       ? `<div style="display:flex;gap:6px;align-items:center">
-                           <select class="doodle-input" id="sel-lobby-bot-diff" style="min-height:40px;padding:4px 8px;width:120px">
-                             <option value="santai" ${this.draftLobbyBotDiff === 'santai' ? 'selected' : ''}>Bot Santai</option>
-                             <option value="pintar" ${this.draftLobbyBotDiff === 'pintar' ? 'selected' : ''}>Bot Pintar</option>
-                             <option value="juara" ${this.draftLobbyBotDiff === 'juara' ? 'selected' : ''}>Bot Juara</option>
+                           <select class="doodle-input" id="sel-lobby-bot-diff" style="min-height:38px;padding:4px 8px;width:118px">
+                             <option value="santai" ${this.draftLobbyBotDiff === 'santai' ? 'selected' : ''}>Bot ${getBotDiffLabel('santai', this.lang)}</option>
+                             <option value="pintar" ${this.draftLobbyBotDiff === 'pintar' ? 'selected' : ''}>Bot ${getBotDiffLabel('pintar', this.lang)}</option>
+                             <option value="juara" ${this.draftLobbyBotDiff === 'juara' ? 'selected' : ''}>Bot ${getBotDiffLabel('juara', this.lang)}</option>
                            </select>
-                           <button class="doodle-btn doodle-btn-blue" style="flex:1" id="btn-lobby-add-bot" ${room.players.length >= 6 ? 'disabled' : ''}>+ Bot</button>
-                           <button class="doodle-btn doodle-btn-primary" style="flex:1" id="btn-lobby-start" ${room.players.length < 2 ? 'disabled' : ''}>Mulai!</button>
+                           <button class="doodle-btn doodle-btn-blue" style="flex:1" id="btn-lobby-add-bot" ${room.players.length >= 6 ? 'disabled' : ''}>${this.t('hostAddBot')}</button>
+                           <button class="doodle-btn doodle-btn-primary" style="flex:1" id="btn-lobby-start" ${room.players.length < 2 ? 'disabled' : ''}>${this.t('startMatch')}</button>
                          </div>`
-                      : `<button class="doodle-btn ${me.ready ? 'doodle-btn-mint' : 'doodle-btn-primary'}" style="flex:1" id="btn-lobby-ready">${me.ready ? '✅ Sudah Siap' : '✋ Tekan Siap!'}</button>`
+                      : `<button class="doodle-btn ${me.ready ? 'doodle-btn-mint' : 'doodle-btn-primary'}" style="flex:1" id="btn-lobby-ready">${me.ready ? `${renderUiIconSvg('check', 16)} ${this.t('readyDone')}` : `${renderUiIconSvg('play', 16)} ${this.t('pressReady')}`}</button>`
                   }
                  </div>`
-              : `<div class="subtitle">Kamu masuk sebagai penonton. Menunggu host memulai...</div>`
+              : `<div class="subtitle">${this.t('spectatorWait')}</div>`
           }
-          <button class="doodle-btn" id="btn-leave-lobby">Keluar Room</button>
+          <button class="doodle-btn" id="btn-leave-lobby">${this.t('leaveRoom')}</button>
         </div>
       </div>
     `;
@@ -1088,9 +1210,10 @@ export class DoodleAppShell {
         me.items.length < 2,
     );
 
+    const en = this.lang === 'en';
     const activeBuffs: string[] = [];
-    if (me?.activeGoldenDice) activeBuffs.push('Dadu Emas');
-    if (me?.activeBrake) activeBuffs.push('Rem <=3');
+    if (me?.activeGoldenDice) activeBuffs.push(en ? 'Golden Die' : 'Dadu Emas');
+    if (me?.activeBrake) activeBuffs.push(en ? 'Brake ≤3' : 'Rem ≤3');
     if (me?.activeTurbo) activeBuffs.push('Turbo +2');
 
     return `
@@ -1101,19 +1224,20 @@ export class DoodleAppShell {
               const p = state.players.find((x) => x.id === pid)!;
               const isAct = pid === activeId;
               const streak = p.challengeStreak ?? 0;
-              const meta = PAWN_META[p.pawn];
+              const meta = getPawnMeta(p.pawn, this.lang);
+              const cname = getColorName(p.color, this.lang);
               return `
-                <div class="player-pill player-pill-clickable ${isAct ? 'active' : ''} ${!p.connected ? 'disconnected' : ''}" data-focus-player="${p.id}" style="border-left: 8px solid ${PLAYER_COLORS[p.color].hex}" title="${escapeHtml(meta.name)} — ${escapeHtml(meta.perkTitle)}: ${escapeHtml(meta.perkDesc)} (Klik untuk sorot pion)">
-                  ${this.settings.colorblindMode ? `<span class="cb-shape" title="${PLAYER_COLORS[p.color].name}">${this.colorShapes[p.color]}</span>` : ''}
+                <div class="player-pill player-pill-clickable ${isAct ? 'active' : ''} ${!p.connected ? 'disconnected' : ''}" data-focus-player="${p.id}" style="border-left: 8px solid ${PLAYER_COLORS[p.color].hex}" title="${escapeHtml(meta.name)} — ${escapeHtml(meta.perkTitle)}: ${escapeHtml(meta.perkDesc)}">
+                  ${this.settings.colorblindMode ? `<span class="cb-shape" title="${escapeHtml(cname)}">${this.colorShapes[p.color]}</span>` : ''}
                   <span>${pawnSvg(p.pawn, p.color, 26, p.accessory ?? 'none')}</span>
                   <div>
                     <div style="display:flex;align-items:center;gap:4px">
                       <b>${escapeHtml(p.name)}</b>
                       ${p.shields > 0 ? renderItemSvg('shield', 15) : ''}
-                      ${streak >= 2 ? `<span class="streak-badge" title="Kombo Tantangan!">${renderUiIconSvg('flame', 13)}x${streak}</span>` : ''}
+                      ${streak >= 2 ? `<span class="streak-badge" title="${en ? 'Challenge Streak!' : 'Kombo Tantangan!'}">${renderUiIconSvg('flame', 13)}x${streak}</span>` : ''}
                     </div>
                     <div class="tabular-num" style="font-size:0.78rem;display:flex;align-items:center;gap:4px">
-                      <span>Kt.${p.position}</span> • <span data-star-pid="${p.id}">★${this.getDisplayedStars(p.id, p.stars)}</span> • <span style="opacity:0.75">${escapeHtml(meta.shortName)}</span>
+                      <span>${this.t('tileShort')}${p.position}</span> • <span data-star-pid="${p.id}">★${this.getDisplayedStars(p.id, p.stars)}</span> • <span style="opacity:0.75">${escapeHtml(meta.shortName)}</span>
                     </div>
                   </div>
                 </div>
@@ -1123,23 +1247,30 @@ export class DoodleAppShell {
         </div>
         <div class="hud-actions-top">
           <div class="player-pill tabular-num" id="hud-turn-timer" style="display:none;font-weight:700"></div>
-          <button class="doodle-btn" id="btn-hud-cam" title="${camOverview ? 'Mode Ikuti Pion' : 'Mode Lihat Penuh'}">${renderUiIconSvg('camera', 18)}</button>
-          <button class="doodle-btn" id="btn-hud-reset-cam" title="Kembalikan Sudut Kamera">Reset</button>
-          <button class="doodle-btn" id="btn-hud-music" title="Musik Latar">${renderUiIconSvg(this.settings.musicEnabled ? 'sound' : 'muted', 18)}</button>
-          <button class="doodle-btn" id="btn-hud-mute" title="Suara Efek">${this.settings.muted ? 'Mute' : 'SFX'}</button>
-          <button class="doodle-btn" id="btn-hud-settings" title="Pengaturan">${renderUiIconSvg('settings', 18)}</button>
-          <button class="doodle-btn doodle-btn-pink" id="btn-hud-leave" title="Keluar Room">Keluar</button>
+          <button class="doodle-btn hud-icon-btn" id="btn-hud-cam" title="${camOverview ? (en ? 'Follow Pawn' : 'Mode Ikuti Pion') : (en ? 'Overview Camera' : 'Mode Lihat Penuh')}">${renderUiIconSvg('camera', 16)}</button>
+          <button class="doodle-btn hud-icon-btn" id="btn-hud-reset-cam" title="${en ? 'Reset Camera' : 'Kembalikan Sudut Kamera'}">${renderUiIconSvg('reset', 16)}</button>
+          <button class="doodle-btn hud-icon-btn ${this.hudCompact ? 'doodle-btn-blue' : ''}" id="btn-hud-peek" title="${this.hudCompact ? (en ? 'Show HUD Overlay' : 'Tampilkan Overlay HUD') : (en ? 'Peek Board' : 'Intip Papan Penuh')}">${renderUiIconSvg('eye', 16)}</button>
+          <button class="doodle-btn hud-icon-btn ${!this.settings.musicEnabled ? 'hud-btn-off' : ''}" id="btn-hud-music" title="${this.t('musicLabel')}">${renderUiIconSvg('music', 16)}</button>
+          <button class="doodle-btn hud-icon-btn ${this.settings.muted ? 'hud-btn-off' : ''}" id="btn-hud-mute" title="${this.t('muteLabel')}">${renderUiIconSvg(this.settings.muted ? 'muted' : 'sound', 16)}</button>
+          <button class="doodle-btn hud-icon-btn" id="btn-hud-settings" title="${this.t('settingsTitle')}">${renderUiIconSvg('settings', 16)}</button>
+          <button class="doodle-btn doodle-btn-pink hud-leave-btn" id="btn-hud-leave" title="${this.t('leaveRoom')}">${renderUiIconSvg('leave', 15)}<span class="hud-btn-label">${en ? 'Leave' : 'Keluar'}</span></button>
         </div>
       </div>
 
       ${
-        this.activityFeed.length > 0
+        !this.hudCompact && this.activityFeed.length > 0
           ? `<div class="activity-feed-dock">
-               <button class="doodle-btn" style="min-height:32px;padding:3px 10px;font-size:0.78rem" id="btn-toggle-feed">${this.feedOpen ? 'Sembunyikan Log' : `Log (${this.activityFeed.length})`}</button>
+               <button class="doodle-btn" style="min-height:30px;padding:3px 9px;font-size:0.75rem" id="btn-toggle-feed">${this.feedOpen ? this.t('hideLog') : `${this.t('logCount')} (${this.activityFeed.length})`}</button>
                ${
                  this.feedOpen
-                   ? `<div class="activity-feed" aria-label="Catatan Kejadian">
-                        ${this.activityFeed.slice(0, 6).map((line) => `<div class="activity-feed-item">${escapeHtml(line)}</div>`).join('')}
+                   ? `<div class="activity-feed" aria-label="Activity Feed">
+                        ${this.activityFeed
+                          .slice(0, 5)
+                          .map(
+                            (entry) =>
+                              `<div class="activity-feed-item"><span class="hud-feed-icon">${this.renderActivityIcon(entry.icon, 13)}</span><span>${escapeHtml(entry.text)}</span></div>`,
+                          )
+                          .join('')}
                       </div>`
                    : ''
                }
@@ -1147,48 +1278,55 @@ export class DoodleAppShell {
           : ''
       }
 
-      <div class="emote-dock">
-        ${
-          this.emoteTrayOpen
-            ? `<div class="doodle-card emote-tray">
-                ${EMOTE_LIST.map((em) => `<button class="doodle-btn" data-send-emote="${em.id}" title="${em.label}">${em.icon}</button>`).join('')}
-               </div>`
-            : ''
-        }
-        <button class="doodle-btn doodle-btn-blue" id="btn-toggle-emote">Stiker</button>
-      </div>
+      ${
+        !this.hudCompact
+          ? `<div class="emote-dock">
+               ${
+                 this.emoteTrayOpen
+                   ? `<div class="doodle-card emote-tray">
+                       ${EMOTE_LIST.map((em) => `<button class="doodle-btn emote-choice-btn" data-send-emote="${em.id}" title="${escapeHtml(getEmoteLabel(em.id, this.lang))}">${renderEmoteSvg(em.id, 22)}</button>`).join('')}
+                      </div>`
+                   : ''
+               }
+               <button class="doodle-btn doodle-btn-blue" id="btn-toggle-emote">
+                 <span class="ui-ico-row">${renderUiIconSvg('sticker', 16)}<span>${this.t('sticker')}</span></span>
+               </button>
+             </div>`
+          : ''
+      }
 
       <div class="hud-bottom">
         ${
-          isMyTurn && state.phase === 'TURN_BEGIN' && me
+          !this.hudCompact && isMyTurn && state.phase === 'TURN_BEGIN' && me
             ? `<div class="hud-turn-helper tabular-num">
-                 <span><b>Giliranmu!</b> Kt.${me.position}/100</span>
-                 <span class="helper-dot-row"><span class="preview-dot is-ladder"></span>Tangga</span>
-                 <span class="helper-dot-row"><span class="preview-dot is-snake"></span>Ular</span>
-                 <span class="helper-key-hint">[Spasi]</span>
+                 <span><b>${this.t('turnYou')}</b> ${this.t('tileShort')}${me.position}/100</span>
+                 <span class="helper-dot-row"><span class="preview-dot is-ladder"></span>${en ? 'Ladder' : 'Tangga'}</span>
+                 <span class="helper-dot-row"><span class="preview-dot is-snake"></span>${en ? 'Snake' : 'Ular'}</span>
+                 <span class="helper-key-hint">${en ? '[Space]' : '[Spasi]'}</span>
                </div>`
             : ''
         }
-        ${activeBuffs.length > 0 ? `<div style="margin-bottom:4px;font-size:0.82rem;font-weight:700;background:rgba(255,255,255,0.92);padding:2px 10px;border-radius:999px;border:2px solid var(--ink)">Aktif: ${activeBuffs.join(' • ')}</div>` : ''}
+        ${!this.hudCompact && activeBuffs.length > 0 ? `<div class="hud-buffs-pill">${en ? 'Active' : 'Aktif'}: ${activeBuffs.join(' • ')}</div>` : ''}
         <div class="hud-bottom-bar">
           <div class="item-slots">
             ${[0, 1]
               .map((idx) => {
                 const item = me?.items[idx];
                 if (!item) {
-                  return `<button class="doodle-btn item-slot-btn" disabled title="Slot Item Kosong">—</button>`;
+                  return `<button class="doodle-btn item-slot-btn" disabled title="${this.t('empty')}">—</button>`;
                 }
-                return `<button class="doodle-btn doodle-btn-mint item-slot-btn" data-use-item="${idx}" ${!isMyTurn || state.phase !== 'TURN_BEGIN' ? 'disabled' : ''} title="${ITEM_META[item].name}: ${ITEM_META[item].description}">
+                const im = getItemMeta(item, this.lang);
+                return `<button class="doodle-btn doodle-btn-mint item-slot-btn" data-use-item="${idx}" ${!isMyTurn || state.phase !== 'TURN_BEGIN' ? 'disabled' : ''} title="${escapeHtml(im.name)}: ${escapeHtml(im.description)}">
                   ${renderItemSvg(item, 22)}
-                  <span>${ITEM_META[item].name.split(' ')[0]}</span>
+                  <span>${escapeHtml(im.name.split(' ')[0])}</span>
                 </button>`;
               })
               .join('')}
             ${
               me && !this.controller?.isSpectator()
-                ? `<button class="doodle-btn shop-buy-btn" id="btn-buy-star-item" ${!canBuyStarItem ? 'disabled' : ''} title="Kantin Bintang: Beli 1 item acak seharga ${myShopCost}★${me.pawn === 'dino' ? ' (Diskon VIP Roro!)' : ''} (maksimal 2 slot)">
+                ? `<button class="doodle-btn shop-buy-btn" id="btn-buy-star-item" ${!canBuyStarItem ? 'disabled' : ''} title="${escapeHtml(this.t('buyTooltip'))} (★${myShopCost})">
                      ${renderUiIconSvg('shop', 18)}
-                     <span class="tabular-num">${me.items.length >= 2 ? 'Penuh' : `Beli ★${myShopCost}`}</span>
+                     <span class="tabular-num">${me.items.length >= 2 ? this.t('bagFull') : `${en ? 'Buy' : 'Beli'} ★${myShopCost}`}</span>
                    </button>`
                 : ''
             }
@@ -1214,16 +1352,18 @@ export class DoodleAppShell {
                             ? 'is-boss'
                             : '';
                       const hintTxt = prev.ladderTo
-                        ? `Kt.${prev.to} → Tangga ${prev.ladderTo}`
+                        ? `${this.t('tileShort')}${prev.to} → ${en ? 'Ladder' : 'Tangga'} ${prev.ladderTo}`
                         : prev.snakeTo
-                          ? `Kt.${prev.to} → Ular ${prev.snakeTo}`
+                          ? `${this.t('tileShort')}${prev.to} → ${en ? 'Snake' : 'Ular'} ${prev.snakeTo}`
                           : prev.to === 100
-                            ? 'Kt.100 Menang!'
+                            ? en
+                              ? 'Tile 100 Win!'
+                              : 'Kt.100 Menang!'
                             : prev.bounced
-                              ? `Pantul Kt.${prev.to}`
-                              : `→ Kt.${prev.to}`;
+                              ? `${en ? 'Bounce' : 'Pantul'} ${this.t('tileShort')}${prev.to}`
+                              : `→ ${this.t('tileShort')}${prev.to}`;
                       return `<button class="doodle-btn dice-pick-btn" data-pick-dice="${idx}">
-                        <span>Pilih ${val}</span>
+                        <span>${en ? 'Pick' : 'Pilih'} ${val}</span>
                         <span class="dice-pick-hint ${hintCls} tabular-num">${hintTxt}</span>
                       </button>`;
                     })
@@ -1232,10 +1372,10 @@ export class DoodleAppShell {
               : `<button class="doodle-btn roll-btn ${isMyTurn && state.phase === 'TURN_BEGIN' ? 'is-your-turn' : ''}" id="btn-roll-dice" ${!isMyTurn || state.phase !== 'TURN_BEGIN' ? 'disabled' : ''}>
                   ${
                     this.controller?.isSpectator()
-                      ? 'Mode Penonton'
+                      ? this.t('spectatorMode')
                       : isMyTurn
-                        ? `${renderUiIconSvg('dice', 24)} LEMPAR DADU!`
-                        : `Giliran ${escapeHtml(state.players.find((p) => p.id === activeId)?.name ?? '')}`
+                        ? `${renderUiIconSvg('dice', 24)} ${this.t('rollDice')}!`
+                        : `${this.t('turnOther')} ${escapeHtml(state.players.find((p) => p.id === activeId)?.name ?? '')}`
                   }
                  </button>`
           }
@@ -1248,18 +1388,32 @@ export class DoodleAppShell {
     const modal = this.activeChallengeModal;
     if (!modal) return '';
     const ch = modal.challenge;
-    const spec = ARCHETYPE_REGISTRY[ch.archetype];
+    const en = this.lang === 'en';
+    const archMeta = getArchetypeMeta(ch.archetype, this.lang);
+    const giftLoc =
+      ch.archetype === 'gift_trap'
+        ? getLocalizedGiftVariant(
+            String(ch.params?.variantId ?? ''),
+            ch.title,
+            ch.flavorText,
+            this.lang,
+          )
+        : null;
+    const displayTitle = giftLoc ? giftLoc.title : archMeta.name;
+    const displayFlavor = giftLoc ? giftLoc.flavorText : archMeta.instruction;
     const owner = this.gameState?.players.find((p) => p.id === modal.localParticipantId);
     const others = (this.gameState?.players ?? []).filter((p) => p.id !== ch.ownerPlayerId);
+    const ladder = BOARD_LAYOUT.ladders.find((l) => l.from === ch.tileId);
+    const snake = BOARD_LAYOUT.snakes.find((s) => s.from === ch.tileId);
 
     return `
       <div class="challenge-backdrop">
         <div class="doodle-card challenge-modal">
           <div class="challenge-header">
             <div>
-              <div style="font-size:0.82rem;opacity:0.8">Kotak ${ch.tileId} • ${spec.displayName} ${ch.mode === 'all_play' ? '• SEMUA MAIN!' : ch.mode === 'duel' ? '• DUEL 1v1' : ''}</div>
-              <h3 style="margin:2px 0">${escapeHtml(ch.title)}</h3>
-              ${owner ? `<div style="font-size:0.85rem;display:inline-flex;align-items:center;gap:5px">${pawnSvg(owner.pawn, owner.color, 20, owner.accessory ?? 'none')} <b>${escapeHtml(owner.name)}</b> <span style="opacity:0.75">• ${escapeHtml(PAWN_META[owner.pawn].shortName)}</span></div>` : ''}
+              <div style="font-size:0.82rem;opacity:0.8">${this.t('tileLabel')} ${ch.tileId} • ${escapeHtml(archMeta.name)} ${ch.mode === 'all_play' ? (en ? '• EVERYONE PLAYS!' : '• SEMUA MAIN!') : ch.mode === 'duel' ? '• DUEL 1v1' : ''}</div>
+              <h3 style="margin:2px 0">${escapeHtml(displayTitle)}</h3>
+              ${owner ? `<div style="font-size:0.85rem;display:inline-flex;align-items:center;gap:5px">${pawnSvg(owner.pawn, owner.color, 20, owner.accessory ?? 'none')} <b>${escapeHtml(owner.name)}</b> <span style="opacity:0.75">• ${escapeHtml(getPawnMeta(owner.pawn, this.lang).shortName)}</span></div>` : ''}
             </div>
             <div class="challenge-timer-ring">
               <svg width="52" height="52">
@@ -1269,14 +1423,16 @@ export class DoodleAppShell {
               <span id="timer-sec-text">${Math.ceil(ch.durationMs / 1000)}</span>
             </div>
           </div>
-          <p style="margin:4px 0 12px;font-size:0.95rem">${escapeHtml(ch.flavorText)}</p>
+          ${ladder ? `<div class="challenge-junction-pill is-ladder">${renderUiIconSvg('ladder', 15)}<span>${escapeHtml(this.t('ladderTileBanner', { from: ladder.from, to: ladder.to }))}</span></div>` : ''}
+          ${snake ? `<div class="challenge-junction-pill is-snake">${renderUiIconSvg('snake', 15)}<span>${escapeHtml(this.t('snakeTileBanner', { from: snake.from, to: snake.to }))}</span></div>` : ''}
+          <p style="margin:6px 0 12px;font-size:0.95rem">${escapeHtml(displayFlavor)}</p>
           ${
             !modal.duelPicked
               ? `<div class="mg-wrap">
-                  <div class="mg-sub">Pilih siapa lawan duelmu!</div>
+                  <div class="mg-sub">${this.t('pickDuelRival')}</div>
                   ${others
                     .map(
-                      (o) => `<button class="doodle-btn doodle-btn-primary" style="width:100%" data-duel-opp="${o.id}">${pawnSvg(o.pawn, o.color, 24, o.accessory ?? 'none')} Tantang ${escapeHtml(o.name)} (Kt.${o.position})</button>`,
+                      (o) => `<button class="doodle-btn doodle-btn-primary" style="width:100%" data-duel-opp="${o.id}">${pawnSvg(o.pawn, o.color, 24, o.accessory ?? 'none')} ${en ? 'Challenge' : 'Tantang'} ${escapeHtml(o.name)} (${this.t('tileShort')}${o.position})</button>`,
                     )
                     .join('')}
                  </div>`
@@ -1286,7 +1442,7 @@ export class DoodleAppShell {
             modal.stamp
               ? `<div class="stamp-overlay">
                   <div class="stamp-badge ${modal.stamp.success ? 'stamp-win' : 'stamp-lose'}">
-                    ${modal.stamp.success ? 'BERHASIL!' : 'YAAH...'}
+                    ${modal.stamp.success ? this.t('youWinChallenge') : en ? 'OOPS...' : 'YAAH...'}
                   </div>
                   <p style="margin-top:14px;font-size:1.05rem">${escapeHtml(modal.stamp.summary)}</p>
                 </div>`
@@ -1297,26 +1453,27 @@ export class DoodleAppShell {
     `;
   }
 
-  private computeSuperlatives(players: Player[]): string[] {
+  private computeSuperlatives(players: Player[]): SuperlativeAward[] {
     if (players.length === 0) return [];
     const pickBest = (scoreFn: (p: Player) => number): Player | null => {
       const sorted = [...players].sort((a, b) => scoreFn(b) - scoreFn(a));
       return scoreFn(sorted[0]) > 0 ? sorted[0] : null;
     };
 
-    const awards: string[] = [];
+    const en = this.lang === 'en';
+    const awards: SuperlativeAward[] = [];
     const starKing = pickBest((p) => p.stars);
-    if (starKing) awards.push(`⭐ Kolektor Bintang: ${starKing.name} (${starKing.stars}★)`);
+    if (starKing) awards.push({ icon: 'star', label: `${en ? 'Star Collector' : 'Kolektor Bintang'}: ${starKing.name} (${starKing.stars}★)` });
     const challengeAce = pickBest((p) => p.stats.challengesWon);
-    if (challengeAce) awards.push(`🧠 Raja Tantangan: ${challengeAce.name} (${challengeAce.stats.challengesWon}x)`);
+    if (challengeAce) awards.push({ icon: 'brain', label: `${en ? 'Challenge Ace' : 'Raja Tantangan'}: ${challengeAce.name} (${challengeAce.stats.challengesWon}x)` });
     const climber = pickBest((p) => p.stats.laddersClimbed);
-    if (climber) awards.push(`🪜 Pemanjat Kilat: ${climber.name} (${climber.stats.laddersClimbed}x)`);
+    if (climber) awards.push({ icon: 'ladder', label: `${en ? 'Ladder Dasher' : 'Pemanjat Kilat'}: ${climber.name} (${climber.stats.laddersClimbed}x)` });
     const dodger = pickBest((p) => p.stats.snakesDodged);
-    if (dodger) awards.push(`🛡️ Pawang Ular: ${dodger.name} (${dodger.stats.snakesDodged}x)`);
+    if (dodger) awards.push({ icon: { item: 'shield' }, label: `${en ? 'Snake Tamer' : 'Pawang Ular'}: ${dodger.name} (${dodger.stats.snakesDodged}x)` });
     const bitten = pickBest((p) => p.stats.snakesBitten);
-    if (bitten) awards.push(`🐍 Sobat Ular: ${bitten.name} (${bitten.stats.snakesBitten}x)`);
+    if (bitten) awards.push({ icon: 'snake', label: `${en ? 'Snake Magnet' : 'Sobat Ular'}: ${bitten.name} (${bitten.stats.snakesBitten}x)` });
     const itemPro = pickBest((p) => p.stats.itemsUsed);
-    if (itemPro) awards.push(`🎒 Ahli Item: ${itemPro.name} (${itemPro.stats.itemsUsed}x)`);
+    if (itemPro) awards.push({ icon: { item: 'surprise' }, label: `${en ? 'Item Master' : 'Ahli Item'}: ${itemPro.name} (${itemPro.stats.itemsUsed}x)` });
     return awards.slice(0, 4);
   }
 
@@ -1326,22 +1483,23 @@ export class DoodleAppShell {
     if (!state || podium.length === 0) return '';
     const isHost = this.modeIsHostOrLocal();
     const awards = this.computeSuperlatives(state.players);
+    const en = this.lang === 'en';
 
     return `
       <div class="challenge-backdrop">
-        <div class="doodle-card menu-box stagger-item" style="max-width:500px">
-          <h1 class="game-logo">🏆 Podium Juara! 🏆</h1>
+        <div class="doodle-card menu-box setup-card-compact stagger-item" style="max-width:500px">
+          <h1 class="game-logo modal-heading">${renderUiIconSvg('trophy', 24)} <span>${en ? 'Winner Podium!' : 'Podium Juara!'}</span></h1>
           <div class="podium-stage">
             ${podium
               .slice(0, 3)
               .map(
                 (entry) => `
               <div class="podium-col podium-rank-${entry.rank}">
-                <div class="tabular-num" style="font-size:1.3rem;font-weight:700">#${entry.rank}</div>
-                <div>${pawnSvg(entry.pawn, entry.color, 38, entry.accessory ?? 'none')}</div>
+                <div class="tabular-num" style="font-size:1.25rem;font-weight:700">#${entry.rank}</div>
+                <div>${pawnSvg(entry.pawn, entry.color, 36, entry.accessory ?? 'none')}</div>
                 <div>${this.settings.colorblindMode ? `<span class="cb-shape">${this.colorShapes[entry.color]}</span> ` : ''}<b>${escapeHtml(entry.name)}</b></div>
-                <div style="font-size:0.74rem;opacity:0.78">${escapeHtml(PAWN_META[entry.pawn].shortName)}</div>
-                <div class="tabular-num" style="font-size:0.85rem">Kt.${entry.position} • ★${entry.stars}</div>
+                <div style="font-size:0.74rem;opacity:0.78">${escapeHtml(getPawnMeta(entry.pawn, this.lang).shortName)}</div>
+                <div class="tabular-num" style="font-size:0.84rem">${this.t('tileShort')}${entry.position} • ★${entry.stars}</div>
               </div>`,
               )
               .join('')}
@@ -1349,20 +1507,20 @@ export class DoodleAppShell {
           <div class="lobby-list">
             ${podium
               .map(
-                (e) => `<div class="lobby-row"><span style="display:inline-flex;align-items:center;gap:6px">#${e.rank} ${this.settings.colorblindMode ? `<span class="cb-shape">${this.colorShapes[e.color]}</span>` : ''}${pawnSvg(e.pawn, e.color, 22, e.accessory ?? 'none')} <b>${escapeHtml(e.name)}</b></span><span class="tabular-num">Kotak ${e.position} • ★${e.stars}</span></div>`,
+                (e) => `<div class="lobby-row"><span style="display:inline-flex;align-items:center;gap:6px">#${e.rank} ${this.settings.colorblindMode ? `<span class="cb-shape">${this.colorShapes[e.color]}</span>` : ''}${pawnSvg(e.pawn, e.color, 22, e.accessory ?? 'none')} <b>${escapeHtml(e.name)}</b></span><span class="tabular-num">${this.t('tileShort')}${e.position} • ★${e.stars}</span></div>`,
               )
               .join('')}
           </div>
           ${
             awards.length > 0
               ? `<div class="podium-awards">
-                   ${awards.map((a) => `<span class="award-chip">${escapeHtml(a)}</span>`).join('')}
+                   ${awards.map((a) => `<span class="award-chip"><span class="ui-ico-row">${this.renderActivityIcon(a.icon, 14)}<span>${escapeHtml(a.label)}</span></span></span>`).join('')}
                  </div>`
               : ''
           }
-          <div style="display:flex;gap:8px;margin-top:6px">
-            ${isHost ? `<button class="doodle-btn doodle-btn-primary" style="flex:1" id="btn-podium-rematch">🔄 Main Lagi</button>` : ''}
-            <button class="doodle-btn" style="flex:1" id="btn-podium-menu">🏠 Menu Utama</button>
+          <div style="display:flex;gap:8px;margin-top:4px">
+            ${isHost ? `<button class="doodle-btn doodle-btn-primary" style="flex:1" id="btn-podium-rematch">${renderUiIconSvg('reset', 16)} ${this.t('playAgain')}</button>` : ''}
+            <button class="doodle-btn" style="flex:1" id="btn-podium-menu">${renderUiIconSvg('home', 16)} ${this.t('mainMenu')}</button>
           </div>
         </div>
       </div>
@@ -1412,7 +1570,25 @@ export class DoodleAppShell {
   private closeCharacterStudio(applyChanges: boolean): void {
     const ctx = this.studioContext;
     if (applyChanges && ctx) {
-      const cleanName = ctx.name.trim();
+      const candidate =
+        ctx.name.trim() ||
+        (ctx.mode === 'local' ? PAWN_META[ctx.pawn].shortName : sanitizeUsernameOrFallback(this.draftName, 'Pemain'));
+      const nameCheck = validateUsername(candidate);
+      if (!nameCheck.ok) {
+        const errText = localizeText(nameCheck.error ?? 'Username tidak diizinkan.', this.lang);
+        const errEl = this.modalLayer.querySelector<HTMLElement>('#studio-name-error');
+        const inpEl = this.modalLayer.querySelector<HTMLInputElement>('#inp-studio-name');
+        if (errEl) {
+          errEl.textContent = errText;
+          errEl.style.display = 'block';
+        }
+        inpEl?.classList.add('is-invalid');
+        inpEl?.focus();
+        this.showToast(errText);
+        return;
+      }
+
+      const cleanName = nameCheck.sanitized;
       if (ctx.mode === 'local' && ctx.localIndex !== undefined) {
         const idx = ctx.localIndex;
         const prevShort = PAWN_META[this.draftLocalPawns[idx]].shortName;
@@ -1426,13 +1602,13 @@ export class DoodleAppShell {
         }
       } else if (ctx.mode === 'lobby') {
         this.onlineController?.customize({
-          playerName: cleanName || this.draftName,
+          playerName: cleanName,
           pawn: ctx.pawn,
           color: ctx.color,
           accessory: ctx.accessory,
         });
       } else {
-        if (cleanName) this.draftName = cleanName;
+        this.draftName = cleanName;
         this.draftPawn = ctx.pawn;
         this.draftColor = ctx.color;
         this.draftAccessory = ctx.accessory;
@@ -1448,16 +1624,16 @@ export class DoodleAppShell {
   }
 
   private renderStudioBioCardHtml(pawn: PawnId, color: PlayerColorId, accessory: AccessoryId): string {
-    const meta = PAWN_META[pawn];
-    const acc = ACCESSORY_META[accessory];
-    const col = PLAYER_COLORS[color];
+    const meta = getPawnMeta(pawn, this.lang);
+    const acc = getAccessoryMeta(accessory, this.lang);
+    const colName = getColorName(color, this.lang);
     return `
       <div class="char-bio-card studio-bio-box">
         <div class="char-bio-top">
           <b>${escapeHtml(meta.name)}</b>
           <span class="char-role-tag">${escapeHtml(meta.title)}</span>
         </div>
-        <div style="font-size:0.82rem;opacity:0.82">${escapeHtml(col.name)} • ${escapeHtml(acc.name)}</div>
+        <div style="font-size:0.82rem;opacity:0.82">${escapeHtml(colName)} • ${escapeHtml(acc.name)}</div>
         <div class="char-perk-pill"><b>${escapeHtml(meta.perkTitle)}:</b> ${escapeHtml(meta.perkDesc)}</div>
       </div>
     `;
@@ -1471,8 +1647,8 @@ export class DoodleAppShell {
     const colors = Object.keys(PLAYER_COLORS) as PlayerColorId[];
     const titleLabel =
       ctx.mode === 'local' && ctx.localIndex !== undefined
-        ? `Studio Pemain ${ctx.localIndex + 1}`
-        : 'Studio Karakter & Aksesoris';
+        ? `${this.t('studioPlayerTitle')} ${ctx.localIndex + 1}`
+        : this.t('studioTitle');
 
     return `
       <div class="challenge-backdrop">
@@ -1480,9 +1656,9 @@ export class DoodleAppShell {
           <div class="studio-header">
             <div>
               <h2 style="margin:0">${titleLabel}</h2>
-              <small style="opacity:0.75">Pilih karakter favorit, warna pastel, dan aksesoris lucunya</small>
+              <small style="opacity:0.75">${this.t('studioSubtitle')}</small>
             </div>
-            <button class="doodle-btn" id="btn-studio-cancel" style="min-height:40px;padding:6px 12px" aria-label="Tutup">✕</button>
+            <button class="doodle-btn" id="btn-studio-cancel" style="min-height:40px;padding:6px 12px" aria-label="${this.t('close')}">✕</button>
           </div>
           <div class="studio-layout">
             <div class="studio-stage-col">
@@ -1490,14 +1666,15 @@ export class DoodleAppShell {
                 <div id="studio-preview-stage" class="studio-preview-stage">
                   ${pawnSvg(ctx.pawn, ctx.color, 130, ctx.accessory)}
                 </div>
-                <div class="studio-drag-hint">Geser kiri / kanan untuk memutar model 3D</div>
+                <div class="studio-drag-hint">${this.t('dragHint3d')}</div>
               </div>
-              <input class="doodle-input" id="inp-studio-name" maxlength="18" value="${escapeHtml(ctx.name)}" placeholder="Nama Karakter" />
+              <input class="doodle-input ${this.getLiveNameError(ctx.name) ? 'is-invalid' : ''}" id="inp-studio-name" maxlength="18" value="${escapeHtml(ctx.name)}" placeholder="${this.t('charNamePlaceholder')}" />
+              <div class="name-error-hint" id="studio-name-error" style="${this.getLiveNameError(ctx.name) ? '' : 'display:none'}">${escapeHtml(this.getLiveNameError(ctx.name) ?? '')}</div>
               <div class="color-row" id="studio-color-row">
                 ${colors
                   .map(
                     (c) => `
-                  <button class="color-dot ${ctx.color === c ? 'selected' : ''}" data-studio-color="${c}" style="background:${PLAYER_COLORS[c].hex}" title="${PLAYER_COLORS[c].name}">
+                  <button class="color-dot ${ctx.color === c ? 'selected' : ''}" data-studio-color="${c}" style="background:${PLAYER_COLORS[c].hex}" title="${escapeHtml(getColorName(c, this.lang))}">
                     ${this.settings.colorblindMode ? this.colorShapes[c] : ''}
                   </button>`,
                   )
@@ -1506,13 +1683,13 @@ export class DoodleAppShell {
               <div id="studio-bio-slot">${this.renderStudioBioCardHtml(ctx.pawn, ctx.color, ctx.accessory)}</div>
             </div>
             <div class="studio-picker-col">
-              <div class="studio-section-label"><b>1. Pilih Karakter Unik</b></div>
+              <div class="studio-section-label"><b>${this.t('pickCharStep')}</b></div>
               <div class="studio-char-grid" id="studio-char-grid">
                 ${pawns
                   .map((p) => {
-                    const m = PAWN_META[p];
+                    const m = getPawnMeta(p, this.lang);
                     return `
-                      <button class="doodle-btn studio-char-card ${ctx.pawn === p ? 'selected' : ''}" data-studio-pawn="${p}" title="${m.name} — ${m.perkDesc}">
+                      <button class="doodle-btn studio-char-card ${ctx.pawn === p ? 'selected' : ''}" data-studio-pawn="${p}" title="${escapeHtml(m.name)} — ${escapeHtml(m.perkDesc)}">
                         <span>${pawnSvg(p, ctx.color, 36, ctx.accessory)}</span>
                         <span class="studio-char-name">${escapeHtml(m.shortName)}</span>
                         <small class="studio-char-role">${escapeHtml(m.title)}</small>
@@ -1521,25 +1698,25 @@ export class DoodleAppShell {
                   .join('')}
               </div>
               <div class="studio-section-label" style="margin-top:4px">
-                <b>2. Pasang Aksesoris</b>
-                <span id="studio-acc-active" style="font-size:0.84rem;opacity:0.8">${escapeHtml(ACCESSORY_META[ctx.accessory].name)}</span>
+                <b>${this.t('pickAccStep')}</b>
+                <span id="studio-acc-active" style="font-size:0.84rem;opacity:0.8">${escapeHtml(getAccessoryMeta(ctx.accessory, this.lang).name)}</span>
               </div>
               <div class="studio-acc-grid" id="studio-acc-grid">
                 ${accessories
                   .map((accId) => {
-                    const acc = ACCESSORY_META[accId];
+                    const acc = getAccessoryMeta(accId, this.lang);
                     return `
-                      <button class="doodle-btn studio-acc-card ${ctx.accessory === accId ? 'selected' : ''}" data-studio-acc="${accId}" title="${acc.description}">
+                      <button class="doodle-btn studio-acc-card ${ctx.accessory === accId ? 'selected' : ''}" data-studio-acc="${accId}" title="${escapeHtml(acc.description)}">
                         <span>${renderAccessorySvg(accId, PLAYER_COLORS[ctx.color].hex, 28)}</span>
                         <small>${escapeHtml(acc.shortName)}</small>
                       </button>`;
                   })
                   .join('')}
               </div>
-              <div id="studio-acc-desc" class="studio-acc-desc">${escapeHtml(ACCESSORY_META[ctx.accessory].description)}</div>
+              <div id="studio-acc-desc" class="studio-acc-desc">${escapeHtml(getAccessoryMeta(ctx.accessory, this.lang).description)}</div>
               <div class="studio-footer-actions">
-                <button class="doodle-btn" id="btn-studio-close" style="flex:1">Batal</button>
-                <button class="doodle-btn doodle-btn-primary" id="btn-studio-save" style="flex:2">Simpan & Pakai</button>
+                <button class="doodle-btn" id="btn-studio-close" style="flex:1">${this.t('cancel')}</button>
+                <button class="doodle-btn doodle-btn-primary" id="btn-studio-save" style="flex:2">${this.lang === 'en' ? 'Save & Equip' : 'Simpan & Pakai'}</button>
               </div>
             </div>
           </div>
@@ -1562,10 +1739,11 @@ export class DoodleAppShell {
     if (bioSlot) {
       bioSlot.innerHTML = this.renderStudioBioCardHtml(ctx.pawn, ctx.color, ctx.accessory);
     }
+    const accMeta = getAccessoryMeta(ctx.accessory, this.lang);
     const accActive = this.modalLayer.querySelector<HTMLElement>('#studio-acc-active');
-    if (accActive) accActive.textContent = ACCESSORY_META[ctx.accessory].name;
+    if (accActive) accActive.textContent = accMeta.name;
     const accDesc = this.modalLayer.querySelector<HTMLElement>('#studio-acc-desc');
-    if (accDesc) accDesc.textContent = ACCESSORY_META[ctx.accessory].description;
+    if (accDesc) accDesc.textContent = accMeta.description;
 
     this.modalLayer.querySelectorAll<HTMLElement>('[data-studio-pawn]').forEach((btn) => {
       const p = btn.dataset.studioPawn as PawnId;
@@ -1585,18 +1763,30 @@ export class DoodleAppShell {
   }
 
   private renderHowToPlayModal(): string {
+    const items: ItemType[] = ['shield', 'golden_dice', 'brake', 'surprise', 'magnet_star', 'swap_turbo'];
     return `
       <div class="challenge-backdrop">
-        <div class="doodle-card menu-box stagger-item">
-          <h2 style="margin:0">📖 Cara Bermain</h2>
-          <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px">
-            <li>Lempar dadu 1d6 (atau tekan <b>Spasi</b> saat giliranmu!). Angka <b>6</b> dapat lemparan lagi (maks 2x).</li>
-            <li>Setiap kotak (2–99) punya <b>17 jenis mini-game 5–10 detik</b> berhadiah ★ & bonus!</li>
-            <li><b>6 Item Strategis:</b> Perisai 🛡️, Dadu Emas 🎲✨, Rem 🛑, Kotak Kejutan 🎁, Magnet Bintang 🧲, dan Sepatu Turbo ⚡ (+2 langkah)!</li>
-            <li><b>Kepala Ular:</b> menang tantangan kotak ular bikin ular tertawa & kamu tidak jatuh!</li>
-            <li><b>Kotak 100 (Bos Doodle):</b> harus mendarat pas dan taklukkan Bos Doodle untuk menang!</li>
+        <div class="doodle-card menu-box setup-card-compact stagger-item">
+          <h2 class="modal-heading">${renderUiIconSvg('book', 20)} <span>${this.t('howtoTitle')}</span></h2>
+          <ul class="howto-list">
+            <li><b>${escapeHtml(this.t('howtoTurnTitle'))}:</b> ${escapeHtml(this.t('howtoTurnDesc'))}</li>
+            <li><b>${escapeHtml(this.t('howtoTileTitle'))}:</b> ${escapeHtml(this.t('howtoTileDesc'))}</li>
+            <li><b>${escapeHtml(this.t('howtoSnakeTitle'))}:</b> ${escapeHtml(this.t('howtoSnakeDesc'))}</li>
+            <li><b>${escapeHtml(this.t('howtoShopTitle'))}:</b> ${escapeHtml(this.t('howtoShopDesc'))}</li>
           </ul>
-          <button class="doodle-btn doodle-btn-primary" id="btn-close-howto">Siap Mengerti!</button>
+          <div class="howto-items-grid">
+            ${items
+              .map((id) => {
+                const im = getItemMeta(id, this.lang);
+                return `
+              <div class="howto-item-pill" title="${escapeHtml(im.description)}">
+                ${renderItemSvg(id, 18)}
+                <span><b>${escapeHtml(im.name)}</b><small>${escapeHtml(im.description)}</small></span>
+              </div>`;
+              })
+              .join('')}
+          </div>
+          <button class="doodle-btn doodle-btn-primary" id="btn-close-howto">${this.t('understood')}</button>
         </div>
       </div>
     `;
@@ -1605,33 +1795,40 @@ export class DoodleAppShell {
   private renderSettingsModal(): string {
     return `
       <div class="challenge-backdrop">
-        <div class="doodle-card menu-box stagger-item">
-          <h2 style="margin:0">⚙️ Pengaturan</h2>
-          <label style="display:flex;justify-content:space-between;align-items:center">
-            <span>🔇 Bisu (Mute)</span>
-            <input type="checkbox" id="set-mute" ${this.settings.muted ? 'checked' : ''} style="width:24px;height:24px"/>
+        <div class="doodle-card menu-box setup-card-compact stagger-item">
+          <h2 class="modal-heading">${renderUiIconSvg('settings', 20)} <span>${this.t('settingsTitle')}</span></h2>
+          <label class="settings-row">
+            <span class="ui-ico-row">${renderUiIconSvg('globe', 16)}<span>${this.t('languageSettingLabel')}</span></span>
+            <select class="doodle-input" id="set-lang" style="min-height:34px;padding:3px 8px;width:152px">
+              <option value="id" ${this.settings.language === 'id' ? 'selected' : ''}>Indonesia (ID)</option>
+              <option value="en" ${this.settings.language === 'en' ? 'selected' : ''}>English (EN)</option>
+            </select>
           </label>
-          <label style="display:flex;justify-content:space-between;align-items:center">
-            <span>🎵 Musik Latar Tabletop</span>
-            <input type="checkbox" id="set-music" ${this.settings.musicEnabled ? 'checked' : ''} style="width:24px;height:24px"/>
+          <label class="settings-row">
+            <span class="ui-ico-row">${renderUiIconSvg('muted', 16)}<span>${this.t('muteLabel')}</span></span>
+            <input type="checkbox" id="set-mute" ${this.settings.muted ? 'checked' : ''} />
           </label>
-          <label>
-            <span>🔊 Volume (${Math.round(this.settings.volume * 100)}%)</span>
+          <label class="settings-row">
+            <span class="ui-ico-row">${renderUiIconSvg('music', 16)}<span>${this.t('musicLabel')}</span></span>
+            <input type="checkbox" id="set-music" ${this.settings.musicEnabled ? 'checked' : ''} />
+          </label>
+          <label class="settings-vol-row">
+            <span class="ui-ico-row">${renderUiIconSvg('sound', 16)}<span>${this.t('volumeLabel')} (${Math.round(this.settings.volume * 100)}%)</span></span>
             <input type="range" id="set-vol" min="0" max="100" value="${Math.round(this.settings.volume * 100)}" style="width:100%"/>
           </label>
-          <label style="display:flex;justify-content:space-between;align-items:center">
-            <span>👁️ Mode Ramah Buta Warna</span>
-            <input type="checkbox" id="set-cb" ${this.settings.colorblindMode ? 'checked' : ''} style="width:24px;height:24px"/>
+          <label class="settings-row">
+            <span class="ui-ico-row">${renderUiIconSvg('eye', 16)}<span>${this.t('colorblindLabel')}</span></span>
+            <input type="checkbox" id="set-cb" ${this.settings.colorblindMode ? 'checked' : ''} />
           </label>
-          <label style="display:flex;justify-content:space-between;align-items:center">
-            <span>🔠 Teks Besar</span>
-            <input type="checkbox" id="set-large" ${this.settings.largeText ? 'checked' : ''} style="width:24px;height:24px"/>
+          <label class="settings-row">
+            <span class="ui-ico-row">${renderUiIconSvg('text', 16)}<span>${this.t('largeTextLabel')}</span></span>
+            <input type="checkbox" id="set-large" ${this.settings.largeText ? 'checked' : ''} />
           </label>
-          <label style="display:flex;justify-content:space-between;align-items:center">
-            <span>✨ Kurangi Gerakan (Reduced Motion)</span>
-            <input type="checkbox" id="set-rm" ${this.settings.reducedMotion ? 'checked' : ''} style="width:24px;height:24px"/>
+          <label class="settings-row">
+            <span class="ui-ico-row">${renderUiIconSvg('spark', 16)}<span>${this.t('reducedMotionLabel')}</span></span>
+            <input type="checkbox" id="set-rm" ${this.settings.reducedMotion ? 'checked' : ''} />
           </label>
-          <button class="doodle-btn doodle-btn-primary" id="btn-close-settings">Simpan</button>
+          <button class="doodle-btn doodle-btn-primary" id="btn-close-settings">${this.t('save')}</button>
         </div>
       </div>
     `;
@@ -1640,7 +1837,7 @@ export class DoodleAppShell {
   private renderDebugPanel(): string {
     return `
       <div class="debug-panel">
-        <b>🛠️ DEBUG PANEL</b>
+        <b class="ui-ico-row">${renderUiIconSvg('settings', 14)}<span>DEBUG PANEL</span></b>
         <div id="debug-stats">FPS: ${this.debugStats.fps} | Draw: ${this.debugStats.drawCalls} | v${this.gameState?.stateVersion ?? 0}</div>
         <div>Paksa Dadu:</div>
         <div class="debug-dice-row">
@@ -1667,6 +1864,13 @@ export class DoodleAppShell {
   private bindMainEvents(): void {
     const q = <T extends HTMLElement>(sel: string) => this.mainLayer.querySelector<T>(sel);
 
+    q('#btn-toggle-lang')?.addEventListener('click', () => {
+      this.sound.playUiClick();
+      this.settings.language = this.settings.language === 'id' ? 'en' : 'id';
+      this.applyAccessibilitySettings();
+      this.render();
+    });
+
     q('#btn-splash-play')?.addEventListener('click', () => {
       this.sound.playUiClick();
       this.screen = 'menu';
@@ -1680,10 +1884,16 @@ export class DoodleAppShell {
       const online = new OnlineGameController(this.scene, this.createSessionCallbacks());
       this.onlineController = online;
       this.controller = online;
-      online.joinRoom(saved.roomCode, this.draftName, this.draftPawn, this.draftColor, {
-        reconnectToken: saved.reconnectToken,
-        accessory: this.draftAccessory,
-      });
+      online.joinRoom(
+        saved.roomCode,
+        sanitizeUsernameOrFallback(this.draftName, 'Pemain'),
+        this.draftPawn,
+        this.draftColor,
+        {
+          reconnectToken: saved.reconnectToken,
+          accessory: this.draftAccessory,
+        },
+      );
       this.screen = 'lobby';
       this.render();
     });
@@ -1725,7 +1935,15 @@ export class DoodleAppShell {
 
     // Draft pickers & rule preset
     q<HTMLInputElement>('#inp-name')?.addEventListener('input', (e) => {
-      this.draftName = (e.target as HTMLInputElement).value;
+      const inp = e.target as HTMLInputElement;
+      this.draftName = inp.value;
+      const err = this.getLiveNameError(this.draftName);
+      inp.classList.toggle('is-invalid', err !== null);
+      const errEl = q<HTMLElement>('#draft-name-error');
+      if (errEl) {
+        errEl.textContent = err ?? '';
+        errEl.style.display = err ? 'block' : 'none';
+      }
     });
     q('#btn-open-studio-profile')?.addEventListener('click', () => {
       this.sound.playUiClick();
@@ -1770,12 +1988,27 @@ export class DoodleAppShell {
 
     // Online create / join
     q('#btn-create-room')?.addEventListener('click', () => {
+      const nameCheck = validateUsername(this.draftName.trim() || 'Pemain');
+      if (!nameCheck.ok) {
+        const errText = localizeText(nameCheck.error ?? 'Username tidak diizinkan.', this.lang);
+        const inp = q<HTMLInputElement>('#inp-name');
+        const errEl = q<HTMLElement>('#draft-name-error');
+        inp?.classList.add('is-invalid');
+        inp?.focus();
+        if (errEl) {
+          errEl.textContent = errText;
+          errEl.style.display = 'block';
+        }
+        this.showToast(errText);
+        return;
+      }
+      this.draftName = nameCheck.sanitized;
       this.sound.playUiClick();
       const online = new OnlineGameController(this.scene, this.createSessionCallbacks());
       this.onlineController = online;
       this.controller = online;
       online.createRoom(
-        this.draftName.trim() || 'Pemain',
+        nameCheck.sanitized,
         this.draftPawn,
         this.draftColor,
         this.draftAccessory,
@@ -1787,14 +2020,33 @@ export class DoodleAppShell {
     const doJoinOnline = (asSpectator: boolean) => {
       const code = this.draftRoomCode.trim().toUpperCase();
       if (code.length !== 4) {
-        this.showToast('Masukkan kode room 4 huruf ya!');
+        this.showToast(localizeText('Masukkan kode room 4 huruf ya!', this.lang));
         return;
+      }
+      let joinName = this.lang === 'en' ? 'Spectator' : 'Penonton';
+      if (!asSpectator) {
+        const nameCheck = validateUsername(this.draftName.trim() || 'Pemain');
+        if (!nameCheck.ok) {
+          const errText = localizeText(nameCheck.error ?? 'Username tidak diizinkan.', this.lang);
+          const inp = q<HTMLInputElement>('#inp-name');
+          const errEl = q<HTMLElement>('#draft-name-error');
+          inp?.classList.add('is-invalid');
+          inp?.focus();
+          if (errEl) {
+            errEl.textContent = errText;
+            errEl.style.display = 'block';
+          }
+          this.showToast(errText);
+          return;
+        }
+        joinName = nameCheck.sanitized;
+        this.draftName = joinName;
       }
       this.sound.playUiClick();
       const online = new OnlineGameController(this.scene, this.createSessionCallbacks());
       this.onlineController = online;
       this.controller = online;
-      online.joinRoom(code, this.draftName.trim() || 'Pemain', this.draftPawn, this.draftColor, {
+      online.joinRoom(code, joinName, this.draftPawn, this.draftColor, {
         asSpectator,
         accessory: this.draftAccessory,
       });
@@ -1812,9 +2064,28 @@ export class DoodleAppShell {
         this.renderMainLayer();
       };
     });
+    const syncLocalNameBanner = () => {
+      const errEl = q<HTMLElement>('#local-name-error');
+      if (!errEl) return;
+      let firstIdx = -1;
+      let firstMsg: string | null = null;
+      for (let i = 0; i < this.draftLocalCount; i++) {
+        const err = this.getLiveNameError(this.draftLocalNames[i]);
+        if (err && firstIdx === -1) {
+          firstIdx = i;
+          firstMsg = err;
+        }
+      }
+      errEl.textContent = firstMsg ? `${this.lang === 'en' ? 'Player' : 'Pemain'} ${firstIdx + 1}: ${firstMsg}` : '';
+      errEl.style.display = firstMsg ? 'block' : 'none';
+    };
+
     this.mainLayer.querySelectorAll<HTMLInputElement>('[data-local-name]').forEach((inp) => {
       inp.oninput = () => {
-        this.draftLocalNames[Number(inp.dataset.localName)] = inp.value;
+        const idx = Number(inp.dataset.localName);
+        this.draftLocalNames[idx] = inp.value;
+        inp.classList.toggle('is-invalid', this.getLiveNameError(inp.value) !== null);
+        syncLocalNameBanner();
       };
     });
     const allPawns = Object.keys(PAWN_META) as PawnId[];
@@ -1849,10 +2120,28 @@ export class DoodleAppShell {
       };
     });
     q('#btn-start-local')?.addEventListener('click', () => {
+      const sanitizedNames: string[] = [];
+      for (let i = 0; i < this.draftLocalCount; i++) {
+        const check = validateUsername(this.draftLocalNames[i].trim() || `Pemain ${i + 1}`);
+        if (!check.ok) {
+          const errText = `${this.lang === 'en' ? 'Player' : 'Pemain'} ${i + 1}: ${localizeText(check.error ?? 'Username tidak diizinkan.', this.lang)}`;
+          const inp = q<HTMLInputElement>(`[data-local-name="${i}"]`);
+          const errEl = q<HTMLElement>('#local-name-error');
+          inp?.classList.add('is-invalid');
+          inp?.focus();
+          if (errEl) {
+            errEl.textContent = errText;
+            errEl.style.display = 'block';
+          }
+          this.showToast(errText);
+          return;
+        }
+        sanitizedNames.push(check.sanitized);
+      }
       this.sound.playUiClick();
       const players: CreatePlayerInput[] = Array.from({ length: this.draftLocalCount }, (_, i) => ({
         id: `local_${i + 1}`,
-        name: this.draftLocalNames[i].trim() || `Pemain ${i + 1}`,
+        name: sanitizedNames[i],
         pawn: this.draftLocalPawns[i],
         color: this.draftLocalColors[i],
         accessory: this.draftLocalAccessories[i],
@@ -1886,9 +2175,24 @@ export class DoodleAppShell {
       };
     });
     q('#btn-start-bot')?.addEventListener('click', () => {
+      const nameCheck = validateUsername(this.draftName.trim() || 'Kamu');
+      if (!nameCheck.ok) {
+        const errText = localizeText(nameCheck.error ?? 'Username tidak diizinkan.', this.lang);
+        const inp = q<HTMLInputElement>('#inp-name');
+        const errEl = q<HTMLElement>('#draft-name-error');
+        inp?.classList.add('is-invalid');
+        inp?.focus();
+        if (errEl) {
+          errEl.textContent = errText;
+          errEl.style.display = 'block';
+        }
+        this.showToast(errText);
+        return;
+      }
+      this.draftName = nameCheck.sanitized;
       this.sound.playUiClick();
       const players = buildBotPlayers(
-        this.draftName.trim() || 'Kamu',
+        nameCheck.sanitized,
         this.draftPawn,
         this.draftColor,
         this.draftBotCount,
@@ -1918,19 +2222,19 @@ export class DoodleAppShell {
       this.sound.playUiClick();
       if (navigator.clipboard?.writeText) {
         void navigator.clipboard.writeText(url).then(
-          () => this.showToast(`Link room ${roomCode} disalin!`),
-          () => this.showToast(`Kode room: ${roomCode}`),
+          () => this.showToast(this.lang === 'en' ? `Room ${roomCode} link copied!` : `Link room ${roomCode} disalin!`),
+          () => this.showToast(this.lang === 'en' ? `Room code: ${roomCode}` : `Kode room: ${roomCode}`),
         );
       } else if (typeof navigator.share === 'function') {
         void navigator
           .share({
-            title: 'DodSnake — Gabung Room!',
-            text: `Main DodSnake bareng yuk! Kode room: ${roomCode}`,
+            title: this.lang === 'en' ? 'DodSnake — Join Room!' : 'DodSnake — Gabung Room!',
+            text: this.lang === 'en' ? `Play DodSnake together! Room code: ${roomCode}` : `Main DodSnake bareng yuk! Kode room: ${roomCode}`,
             url,
           })
-          .catch(() => this.showToast(`Kode room: ${roomCode}`));
+          .catch(() => this.showToast(this.lang === 'en' ? `Room code: ${roomCode}` : `Kode room: ${roomCode}`));
       } else {
-        this.showToast(`Kode room: ${roomCode}`);
+        this.showToast(this.lang === 'en' ? `Room code: ${roomCode}` : `Kode room: ${roomCode}`);
       }
     });
     q('#btn-lobby-studio')?.addEventListener('click', () => {
@@ -2027,6 +2331,11 @@ export class DoodleAppShell {
         this.scene.focusPlayer(activeId);
       }
     });
+    q('#btn-hud-peek')?.addEventListener('click', () => {
+      this.sound.playUiClick();
+      this.hudCompact = !this.hudCompact;
+      this.renderMainLayer();
+    });
     q('#btn-hud-music')?.addEventListener('click', () => {
       this.sound.playUiClick();
       this.settings.musicEnabled = !this.settings.musicEnabled;
@@ -2093,7 +2402,15 @@ export class DoodleAppShell {
       const nameInp = q<HTMLInputElement>('#inp-studio-name');
       nameInp?.addEventListener('input', (e) => {
         if (this.studioContext) {
-          this.studioContext.name = (e.target as HTMLInputElement).value;
+          const val = (e.target as HTMLInputElement).value;
+          this.studioContext.name = val;
+          const err = this.getLiveNameError(val);
+          nameInp.classList.toggle('is-invalid', err !== null);
+          const errEl = q<HTMLElement>('#studio-name-error');
+          if (errEl) {
+            errEl.textContent = err ?? '';
+            errEl.style.display = err ? 'block' : 'none';
+          }
         }
       });
 
@@ -2155,6 +2472,12 @@ export class DoodleAppShell {
       this.showSettings = false;
       this.renderModalsLayer();
       this.renderMainLayer();
+    });
+    q<HTMLSelectElement>('#set-lang')?.addEventListener('change', (e) => {
+      const val = (e.target as HTMLSelectElement).value;
+      this.settings.language = val === 'en' ? 'en' : 'id';
+      this.applyAccessibilitySettings();
+      this.render();
     });
     q<HTMLInputElement>('#set-mute')?.addEventListener('change', (e) => {
       this.settings.muted = (e.target as HTMLInputElement).checked;
