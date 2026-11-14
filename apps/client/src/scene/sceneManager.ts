@@ -20,6 +20,7 @@ import { buildDiceVisual, type DiceVisual } from './diceMesh.js';
 import { DoodleParticleSystem } from './particleSystem.js';
 import { DoodleCameraRig } from './cameraRig.js';
 import type { DoodleSoundEngine } from '../audio/soundEngine.js';
+import type { AppLanguage } from '../i18n/translations.js';
 
 export interface SceneDebugStats {
   fps: number;
@@ -103,6 +104,8 @@ export class DoodleSceneManager {
   private paused = false;
   private externalPaused = false;
   private reducedMotion = false;
+  private colorblindMode = false;
+  private language: AppLanguage = 'id';
   private speedMultiplier = 1;
   private preferredCameraMode: 'overview' | 'follow' = 'follow';
   private showcaseMode = true;
@@ -114,6 +117,7 @@ export class DoodleSceneManager {
   private isPlayingQueue = false;
   private eventQueue: Array<{ event: GameEvent; onDone?: () => void }> = [];
   private latestPlayers: Player[] = [];
+  private latestGameState: GameState | null = null;
   private fpsSamples: number[] = [];
   private onStatsUpdate?: (stats: SceneDebugStats) => void;
   private onSpeedChange?: (enabled: boolean) => void;
@@ -203,6 +207,19 @@ export class DoodleSceneManager {
   public setReducedMotion(reduced: boolean): void {
     this.reducedMotion = reduced;
     this.outlineCtrl.setReducedMotion(reduced);
+  }
+
+  public setColorblindMode(enabled: boolean): void {
+    if (this.colorblindMode === enabled) return;
+    this.colorblindMode = enabled;
+    this.board.setColorblindMode(enabled);
+    if (this.latestGameState) {
+      this.syncPlayersFromState(this.latestGameState);
+    }
+  }
+
+  public setLanguage(lang: AppLanguage): void {
+    this.language = lang;
   }
 
   public setPreferredCameraMode(mode: 'overview' | 'follow'): void {
@@ -315,6 +332,7 @@ export class DoodleSceneManager {
   }
 
   public syncPlayersFromState(state: GameState): void {
+    this.latestGameState = state;
     this.latestPlayers = state.players;
     const validIds = new Set(state.players.map((p) => p.id));
 
@@ -330,7 +348,7 @@ export class DoodleSceneManager {
 
     state.players.forEach((player, idx) => {
       const acc = player.accessory ?? 'none';
-      const sig = `${player.pawn}:${player.color}:${acc}:${player.name}`;
+      const sig = `${player.pawn}:${player.color}:${acc}:${player.name}:${this.colorblindMode ? 'cb1' : 'cb0'}`;
       let pv = this.pawns.get(player.id);
       if (pv && this.pawnSignatures.get(player.id) !== sig) {
         this.scene.remove(pv.root);
@@ -344,7 +362,7 @@ export class DoodleSceneManager {
           this.outlineCtrl,
           idx * 1.3,
           player.name,
-          { accessory: acc },
+          { accessory: acc, colorblindMode: this.colorblindMode },
         );
         this.pawns.set(player.id, pv);
         this.pawnSignatures.set(player.id, sig);
@@ -680,7 +698,12 @@ export class DoodleSceneManager {
         tl.call(() => {
           this.animatingPawns.delete(ev.playerId);
           if (ev.bounced) {
-            this.showCallout('Mantul!', pv.root.position, DOODLE_PALETTE.orange, 0.85);
+            this.showCallout(
+              this.language === 'en' ? 'Bounce!' : 'Mantul!',
+              pv.root.position,
+              DOODLE_PALETTE.orange,
+              0.85,
+            );
           }
         });
         return;
@@ -721,11 +744,17 @@ export class DoodleSceneManager {
             },
           })
           .call(() => {
+            ladder.setGrowProgress(1);
             pv.bodyGroup.rotation.z = 0;
             pv.root.position.copy(endPos);
             this.animatingPawns.delete(ev.playerId);
             this.particles.spawnConfetti(endPos, this.reducedMotion, 20);
-            this.showCallout('Wiii!', endPos, DOODLE_PALETTE.mint, 1.0);
+            this.showCallout(
+              this.language === 'en' ? 'Climb!' : 'Naik!',
+              endPos,
+              DOODLE_PALETTE.mint,
+              1.0,
+            );
           });
         return;
       }
@@ -738,12 +767,25 @@ export class DoodleSceneManager {
           return;
         }
         if (ev.dodgedByChallenge) {
-          this.showCallout('Ular Ketawa!', pv.root.position, DOODLE_PALETTE.mint, 1.0);
-          tl.to(snake.headGroup.position, { y: '+=0.35', yoyo: true, repeat: 3, duration: 0.12 });
+          this.showCallout(
+            this.language === 'en' ? 'Dodged!' : 'Lolos Ular!',
+            pv.root.position,
+            DOODLE_PALETTE.mint,
+            1.0,
+          );
+          tl.to(pv.bodyGroup.position, { y: 0.36, yoyo: true, repeat: 1, duration: 0.14 }).to(
+            snake.headGroup.position,
+            { y: '+=0.25', yoyo: true, repeat: 1, duration: 0.12 },
+          );
           return;
         }
         if (ev.blockedByShield) {
-          this.showCallout('Tangkis Perisai!', pv.root.position, DOODLE_PALETTE.blue, 1.0);
+          this.showCallout(
+            this.language === 'en' ? 'Shield!' : 'Perisai!',
+            pv.root.position,
+            DOODLE_PALETTE.blue,
+            1.0,
+          );
           tl.to(pv.shieldBubble.scale, { x: 1.5, y: 1.5, z: 1.5, duration: 0.25, yoyo: true, repeat: 1 });
           return;
         }
@@ -795,7 +837,12 @@ export class DoodleSceneManager {
               pv.root.position.copy(endPos);
               pv.setDizzyVisible(true);
               this.animatingPawns.delete(ev.playerId);
-              this.showCallout('Glek!!', endPos, DOODLE_PALETTE.pink, 1.0);
+              this.showCallout(
+                this.language === 'en' ? 'Slide Down!' : 'Kena Ular!',
+                endPos,
+                DOODLE_PALETTE.pink,
+                1.0,
+              );
               setTimeout(() => pv.setDizzyVisible(false), 2400);
             },
           });
@@ -821,18 +868,29 @@ export class DoodleSceneManager {
         if (pv) {
           this.sound.playItemUse();
           this.particles.spawnStarBurst(pv.root.position, this.reducedMotion);
+          const en = this.language === 'en';
           const tag =
             ev.item === 'shield'
-              ? 'Perisai!'
+              ? en
+                ? 'Shield!'
+                : 'Perisai!'
               : ev.item === 'golden_dice'
-                ? 'Dadu Emas!'
+                ? en
+                  ? 'Golden Die!'
+                  : 'Dadu Emas!'
                 : ev.item === 'brake'
-                  ? 'Rem!'
+                  ? en
+                    ? 'Brake!'
+                    : 'Rem!'
                   : ev.item === 'magnet_star'
-                    ? 'Magnet ★!'
+                    ? en
+                      ? 'Magnet!'
+                      : 'Magnet!'
                     : ev.item === 'swap_turbo'
                       ? 'Turbo +2!'
-                      : 'Kejutan!';
+                      : en
+                        ? 'Mystery!'
+                        : 'Kejutan!';
           this.showCallout(tag, pv.root.position, DOODLE_PALETTE.yellow, 0.85);
           tl.to(pv.bodyGroup.scale, { y: 1.18, x: 0.9, z: 0.9, yoyo: true, repeat: 1, duration: 0.14 });
         } else {
@@ -845,7 +903,12 @@ export class DoodleSceneManager {
         const pv = this.pawns.get(ev.playerId);
         if (pv) {
           this.particles.spawnStarBurst(pv.root.position, this.reducedMotion);
-          this.showCallout('Lempar Lagi!', pv.root.position, DOODLE_PALETTE.yellow, 0.8);
+          this.showCallout(
+            this.language === 'en' ? 'Roll Again!' : 'Lempar Lagi!',
+            pv.root.position,
+            DOODLE_PALETTE.yellow,
+            0.8,
+          );
           tl.to(pv.bodyGroup.position, { y: 0.3, yoyo: true, repeat: 1, duration: 0.14 });
         } else {
           tl.to({}, { duration: 0.1 });
