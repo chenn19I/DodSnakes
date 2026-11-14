@@ -27,9 +27,17 @@ function buildValidClientInput(ch: ActiveChallenge, playerId: string) {
     const q = QUIZ_BANK.find((x) => x.id === Number(ch.params.questionId))!;
     sim.answerIndex = q.correctIndex;
     sim.reactionMs = 520;
-  } else if (ch.archetype === 'shadow_match' || ch.archetype === 'quick_math' || ch.archetype === 'stroop_color' || ch.archetype === 'color_count') {
+  } else if (ch.archetype === 'shadow_match' || ch.archetype === 'quick_math' || ch.archetype === 'stroop_color' || ch.archetype === 'color_count' || ch.archetype === 'odd_one_out') {
     sim.answerIndex = Number(ch.params.correctIndex);
     sim.reactionMs = 450;
+  } else if (ch.archetype === 'pair_flip') {
+    const pairCount = Number(ch.params.pairCount ?? 3);
+    sim.sequenceIndices = Array.from({ length: pairCount * 2 }, (_, i) => i);
+    sim.extra = { pairsMatched: pairCount };
+    sim.reactionMs = 2400;
+  } else if (ch.archetype === 'number_order') {
+    sim.sequenceIndices = [...((ch.params.expectedIndices as number[]) ?? [0, 1, 2, 3, 4])];
+    sim.reactionMs = 1500;
   } else if (ch.archetype === 'bubble_pop') {
     const targetPops = Number(ch.params.targetPops ?? 5);
     sim.tapTimestamps = Array.from({ length: targetPops }, (_, i) => 400 + i * 240);
