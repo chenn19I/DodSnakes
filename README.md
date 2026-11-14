@@ -63,7 +63,7 @@ Customize any pawn inside the **Studio Karakter & Aksesoris** with a draggable l
    - **Mode Kilat**: Start with 1 item + 2 stars and faster forward challenge momentum.
    - **Pesta Item**: Start with 1 item and greatly increased item drop chances.
 3. **Landing Resolution Order**:
-   - Play one of **20 interactive randomized mini-game archetypes** on tiles `2-99` (`tap_timing`, `quick_quiz`, `memory_doodle`, `spam_tap`, `swipe_dodge`, `shadow_match`, `quick_math`, `word_scramble`, `trace_line`, `lucky_wheel`, `stroop_color`, `quick_duel`, `gift_trap`, `bubble_pop`, `rhythm_clap`, `color_count`, `balance_bar`, `pair_flip`, `number_order`, `odd_one_out`), excluding tile `1` (`start`).
+   - Play one of **22 interactive randomized mini-game archetypes** on tiles `2-99` (`tap_timing`, `quick_quiz`, `memory_doodle`, `spam_tap`, `swipe_dodge`, `shadow_match`, `quick_math`, `word_scramble`, `trace_line`, `lucky_wheel`, `stroop_color`, `quick_duel`, `gift_trap`, `bubble_pop`, `rhythm_clap`, `color_count`, `balance_bar`, `pair_flip`, `number_order`, `odd_one_out`, `pattern_next`, `math_compare`), excluding tile `1` (`start`).
    - Apply challenge rewards (stars `★`, `advance` / `shield` / `extra_dice`, comeback **Bonus Ngejar +1 ★** when trailing the leader by `>= 25` tiles) or penalties (`retreat` / `skip_turn`).
    - Resolve ladders or snakes on the landed tile:
      - **Ladder base**: Pawn climbs up to the ladder top.
