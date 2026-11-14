@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: dodsnake-server
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build --workspace=@doodle-dash/shared && npm run build --workspace=@doodle-dash/server
+    startCommand: npm run start --workspace=@doodle-dash/server
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CORS_ORIGIN
+        value: https://dodsnake.vercel.app
