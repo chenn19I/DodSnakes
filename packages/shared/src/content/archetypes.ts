@@ -1526,6 +1526,140 @@ export const ARCHETYPE_REGISTRY: Record<ChallengeArchetype, ArchetypeSpec> = {
       };
     },
   },
+
+  target_sum: {
+    id: 'target_sum',
+    displayName: 'Kombinasi Target',
+    instruction: 'Ketuk tepat 2 kartu angka yang jumlahnya sama dengan angka target!',
+    baseDurationMs: 9000,
+    allowedModes: ['solo'],
+    buildParams: (rng, difficulty) => {
+      const a = rng.nextInt(2, 8 + difficulty * 3);
+      const b = rng.nextInt(3, 9 + difficulty * 3);
+      const target = a + b;
+      const values = [a, b];
+      while (values.length < 4) {
+        let candidate = rng.nextInt(1, Math.max(12, target - 1));
+        if (values.includes(candidate) || values.some((v) => v + candidate === target)) {
+          candidate = target + values.length + rng.nextInt(1, 5);
+        }
+        values.push(candidate);
+      }
+      const options = rng.shuffle(values);
+      let validPair: [number, number] = [0, 1];
+      outer: for (let i = 0; i < options.length; i++) {
+        for (let j = i + 1; j < options.length; j++) {
+          if (options[i] + options[j] === target) {
+            validPair = [i, j];
+            break outer;
+          }
+        }
+      }
+      return { target, options, validPair, difficulty };
+    },
+    validate: (params, sub) => {
+      const target = Number(params.target ?? 0);
+      const options = (params.options as number[]) ?? [];
+      const picked = sub.inputLog.sequenceIndices ?? [];
+      const reaction = sub.inputLog.reactionMs ?? sub.inputLog.completedAt - sub.inputLog.startedAt;
+      if (reaction < MIN_REACTION_MS) {
+        return { success: false, score: 0, reason: 'Respon terlalu cepat' };
+      }
+      if (
+        picked.length !== 2 ||
+        picked[0] === picked[1] ||
+        picked[0] < 0 ||
+        picked[1] < 0 ||
+        picked[0] >= options.length ||
+        picked[1] >= options.length
+      ) {
+        return { success: false, score: 0, reason: 'Harus memilih tepat 2 kartu berbeda!' };
+      }
+      const ok = options[picked[0]] + options[picked[1]] === target;
+      return {
+        success: ok,
+        score: ok ? Math.max(58, Math.round(120 - reaction / 70)) : 0,
+        reason: ok ? 'Kombinasi tepat!' : `Belum pas ke ${target}!`,
+      };
+    },
+    simulateBot: (params, botDiff, rng) => {
+      const difficulty = Number(params.difficulty ?? 2);
+      const options = (params.options as number[]) ?? [1, 2, 3, 4];
+      const target = Number(params.target ?? 0);
+      const validPair = (params.validPair as [number, number]) ?? [0, 1];
+      const win = rng.chance(botSuccessRate(botDiff, difficulty));
+      let wrongPair: [number, number] = [0, 1];
+      for (let i = 0; i < options.length; i++) {
+        for (let j = i + 1; j < options.length; j++) {
+          if (options[i] + options[j] !== target) {
+            wrongPair = [i, j];
+          }
+        }
+      }
+      const reactionMs = rng.nextInt(1400, 3600);
+      return {
+        startedAt: 0,
+        completedAt: reactionMs,
+        reactionMs,
+        sequenceIndices: win ? [...validPair] : wrongPair,
+        claimedSuccess: win,
+        score: win ? 86 : 0,
+      };
+    },
+  },
+
+  arrow_blitz: {
+    id: 'arrow_blitz',
+    displayName: 'Panah Kilat',
+    instruction: 'Ketuk urutan arah panah persis seperti petunjuk di atas!',
+    baseDurationMs: 9000,
+    allowedModes: ['solo'],
+    buildParams: (rng, difficulty) => {
+      const length = difficulty >= 3 ? 5 : 4;
+      const sequence: number[] = [];
+      for (let i = 0; i < length; i++) {
+        let dir = rng.nextInt(0, 3);
+        if (i > 0 && dir === sequence[i - 1] && rng.chance(0.45)) {
+          dir = (dir + 1) % 4;
+        }
+        sequence.push(dir);
+      }
+      return { sequence, difficulty };
+    },
+    validate: (params, sub) => {
+      const expected = (params.sequence as number[]) ?? [];
+      const actual = sub.inputLog.sequenceIndices ?? [];
+      const reaction = sub.inputLog.reactionMs ?? sub.inputLog.completedAt - sub.inputLog.startedAt;
+      if (reaction < MIN_REACTION_MS) {
+        return { success: false, score: 0, reason: 'Respon terlalu cepat' };
+      }
+      const ok =
+        expected.length > 0 &&
+        actual.length === expected.length &&
+        expected.every((val, idx) => actual[idx] === val);
+      return {
+        success: ok,
+        score: ok ? Math.max(58, Math.round(125 - reaction / 68)) : 0,
+        reason: ok ? 'Refleks panah sempurna!' : 'Urutan panah keliru!',
+      };
+    },
+    simulateBot: (params, botDiff, rng) => {
+      const difficulty = Number(params.difficulty ?? 2);
+      const expected = (params.sequence as number[]) ?? [0, 1, 2, 3];
+      const win = rng.chance(botSuccessRate(botDiff, difficulty));
+      const reactionMs = rng.nextInt(1300, 3400);
+      return {
+        startedAt: 0,
+        completedAt: reactionMs,
+        reactionMs,
+        sequenceIndices: win
+          ? [...expected]
+          : expected.map((v, i) => (i === expected.length - 1 ? (v + 1) % 4 : v)),
+        claimedSuccess: win,
+        score: win ? 88 : 0,
+      };
+    },
+  },
 };
 
 export const PLAYABLE_TILE_ARCHETYPES: Array<Exclude<ChallengeArchetype, 'start'>> = [
@@ -1551,6 +1685,8 @@ export const PLAYABLE_TILE_ARCHETYPES: Array<Exclude<ChallengeArchetype, 'start'
   'odd_one_out',
   'pattern_next',
   'math_compare',
+  'target_sum',
+  'arrow_blitz',
 ];
 
 export function deriveChallengeRuntimeSeed(matchSeed: number, eventSeq: number, tileId: number): number {
