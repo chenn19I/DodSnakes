@@ -209,9 +209,26 @@ describe('Serverless P2pRoomHost realtime multiplayer roundtrip', () => {
         base.reactionMs = 900;
       } else if (c.archetype === 'quick_duel') {
         base.reactionMs = 180;
+      } else if (c.archetype === 'target_sum') {
+        base.sequenceIndices = [...((c.params.validPair as number[]) ?? [0, 1])];
+        base.reactionMs = 700;
+      } else if (c.archetype === 'arrow_blitz') {
+        base.sequenceIndices = [...((c.params.sequence as number[]) ?? [0, 1, 2, 3])];
+        base.reactionMs = 750;
       }
       return base;
     };
+
+    expect(ch!.mode).toBe('solo');
+    expect(ch!.participantIds).toEqual([host.hostPlayerId]);
+    // Non-owner peer submission on a solo ladder challenge must be ignored cleanly
+    host.handlePeerMessage('peer_guest', 'challenge:submit', {
+      tileId: ch!.tileId,
+      claimedSuccess: true,
+      score: 100,
+      inputLog: makePassInput(ch!),
+    });
+    expect(latestState!.phase).toBe('CHALLENGE');
 
     for (const pid of ch!.participantIds) {
       const peer = pid === host.hostPlayerId ? 'peer_host' : 'peer_guest';
