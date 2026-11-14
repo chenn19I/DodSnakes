@@ -1638,6 +1638,27 @@ const renderNumberOrder: ChallengeRendererFn = ({
   };
 };
 
+function bindChoiceKeyShortcuts(
+  buttons: HTMLButtonElement[],
+  isDone: () => boolean,
+): () => void {
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (isDone()) return;
+    const tag = (e.target as HTMLElement | null)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    const idx = Number(e.key) - 1;
+    if (Number.isInteger(idx) && idx >= 0 && idx < buttons.length) {
+      const target = buttons[idx];
+      if (target && !target.disabled) {
+        e.preventDefault();
+        target.click();
+      }
+    }
+  };
+  window.addEventListener('keydown', onKeyDown);
+  return () => window.removeEventListener('keydown', onKeyDown);
+}
+
 const renderOddOneOut: ChallengeRendererFn = ({
   challenge,
   playerId,
@@ -1690,7 +1711,8 @@ const renderOddOneOut: ChallengeRendererFn = ({
     </div>
   `;
 
-  container.querySelectorAll<HTMLButtonElement>('[data-odd-idx]').forEach((btn, idx) => {
+  const btns = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-odd-idx]'));
+  btns.forEach((btn, idx) => {
     btn.onclick = () => {
       if (submitted) return;
       submitted = true;
@@ -1698,9 +1720,137 @@ const renderOddOneOut: ChallengeRendererFn = ({
       onSubmit(makeInputSubmission(playerId, true, 90, startedAt, { answerIndex: idx }));
     };
   });
+  const unbindKeys = bindChoiceKeyShortcuts(btns, () => submitted);
 
   return () => {
     submitted = true;
+    unbindKeys();
+  };
+};
+
+interface PatternTokenParam {
+  shape: string;
+  colorId: string;
+  hex: string;
+  pattern: string;
+  cbCode: string;
+}
+
+const renderPatternNext: ChallengeRendererFn = ({
+  challenge,
+  playerId,
+  container,
+  colorblindMode,
+  language = 'id',
+  sound,
+  onSubmit,
+}) => {
+  const en = language === 'en';
+  const sequence = (challenge.params.sequence as PatternTokenParam[]) ?? [];
+  const options = (challenge.params.options as PatternTokenParam[]) ?? [];
+  const startedAt = performance.now();
+  let submitted = false;
+
+  container.innerHTML = `
+    <div class="mg-wrap">
+      <div class="mg-sub">${en ? 'What sticker comes next? (or press 1-4)' : 'Stiker apa berikutnya? (atau tekan 1-4)'}</div>
+      <div class="mg-pattern-seq">
+        ${sequence
+          .map(
+            (tok) => `
+          <div class="mg-pattern-slot" style="background:${tok.hex}26;border-color:${tok.hex}">
+            <span style="display:inline-flex;transform:scale(0.56);margin:-14px 0">${renderDoodleSvg(tok.shape)}</span>
+            ${colorblindMode ? `<span class="mg-cb-tag">${renderPatternBadge(tok.pattern)} ${tok.cbCode}</span>` : ''}
+          </div>`,
+          )
+          .join('')}
+        <div class="mg-pattern-slot is-question">?</div>
+      </div>
+      <div class="mg-pattern-grid">
+        ${options
+          .map(
+            (opt, idx) => `
+          <button class="doodle-btn mg-pattern-opt" data-pat-idx="${idx}" style="background:${opt.hex}26;border-color:${opt.hex}">
+            <span class="mg-key-pill">${idx + 1}</span>
+            <span style="display:inline-flex;transform:scale(0.66);margin:-10px 0">${renderDoodleSvg(opt.shape)}</span>
+            ${colorblindMode ? `<span class="mg-cb-tag">${renderPatternBadge(opt.pattern)} ${opt.cbCode}</span>` : ''}
+          </button>`,
+          )
+          .join('')}
+      </div>
+    </div>
+  `;
+
+  const btns = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-pat-idx]'));
+  btns.forEach((btn, idx) => {
+    btn.onclick = () => {
+      if (submitted) return;
+      submitted = true;
+      sound.playUiClick();
+      onSubmit(makeInputSubmission(playerId, true, 90, startedAt, { answerIndex: idx }));
+    };
+  });
+  const unbindKeys = bindChoiceKeyShortcuts(btns, () => submitted);
+
+  return () => {
+    submitted = true;
+    unbindKeys();
+  };
+};
+
+const renderMathCompare: ChallengeRendererFn = ({
+  challenge,
+  playerId,
+  container,
+  language = 'id',
+  sound,
+  onSubmit,
+}) => {
+  const en = language === 'en';
+  const cards = (challenge.params.cards as Array<{ expr: string; val: number }>) ?? [];
+  const findSmallest = Boolean(challenge.params.findSmallest);
+  const startedAt = performance.now();
+  let submitted = false;
+
+  const prompt = findSmallest
+    ? en
+      ? 'Tap the SMALLEST total! (1-3)'
+      : 'Ketuk nilai PALING KECIL! (1-3)'
+    : en
+      ? 'Tap the LARGEST total! (1-3)'
+      : 'Ketuk nilai PALING BESAR! (1-3)';
+
+  container.innerHTML = `
+    <div class="mg-wrap">
+      <div class="mg-sub"><b>${prompt}</b></div>
+      <div class="mg-compare-grid">
+        ${cards
+          .map(
+            (c, idx) => `
+          <button class="doodle-btn mg-compare-card" data-cmp-idx="${idx}">
+            <span class="mg-key-pill">${idx + 1}</span>
+            <span class="tabular-num" style="font-size:1.18rem;font-weight:700">${c.expr}</span>
+          </button>`,
+          )
+          .join('')}
+      </div>
+    </div>
+  `;
+
+  const btns = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-cmp-idx]'));
+  btns.forEach((btn, idx) => {
+    btn.onclick = () => {
+      if (submitted) return;
+      submitted = true;
+      sound.playUiClick();
+      onSubmit(makeInputSubmission(playerId, true, 90, startedAt, { answerIndex: idx }));
+    };
+  });
+  const unbindKeys = bindChoiceKeyShortcuts(btns, () => submitted);
+
+  return () => {
+    submitted = true;
+    unbindKeys();
   };
 };
 
@@ -1725,5 +1875,7 @@ export const CLIENT_CHALLENGE_RENDERERS: Record<string, ChallengeRendererFn> = {
   pair_flip: renderPairFlip,
   number_order: renderNumberOrder,
   odd_one_out: renderOddOneOut,
+  pattern_next: renderPatternNext,
+  math_compare: renderMathCompare,
   boss_doodle: renderBossDoodle,
 };
