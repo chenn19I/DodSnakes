@@ -216,4 +216,33 @@ describe('RoomManager multiplayer logic', () => {
     expect(room.state?.phase).toBe('TURN_BEGIN');
     expect(() => mgr.roll(activeSocket, 2)).not.toThrow();
   });
+
+  it('rejects challenge submissions from non-owner opponents on solo challenges', () => {
+    const { mgr } = createTestHarness({ turnTimeoutMs: 5000, botDelayMs: 50 });
+    const c = mgr.createRoom('s1', { playerName: 'Ali', pawn: 'kucing', color: 'pink' });
+    mgr.joinRoom('s2', {
+      roomCode: c.roomCode,
+      playerName: 'Bima',
+      pawn: 'kodok',
+      color: 'mint',
+    });
+    mgr.setPlayerReady('s2', true);
+    mgr.startRoomGame('s1', 4242);
+
+    mgr.roll('s1', 3); // tile 4 (Ladder) -> strictly solo for p1
+    const room = mgr.getRoom(c.roomCode)!;
+    const ch = room.state!.activeChallenge!;
+    expect(ch.mode).toBe('solo');
+    expect(ch.ownerPlayerId).toBe(room.players[0].id);
+    expect(ch.participantIds).toEqual([room.players[0].id]);
+
+    expect(() =>
+      mgr.submitChallenge('s2', {
+        tileId: ch.tileId,
+        claimedSuccess: true,
+        score: 95,
+        inputLog: { startedAt: 0, completedAt: 700, reactionMs: 700 },
+      }),
+    ).toThrow();
+  });
 });
