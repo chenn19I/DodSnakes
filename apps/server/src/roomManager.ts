@@ -812,4 +812,12 @@ export class RoomManager {
   public getRoom(code: string): RoomInstance | undefined {
     return this.rooms.get(code.toUpperCase());
   }
+
+  public syncToSocket(socketId: string): void {
+    const link = this.socketToRoom.get(socketId);
+    if (!link) return;
+    const room = this.rooms.get(link.roomCode);
+    if (!room || !room.inGame || !room.state) return;
+    this.hooks.emitToSocket(socketId, 'game:sync', { state: room.state });
+  }
 }
