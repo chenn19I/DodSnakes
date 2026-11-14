@@ -23,11 +23,16 @@ import {
 import { RoomManager } from './roomManager.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
+const corsOrigins = process.env.CORS_ORIGIN
+  ?.split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const corsOriginOption = corsOrigins && corsOrigins.length > 0 ? corsOrigins : '*';
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: corsOriginOption }));
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', game: 'Ular Tangga Doodle Dash' });
+  res.json({ status: 'ok', game: 'DodSnake' });
 });
 
 // Serve built client static files in production if present
@@ -35,12 +40,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientDist = path.resolve(__dirname, '../../client/dist');
 if (fs.existsSync(clientDist)) {
   app.use(express.static(clientDist));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/socket.io') || req.path === '/health') {
+      next();
+      return;
+    }
+    res.sendFile(path.join(clientDist, 'index.html'));
+  });
 }
 
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: '*',
+    origin: corsOriginOption,
     methods: ['GET', 'POST'],
   },
 });
@@ -208,5 +220,5 @@ io.on('connection', (socket) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Server Ular Tangga Doodle Dash aktif di http://localhost:${PORT}`);
+  console.log(`Server DodSnake aktif di http://localhost:${PORT}`);
 });
