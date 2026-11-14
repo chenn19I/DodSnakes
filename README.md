@@ -1,13 +1,30 @@
-# Ular Tangga Doodle Dash
+# DodSnake
 
-A **Semi-Doodle** 3D multiplayer tabletop Snakes & Ladders board game set on a textured sketchbook desk: **100 tiles** featuring unique challenges on every space (mini-games across tiles `2–99` and the final **Bos Doodle** boss fight on tile `100`), complete with 6 distinct named characters, cute 3D animations, Online Multiplayer, Local Hot-Seat Mode, and Smart Bots.
+A **Semi-Doodle** 3D multiplayer tabletop Snakes & Ladders board game set on a textured sketchbook desk: **100 tiles** featuring unique challenges on every space (mini-games across tiles `2–99` and the final **Bos Doodle** boss fight on tile `100`), interactive **Character & Accessory Studio**, cute 3D animations, procedural tabletop audio, Online Multiplayer, Local Hot-Seat Mode, and Smart Bots.
 
 ## Monorepo Architecture
 
 - `packages/shared` (`@doodle-dash/shared`): Pure deterministic game engine (no DOM dependency), seeded PRNG, turn state machine, challenge archetype registry, `data/tiles.json` generator, Zod multiplayer protocol schemas, 1,000-match bot simulator, and Vitest unit tests.
-- `apps/server` (`@doodle-dash/server`): Authoritative Node.js + TypeScript + Socket.IO + Express server (4-letter room codes, anti-cheat challenge validation, 60-second reconnect window with automatic bot takeover, live emotes, and spectators).
-- `apps/client` (`@doodle-dash/client`): Vite + TypeScript + Three.js + GSAP web client with 3-band toon shading, boiling-line doodle outlines (~9 fps), 4-zone pastel 3D diorama board, procedural Web Audio SFX, and responsive portrait-first UI.
+- `apps/server` (`@doodle-dash/server`): Authoritative Node.js + TypeScript + Socket.IO + Express server (4-letter room codes, anti-cheat challenge validation, 60-second reconnect window with automatic bot takeover, configurable `CORS_ORIGIN`, live emotes, and spectators).
+- `apps/client` (`@doodle-dash/client`): Vite + TypeScript + Three.js + GSAP web client with 8-band smooth cel shading, gentle doodle outlines, 4-zone pastel 3D diorama board, interactive 3D Character & Accessory Studio, procedural Web Audio SFX + 32-bar tabletop BGM, and responsive portrait-first UI.
 - `data/board.json` & `data/tiles.json`: Board configuration (snakes, ladders, zones) and 100 deterministic tile challenge definitions.
+
+## Public Deployment on Vercel (`dodsnake.vercel.app`)
+
+`vercel.json` is pre-configured to build `@doodle-dash/shared` and `@doodle-dash/client` (`apps/client/dist`) with SPA URL rewrites:
+
+1. **Deploy Frontend to Vercel**:
+   - Import `https://github.com/chenn19I/DodSnake` into [Vercel](https://vercel.com/) and name the project **`dodsnake`** (so it publishes at **`https://dodsnake.vercel.app`**).
+   - If `dodsnake.vercel.app` is already claimed globally on Vercel, recommended clean alternatives are `dodsnake-game.vercel.app`, `dodsnake-play.vercel.app`, `dodsnake-id.vercel.app`, `play-dodsnake.vercel.app`, or `dodsnake-3d.vercel.app`.
+   - Or deploy from CLI inside the repository root:
+     ```bash
+     npx vercel --prod --name dodsnake
+     ```
+2. **Offline vs. Online Multiplayer on Vercel**:
+   - **Local Hot-Seat Mode** and **Smart Bots (*Lawan Bot*)** run 100% client-side in the browser on Vercel without needing a backend server.
+   - Because Vercel static hosting does not run stateful Socket.IO WebSockets, deploy `apps/server` to a Node host (a one-click `render.yaml` blueprint is included at the repository root) and configure:
+     - Backend (`@doodle-dash/server`): `CORS_ORIGIN=https://dodsnake.vercel.app`
+     - Frontend (Vercel Environment Variable): `VITE_SERVER_URL=https://<your-backend-host>`
 
 ## Getting Started
 
@@ -27,9 +44,9 @@ npm run build            # compile shared, server, and client for production
 
 - **Debug Panel**: Open the client with `?debug=1` (e.g. `http://localhost:5173/?debug=1`) in Local/Bot mode to force dice values, jump directly to any tile (`1–100`), trigger any challenge archetype immediately, and inspect FPS & draw call metrics.
 
-## Playable Characters & Passive Perks (*Bakat Unik*)
+## Playable Characters, Accessories & Passive Perks (*Bakat Unik*)
 
-Each character has an individually sculpted 3D pawn with custom accessories, matching SVG portrait, floating 3D nameplate, and a signature passive perk:
+Customize any pawn inside the **Studio Karakter & Aksesoris** with a draggable live 3D turntable, pastel swatches, and 7 accessories (`none`, `crown`, `glasses`, `scarf`, `headset`, `flower`, `backpack`). Each character features custom sculpted meshes, matching SVG portraits, floating 3D nameplates, and a signature passive perk:
 
 1. **Mochi** (*Mochi si Kucing* — *Kaki Gesit*): Gains **+1 ★** bonus every time Mochi climbs a ladder.
 2. **Koko** (*Koko si Kodok* — *Lompatan Kodok*): Rolling a **1** automatically hops **+1** extra step forward.
