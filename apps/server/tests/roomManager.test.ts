@@ -126,4 +126,36 @@ describe('RoomManager multiplayer logic', () => {
     expect(room.state?.rulePreset).toBe('pesta_item');
     expect(room.state?.players[0].items.length).toBe(1);
   });
+
+  it('stores and updates player accessories through room customization and game start', () => {
+    const { mgr } = createTestHarness();
+    const c = mgr.createRoom('s1', {
+      playerName: 'Mochi',
+      pawn: 'kucing',
+      color: 'pink',
+      accessory: 'glasses',
+    });
+    mgr.joinRoom('s2', {
+      roomCode: c.roomCode,
+      playerName: 'Koko',
+      pawn: 'kodok',
+      color: 'mint',
+    });
+
+    mgr.customizePlayer('s2', { accessory: 'headset' });
+    mgr.addBot('s1', 'pintar');
+
+    const room = mgr.getRoom(c.roomCode)!;
+    expect(room.players[0].accessory).toBe('glasses');
+    expect(room.players[1].accessory).toBe('headset');
+    expect(room.players[2].accessory).not.toBe('none');
+
+    mgr.setPlayerReady('s2', true);
+    mgr.startRoomGame('s1', 7331);
+    expect(room.state?.players.map((p) => p.accessory)).toEqual([
+      'glasses',
+      'headset',
+      room.players[2].accessory,
+    ]);
+  });
 });
