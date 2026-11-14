@@ -9,7 +9,7 @@ export const SafePlayerNameSchema = z
   .string()
   .transform((val) => sanitizeUsernameRaw(val))
   .refine((val) => val.length >= 1 && val.length <= 18, {
-    message: 'Nama pemain harus 1–18 karakter.',
+    message: 'Nama pemain harus 1-18 karakter.',
   })
   .refine((val) => /[a-zA-Z0-9]/.test(val), {
     message: 'Nama pemain harus mengandung huruf atau angka.',
