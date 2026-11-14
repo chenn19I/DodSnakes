@@ -1,5 +1,6 @@
 import { io, type Socket } from 'socket.io-client';
 import type {
+  AccessoryId,
   ActiveChallenge,
   BotDifficulty,
   ChallengeSubmission,
@@ -34,13 +35,51 @@ export class OnlineGameController implements GameSessionController {
   private spectator = false;
   private packetChain: Promise<void> = Promise.resolve();
   private disposed = false;
+  private connectionErrorNotified = false;
+
+  public static getServerUrl(): string {
+    if (typeof window !== 'undefined') {
+      const paramUrl = new URLSearchParams(window.location.search).get('server')?.trim();
+      if (paramUrl) {
+        return paramUrl.replace(/\/+$/, '');
+      }
+    }
+    const envUrl = (import.meta.env?.VITE_SERVER_URL ?? '').trim();
+    if (envUrl) {
+      return envUrl.replace(/\/+$/, '');
+    }
+    return '/';
+  }
+
+  public static hasConfiguredServer(): boolean {
+    if (OnlineGameController.getServerUrl() !== '/') {
+      return true;
+    }
+    if (typeof window === 'undefined') return true;
+    const host = window.location.hostname;
+    return host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local');
+  }
 
   constructor(scene: DoodleSceneManager, callbacks: SessionCallbacks) {
     this.scene = scene;
     this.callbacks = callbacks;
-    this.socket = io('/', {
+    const serverUrl = OnlineGameController.getServerUrl();
+    this.socket = io(serverUrl, {
       transports: ['websocket', 'polling'],
       autoConnect: true,
+    });
+
+    this.socket.on('connect', () => {
+      this.connectionErrorNotified = false;
+    });
+
+    this.socket.on('connect_error', () => {
+      if (this.disposed || this.connectionErrorNotified) return;
+      this.connectionErrorNotified = true;
+      const hint = OnlineGameController.hasConfiguredServer()
+        ? 'Gagal terhubung ke server online DodSnake. Periksa koneksi internet atau coba beberapa detik lagi.'
+        : 'Server online belum terhubung (VITE_SERVER_URL belum diatur). Gunakan Mode Lokal atau Lawan Bot untuk langsung bermain!';
+      this.callbacks.onError(hint);
     });
 
     this.socket.on('room:joined', (res: {
@@ -279,8 +318,13 @@ export class OnlineGameController implements GameSessionController {
     localStorage.removeItem(SESSION_KEY);
   }
 
-  public createRoom(playerName: string, pawn: PawnId, color: PlayerColorId): void {
-    this.socket.emit('room:create', { playerName, pawn, color });
+  public createRoom(
+    playerName: string,
+    pawn: PawnId,
+    color: PlayerColorId,
+    accessory: AccessoryId = 'none',
+  ): void {
+    this.socket.emit('room:create', { playerName, pawn, color, accessory });
   }
 
   public joinRoom(
@@ -288,13 +332,14 @@ export class OnlineGameController implements GameSessionController {
     playerName: string,
     pawn: PawnId,
     color: PlayerColorId,
-    options?: { reconnectToken?: string; asSpectator?: boolean },
+    options?: { reconnectToken?: string; asSpectator?: boolean; accessory?: AccessoryId },
   ): void {
     this.socket.emit('room:join', {
       roomCode,
       playerName,
       pawn,
       color,
+      accessory: options?.accessory ?? 'none',
       reconnectToken: options?.reconnectToken,
       asSpectator: options?.asSpectator,
     });
@@ -304,7 +349,12 @@ export class OnlineGameController implements GameSessionController {
     this.socket.emit('player:ready', { ready });
   }
 
-  public customize(patch: { playerName?: string; pawn?: PawnId; color?: PlayerColorId }): void {
+  public customize(patch: {
+    playerName?: string;
+    pawn?: PawnId;
+    color?: PlayerColorId;
+    accessory?: AccessoryId;
+  }): void {
     this.socket.emit('player:customize', patch);
   }
 
