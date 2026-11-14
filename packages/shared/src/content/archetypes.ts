@@ -1365,6 +1365,167 @@ export const ARCHETYPE_REGISTRY: Record<ChallengeArchetype, ArchetypeSpec> = {
       };
     },
   },
+
+  pattern_next: {
+    id: 'pattern_next',
+    displayName: 'Lanjutkan Pola',
+    instruction: 'Tebak stiker berikutnya yang melengkapi pola gambar!',
+    baseDurationMs: 8500,
+    allowedModes: ['all_play', 'solo'],
+    buildParams: (rng, difficulty) => {
+      const shapes = ['cat', 'duck', 'star', 'cloud', 'mushroom', 'crown', 'rocket', 'fish', 'banana', 'lollipop'];
+      const colorDefs = [
+        { colorId: 'pink', hex: '#ff6b8b', pattern: 'diamond', cbCode: 'PK' },
+        { colorId: 'biru', hex: '#4ea8de', pattern: 'triangle', cbCode: 'BR' },
+        { colorId: 'kuning', hex: '#f4a261', pattern: 'star', cbCode: 'KN' },
+        { colorId: 'mint', hex: '#38b000', pattern: 'square', cbCode: 'HJ' },
+        { colorId: 'ungu', hex: '#9b5de5', pattern: 'circle', cbCode: 'UN' },
+      ];
+      const chosenShapes = rng.shuffle(shapes).slice(0, 4);
+      const chosenColors = rng.shuffle(colorDefs).slice(0, 4);
+      const tokens = [0, 1, 2, 3].map((i) => ({
+        shape: chosenShapes[i],
+        colorId: chosenColors[i].colorId,
+        hex: chosenColors[i].hex,
+        pattern: chosenColors[i].pattern,
+        cbCode: chosenColors[i].cbCode,
+      }));
+
+      // Cycle across distinct pattern grammars: ABAB->A, AABA->A, ABCAB->C, ABBC->A
+      const modePick = rng.nextInt(0, difficulty >= 3 ? 3 : 2);
+      let seqIndices: number[];
+      let answerTokenIdx: number;
+      if (modePick === 0) {
+        seqIndices = [0, 1, 0, 1];
+        answerTokenIdx = 0;
+      } else if (modePick === 1) {
+        seqIndices = [0, 0, 1, 0, 0];
+        answerTokenIdx = 1;
+      } else if (modePick === 2) {
+        seqIndices = [0, 1, 2, 0, 1];
+        answerTokenIdx = 2;
+      } else {
+        seqIndices = [0, 1, 1, 2, 0];
+        answerTokenIdx = 1;
+      }
+
+      const sequence = seqIndices.map((idx) => tokens[idx]);
+      const answerToken = tokens[answerTokenIdx];
+      const options = rng.shuffle([...tokens]);
+      const correctIndex = options.findIndex(
+        (opt) => opt.shape === answerToken.shape && opt.colorId === answerToken.colorId,
+      );
+      return { sequence, options, correctIndex, difficulty };
+    },
+    validate: (params, sub) => {
+      const correctIdx = Number(params.correctIndex ?? 0);
+      const reaction = sub.inputLog.reactionMs ?? sub.inputLog.completedAt - sub.inputLog.startedAt;
+      if (reaction < MIN_REACTION_MS) {
+        return { success: false, score: 0, reason: 'Respon terlalu cepat' };
+      }
+      const ok = sub.inputLog.answerIndex === correctIdx;
+      return {
+        success: ok,
+        score: ok ? Math.max(55, Math.round(115 - reaction / 65)) : 0,
+        reason: ok ? 'Pola tepat sekali!' : 'Urutan pola belum pas',
+      };
+    },
+    simulateBot: (params, botDiff, rng) => {
+      const difficulty = Number(params.difficulty ?? 2);
+      const correctIdx = Number(params.correctIndex ?? 0);
+      const win = rng.chance(botSuccessRate(botDiff, difficulty));
+      const reactionMs = rng.nextInt(1100, 3000);
+      return {
+        startedAt: 0,
+        completedAt: reactionMs,
+        reactionMs,
+        answerIndex: win ? correctIdx : (correctIdx + 1) % 4,
+        claimedSuccess: win,
+        score: win ? 85 : 0,
+      };
+    },
+  },
+
+  math_compare: {
+    id: 'math_compare',
+    displayName: 'Bandingkan Hitungan',
+    instruction: 'Pilih kartu hitungan dengan hasil paling besar atau paling kecil!',
+    baseDurationMs: 8500,
+    allowedModes: ['all_play', 'solo'],
+    buildParams: (rng, difficulty) => {
+      const findSmallest = rng.chance(0.45);
+      const cards: Array<{ expr: string; val: number }> = [];
+      const usedVals = new Set<number>();
+
+      while (cards.length < 3) {
+        const opRoll = rng.nextInt(0, difficulty >= 3 ? 2 : 1);
+        let a: number;
+        let b: number;
+        let expr: string;
+        let val: number;
+        if (opRoll === 0) {
+          a = rng.nextInt(4, 18 + difficulty * 3);
+          b = rng.nextInt(3, 14 + difficulty * 2);
+          expr = `${a} + ${b}`;
+          val = a + b;
+        } else if (opRoll === 1) {
+          a = rng.nextInt(10, 26 + difficulty * 3);
+          b = rng.nextInt(2, Math.min(a - 1, 14));
+          expr = `${a} - ${b}`;
+          val = a - b;
+        } else {
+          a = rng.nextInt(2, 6 + difficulty);
+          b = rng.nextInt(2, 6);
+          expr = `${a} x ${b}`;
+          val = a * b;
+        }
+        if (usedVals.has(val)) continue;
+        usedVals.add(val);
+        cards.push({ expr, val });
+      }
+
+      const shuffledCards = rng.shuffle(cards);
+      let bestIdx = 0;
+      for (let i = 1; i < shuffledCards.length; i++) {
+        if (findSmallest ? shuffledCards[i].val < shuffledCards[bestIdx].val : shuffledCards[i].val > shuffledCards[bestIdx].val) {
+          bestIdx = i;
+        }
+      }
+      return {
+        cards: shuffledCards,
+        findSmallest,
+        correctIndex: bestIdx,
+        difficulty,
+      };
+    },
+    validate: (params, sub) => {
+      const correctIdx = Number(params.correctIndex ?? 0);
+      const reaction = sub.inputLog.reactionMs ?? sub.inputLog.completedAt - sub.inputLog.startedAt;
+      if (reaction < MIN_REACTION_MS) {
+        return { success: false, score: 0, reason: 'Respon terlalu cepat' };
+      }
+      const ok = sub.inputLog.answerIndex === correctIdx;
+      return {
+        success: ok,
+        score: ok ? Math.max(55, Math.round(115 - reaction / 65)) : 0,
+        reason: ok ? 'Hitungan paling jeli!' : 'Cek ulang nilainya ya!',
+      };
+    },
+    simulateBot: (params, botDiff, rng) => {
+      const difficulty = Number(params.difficulty ?? 2);
+      const correctIdx = Number(params.correctIndex ?? 0);
+      const win = rng.chance(botSuccessRate(botDiff, difficulty));
+      const reactionMs = rng.nextInt(1300, 3400);
+      return {
+        startedAt: 0,
+        completedAt: reactionMs,
+        reactionMs,
+        answerIndex: win ? correctIdx : (correctIdx + 1) % 3,
+        claimedSuccess: win,
+        score: win ? 85 : 0,
+      };
+    },
+  },
 };
 
 export const PLAYABLE_TILE_ARCHETYPES: Array<Exclude<ChallengeArchetype, 'start'>> = [
@@ -1388,6 +1549,8 @@ export const PLAYABLE_TILE_ARCHETYPES: Array<Exclude<ChallengeArchetype, 'start'
   'pair_flip',
   'number_order',
   'odd_one_out',
+  'pattern_next',
+  'math_compare',
 ];
 
 export function deriveChallengeRuntimeSeed(matchSeed: number, eventSeq: number, tileId: number): number {
