@@ -3,6 +3,7 @@ import {
   BOARD_LAYOUT,
   TILES,
   TILE_SPACING,
+  getBoardSpecialTile,
   getTileGridCoord,
   getZoneForTile,
   type Tile,
@@ -21,7 +22,7 @@ import {
 
 export interface TilePreviewMarker {
   tileId: number;
-  kind: 'normal' | 'ladder' | 'snake' | 'boss' | 'bounced';
+  kind: 'normal' | 'ladder' | 'snake' | 'boss' | 'bounced' | 'special';
 }
 
 export interface BoardVisuals {
@@ -113,6 +114,10 @@ function archetypeBadgeSymbol(tile: Tile): string {
       return '⊞';
     case 'math_compare':
       return '><';
+    case 'target_sum':
+      return '=+';
+    case 'arrow_blitz':
+      return '↕';
     default:
       return '•';
   }
@@ -211,6 +216,50 @@ function createTileAtlasTexture(): THREE.CanvasTexture {
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
+    } else {
+      const special = getBoardSpecialTile(tile.id);
+      if (special) {
+        const ringColor =
+          special.kind === 'star_fountain'
+            ? DOODLE_PALETTE.yellow
+            : special.kind === 'supply_crate'
+              ? '#FF9852'
+              : special.kind === 'shield_shrine'
+                ? DOODLE_PALETTE.blue
+                : DOODLE_PALETTE.mint;
+        ctx.strokeStyle = ringColor;
+        ctx.lineWidth = 7;
+        ctx.setLineDash([12, 6]);
+        ctx.beginPath();
+        ctx.roundRect(x + 18, y + 18, cell - 36, cell - 36, 22);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Bottom-left emblem badge (shape + color coded for colorblind clarity)
+        const bx = x + 44;
+        const by = y + cell - 40;
+        ctx.fillStyle = ringColor;
+        ctx.strokeStyle = DOODLE_PALETTE.ink;
+        ctx.lineWidth = 3.2;
+        ctx.beginPath();
+        ctx.arc(bx, by, 18, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = DOODLE_PALETTE.ink;
+        ctx.font = 'bold 20px "Patrick Hand", "Comic Sans MS", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const glyph =
+          special.kind === 'star_fountain'
+            ? '+★'
+            : special.kind === 'supply_crate'
+              ? '+?'
+              : special.kind === 'shield_shrine'
+                ? 'S'
+                : '>>';
+        ctx.fillText(glyph, bx, by + 1);
+      }
     }
 
     // Mode tag dot (duel / all_play)
@@ -749,6 +798,7 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
     snake: DOODLE_PALETTE.pink,
     boss: DOODLE_PALETTE.orange,
     bounced: DOODLE_PALETTE.coral,
+    special: DOODLE_PALETTE.purple,
   };
   const previewKindColorsCb: Record<TilePreviewMarker['kind'], string> = {
     normal: '#E69F00',
@@ -756,6 +806,7 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
     snake: '#D55E00',
     boss: '#CC79A7',
     bounced: '#0072B2',
+    special: '#56B4E9',
   };
   let colorblindMode = false;
   let latestPreviews: TilePreviewMarker[] = [];
