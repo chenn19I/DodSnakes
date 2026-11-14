@@ -23,8 +23,14 @@ export function buildChallengeRuntimeParams(
   runtimeSeed: number,
   difficulty: number,
   tileId: number,
+  alwaysRegenerate = false,
 ): Record<string, unknown> {
-  if (challengeArchetype === 'lucky_wheel' || challengeArchetype === 'quick_duel' || challengeArchetype === 'gift_trap') {
+  if (
+    alwaysRegenerate ||
+    challengeArchetype === 'lucky_wheel' ||
+    challengeArchetype === 'quick_duel' ||
+    challengeArchetype === 'gift_trap'
+  ) {
     const rng = new SeededRng(runtimeSeed);
     return ARCHETYPE_REGISTRY[challengeArchetype].buildParams(rng, difficulty, tileId);
   }
