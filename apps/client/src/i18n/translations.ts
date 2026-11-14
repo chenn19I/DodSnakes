@@ -7,12 +7,15 @@ import {
   PLAYER_COLORS,
   STAR_SHOP_COST,
   type AccessoryId,
+  type BoardSpecialKind,
   type ChallengeArchetype,
   type EmoteId,
   type GameEvent,
   type GameModePreset,
   type GameState,
   type ItemType,
+  type MatchMission,
+  type MatchMissionKind,
   type PawnId,
   type PlayerColorId,
   type ZoneId,
@@ -105,6 +108,8 @@ const ITEM_META_EN: Record<ItemType, { name: string; description: string }> = {
   surprise: { name: 'Mystery Box', description: 'Triggers a random playful boost or twist before rolling!' },
   magnet_star: { name: 'Star Magnet', description: 'Pull 1 ★ from the race leader (or gain +1 ★ bonus)!' },
   swap_turbo: { name: 'Turbo Boots', description: 'Add +2 extra steps onto your next dice roll!' },
+  star_multiplier: { name: 'Double Charm', description: 'Double challenge star rewards (2x) if you win this turn!' },
+  rival_brake: { name: 'Rival Brake', description: 'Put a brake on the leading rival so their next roll is max 3!' },
 };
 
 const COLOR_NAMES_EN: Record<PlayerColorId, string> = {
@@ -165,6 +170,8 @@ const ARCHETYPE_EN: Record<ChallengeArchetype, { name: string; instruction: stri
   odd_one_out: { name: 'Spot the Odd One', instruction: 'Find and tap the 1 unique sticker that stands out from the rest!' },
   pattern_next: { name: 'Complete the Pattern', instruction: 'Pick the sticker that comes next in the sequence!' },
   math_compare: { name: 'Compare Expressions', instruction: 'Tap the math card with the LARGEST or SMALLEST total!' },
+  target_sum: { name: 'Target Sum', instruction: 'Tap 2 number cards whose total equals the target!' },
+  arrow_blitz: { name: 'Arrow Blitz', instruction: 'Repeat the arrow sequence in order (taps or Arrow/WASD)!' },
   boss_doodle: { name: 'Boss Doodle Finale', instruction: 'Clear all 3 stages at Tile 100 to claim victory!' },
 };
 
@@ -276,6 +283,40 @@ export function getArchetypeMeta(arch: ChallengeArchetype, lang: AppLanguage) {
     };
   }
   return ARCHETYPE_EN[arch];
+}
+
+export function getSpecialTileLabel(kind: BoardSpecialKind, lang: AppLanguage): string {
+  switch (kind) {
+    case 'star_fountain':
+      return lang === 'en' ? 'Star Fountain (+2★)' : 'Air Mancur Bintang (+2★)';
+    case 'supply_crate':
+      return lang === 'en' ? 'Supply Crate' : 'Peti Item Spesial';
+    case 'shield_shrine':
+      return lang === 'en' ? 'Shield Shrine (+1 Shield)' : 'Altar Perisai (+1 Perisai)';
+    case 'tailwind':
+      return lang === 'en' ? 'Tailwind Boost (+2 tiles)' : 'Angin Dorong (+2 kotak)';
+  }
+}
+
+export function getMissionLabel(kind: MatchMissionKind, lang: AppLanguage): string {
+  switch (kind) {
+    case 'climb_2':
+      return lang === 'en' ? 'Climb 2 ladders' : 'Naik 2 tangga';
+    case 'win_3':
+      return lang === 'en' ? 'Win 3 challenges' : 'Menang 3 tantangan';
+    case 'streak_2':
+      return lang === 'en' ? '2x challenge streak' : 'Kombo 2x menang';
+    case 'use_2_items':
+      return lang === 'en' ? 'Use 2 items' : 'Pakai 2 item';
+  }
+}
+
+export function formatMissionText(mission: MatchMission, lang: AppLanguage): string {
+  const title = getMissionLabel(mission.kind, lang);
+  const prog = `${Math.min(mission.progress, mission.target)}/${mission.target}`;
+  return mission.completed
+    ? `${title} (${lang === 'en' ? 'Done!' : 'Tuntas!'})`
+    : `${title} (${prog})`;
 }
 
 export function getZoneName(zoneId: ZoneId, lang: AppLanguage): string {
@@ -492,6 +533,28 @@ export function formatEventFeedText(
     };
   }
 
+  if (ev.type === 'BoardSpecialTriggered') {
+    const label = getSpecialTileLabel(ev.kind, lang);
+    const msg =
+      lang === 'en'
+        ? `${nameOf(ev.playerId)} activated ${label}`
+        : `${nameOf(ev.playerId)} dapat ${label}`;
+    return { text: msg, toast: msg };
+  }
+
+  if (ev.type === 'MissionCompleted') {
+    const rewardPart = ev.grantedItem
+      ? `+${ev.starsDelta}★ + ${getItemMeta(ev.grantedItem, lang).name}`
+      : ev.shieldsDelta
+        ? `+${ev.starsDelta}★ + ${ev.shieldsDelta} ${lang === 'en' ? 'Shield' : 'Perisai'}`
+        : `+${ev.starsDelta}★`;
+    const msg =
+      lang === 'en'
+        ? `${nameOf(ev.playerId)} cleared Match Mission (${rewardPart})`
+        : `Misi ${nameOf(ev.playerId)} tuntas (${rewardPart})`;
+    return { text: msg, toast: msg };
+  }
+
   if (ev.type === 'GameWon') {
     return {
       text: lang === 'en' ? `${nameOf(ev.winnerId)} WINS!` : `${nameOf(ev.winnerId)} MENANG!`,
@@ -520,6 +583,8 @@ export function localizeText(msg: string, lang: AppLanguage): string {
     'Dadu Emas siap! Lempar 2 dadu sekaligus pada giliran ini.': 'Golden Dice ready! Roll 2 dice and pick one this turn.',
     'Rem Mendadak aktif! Dadu maksimal angka 3 pada lemparan ini.': 'Quick Brake active! Max die roll capped at 3.',
     'Sepatu Turbo aktif! +2 langkah ekstra pada lemparan berikutnya!': 'Turbo Boots active! +2 extra steps on your next roll!',
+    'Jimat Ganda aktif! Hadiah bintang tantangan giliran ini 2x lipat!': 'Double Charm active! Challenge star rewards doubled this turn!',
+    'Tidak ada lawan di papan, Jebakan Rem memberi +1 ★ bonus!': 'No rivals on the board, Rival Brake granted +1 ★ bonus!',
     'Magnet Bintang menemukan +1 ★ berkilau!': 'Star Magnet found +1 sparkling ★!',
     'Kartu Kasihan aktif! Tidak kena penalti.': 'Mercy Card active! Penalty skipped.',
     'Lewat 1 giliran': 'Skip 1 turn',
@@ -545,6 +610,7 @@ export function localizeText(msg: string, lang: AppLanguage): string {
     .replace(/^YAAH\.\.\. (.+) gagal tantangan\.(?: \((.+)\))?$/, 'OOPS... $1 missed the challenge.')
     .replace(/^Roda berhenti di: (.+)$/, 'Wheel landed on: $1')
     .replace(/^Magnet Bintang menarik 1 ★ dari (.+)!$/, 'Star Magnet pulled 1 ★ from $1!')
+    .replace(/^Jebakan Rem dipasang ke (.+)! Dadu berikutnya maksimal 3!$/, 'Rival Brake placed on $1! Next roll capped at 3!')
     .replace(/^Kotak Kejutan memberi (.+)!$/, 'Mystery Box gave $1!')
     .replace(/^Pemain (\d+): /, 'Player $1: ');
 }
@@ -641,6 +707,8 @@ export type UiKey =
   | 'howtoSnakeDesc'
   | 'howtoShopTitle'
   | 'howtoShopDesc'
+  | 'howtoSpecialTitle'
+  | 'howtoSpecialDesc'
   | 'howtoItemTitle'
   | 'winnerBanner'
   | 'podiumTitle'
@@ -662,6 +730,10 @@ export type UiKey =
   | 'youWinChallenge'
   | 'youMissChallenge'
   | 'watchingChallenge'
+  | 'duelPickWait'
+  | 'spectatingChallenge'
+  | 'spectatingDuel'
+  | 'missionLabel'
   | 'botPlaying'
   | 'supportBtn'
   | 'supportTitle'
@@ -760,6 +832,8 @@ const ID_STRINGS: Record<UiKey, string> = {
   howtoSnakeDesc: 'Di petak Tangga, pion naik otomatis setelah tantangan! Di petak Ular, MENANG tantangan atau punya Perisai = lolos; KALAH = meluncur turun! (Jika gagal 2x beruntun, penalti dilewati.)',
   howtoShopTitle: '4. Kantin Bintang (Item Taktis)',
   howtoShopDesc: 'Kumpulkan Bintang dari mini-game lalu tukar 4 Bintang (3 Bintang khusus Roro Dino) untuk membeli Kotak Item sebelum melempar dadu!',
+  howtoSpecialTitle: '5. Petak Spesial, Misi & Duel 1v1',
+  howtoSpecialDesc: 'Petak spesial memberi +2 ★, item, perisai, atau angin dorong +2! Tuntaskan Misi Pertandingan (+3 ★ + bonus) dan pilih 1 lawan saat Duel!',
   howtoItemTitle: 'Koleksi Item Taktis:',
   winnerBanner: 'Pemenang Papan Crayon!',
   podiumTitle: 'Podium & Penghargaan Seru',
@@ -781,6 +855,10 @@ const ID_STRINGS: Record<UiKey, string> = {
   youWinChallenge: 'BERHASIL!',
   youMissChallenge: 'YAAH... COBA LAGI!',
   watchingChallenge: 'Menonton teman menyelesaikan tantangan...',
+  duelPickWait: '{name} sedang memilih lawan duel 1v1...',
+  spectatingChallenge: '{name} sedang bermain {challenge} (Kt.{tile})',
+  spectatingDuel: 'Duel 1v1: {a} vs {b} (Kt.{tile})',
+  missionLabel: 'Misi',
   botPlaying: 'Bot sedang memainkan tantangan secara otomatis...',
   supportBtn: 'Dukung',
   supportTitle: 'Dukung DodSnake (Saweria)',
@@ -880,6 +958,8 @@ const EN_STRINGS: Record<UiKey, string> = {
   howtoSnakeDesc: 'Ladder tiles automatically climb UP after the tile check! On Snake heads, WINNING the mini-game or holding a Shield keeps you safe; failing slides you down!',
   howtoShopTitle: '4. Star Canteen (Tactical Shop)',
   howtoShopDesc: 'Earn Stars from mini-games and spend 4 Stars (only 3 Stars for Roro the Dino) before rolling to grab a tactical item!',
+  howtoSpecialTitle: '5. Special Tiles, Missions & 1v1 Duel',
+  howtoSpecialDesc: 'Special tiles grant +2 ★, items, shields, or +2 tailwind! Complete your Match Mission (+3 ★ + reward) and pick 1 rival in Duels!',
   howtoItemTitle: 'Tactical Items:',
   winnerBanner: 'Board Champion!',
   podiumTitle: 'Podium & Superlative Awards',
@@ -901,6 +981,10 @@ const EN_STRINGS: Record<UiKey, string> = {
   youWinChallenge: 'SUCCESS!',
   youMissChallenge: 'MISSED!',
   watchingChallenge: 'Watching friend play the challenge...',
+  duelPickWait: '{name} is picking a 1v1 duel rival...',
+  spectatingChallenge: '{name} is playing {challenge} (Tile {tile})',
+  spectatingDuel: '1v1 Duel: {a} vs {b} (Tile {tile})',
+  missionLabel: 'Mission',
   botPlaying: 'Bot is playing this challenge automatically...',
   supportBtn: 'Donate',
   supportTitle: 'Support DodSnake (Saweria)',
