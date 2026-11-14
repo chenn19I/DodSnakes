@@ -16,6 +16,7 @@ import {
   recordChallengeSubmission,
   resolveTile,
   rollDice,
+  selectDuelOpponent,
   shouldBotBuyStarItem,
   simulateBotChallengeSubmission,
   startGame,
@@ -613,6 +614,24 @@ export class RoomManager {
   }
 
   private scheduleChallengeResolution(room: RoomInstance, challenge: ActiveChallenge): void {
+    if (room.challengeTimer) {
+      clearTimeout(room.challengeTimer);
+      room.challengeTimer = undefined;
+    }
+
+    if (challenge.mode === 'duel' && challenge.awaitingDuelPick) {
+      room.challengeTimer = setTimeout(() => {
+        if (!room.state || room.state.phase !== 'CHALLENGE' || !room.state.activeChallenge?.awaitingDuelPick) {
+          return;
+        }
+        room.state = selectDuelOpponent(room.state, challenge.ownerPlayerId, undefined, Date.now());
+        const picked = room.state.activeChallenge!;
+        this.hooks.emitToRoom(room.code, 'challenge:begin', { challenge: picked });
+        this.scheduleChallengeResolution(room, picked);
+      }, 12_000);
+      return;
+    }
+
     // Pre-fill bot participants
     for (const pid of challenge.participantIds) {
       const p = room.state!.players.find((x) => x.id === pid);
@@ -648,19 +667,14 @@ export class RoomManager {
     if (!player || !room.state?.activeChallenge) return;
     const ch = room.state.activeChallenge;
     if (ch.ownerPlayerId !== player.id || ch.mode !== 'duel') return;
+    if (!ch.awaitingDuelPick && Object.keys(ch.submissions).length > 0) return;
     const exists = room.state.players.some((p) => p.id === opponentId && p.id !== player.id);
     if (!exists) return;
 
-    ch.opponentId = opponentId;
-    ch.participantIds = [player.id, opponentId];
-    // Reset submissions & re-populate bot if new opponent is bot
-    ch.submissions = {};
-    const opp = room.state.players.find((p) => p.id === opponentId);
-    if (opp?.isBot) {
-      const botRng = new SeededRng(hashSeed(ch.seed, opp.id, 'bot_srv'));
-      ch.submissions[opp.id] = simulateBotChallengeSubmission(ch, opp.id, opp.botDifficulty, botRng);
-    }
-    this.hooks.emitToRoom(room.code, 'challenge:begin', { challenge: ch });
+    room.state = selectDuelOpponent(room.state, player.id, opponentId, Date.now());
+    const updated = room.state.activeChallenge!;
+    this.hooks.emitToRoom(room.code, 'challenge:begin', { challenge: updated });
+    this.scheduleChallengeResolution(room, updated);
   }
 
   public submitChallenge(socketId: string, submission: Omit<ChallengeSubmission, 'playerId'> & { tileId: number }): void {
@@ -672,7 +686,17 @@ export class RoomManager {
     if (ch.tileId !== submission.tileId) {
       throw new Error('Tile tantangan tidak cocok.');
     }
-    if (!ch.participantIds.includes(player.id)) {
+    if (ch.awaitingDuelPick) {
+      throw new Error('Penantang sedang memilih lawan duel.');
+    }
+    const allowedParticipant =
+      ch.participantIds.includes(player.id) &&
+      (ch.mode === 'duel'
+        ? player.id === ch.ownerPlayerId || player.id === ch.opponentId
+        : ch.mode === 'solo'
+          ? player.id === ch.ownerPlayerId
+          : true);
+    if (!allowedParticipant) {
       throw new Error('Kamu tidak termasuk peserta tantangan ini.');
     }
 
@@ -683,7 +707,8 @@ export class RoomManager {
       inputLog: submission.inputLog,
     });
 
-    const allSubmitted = ch.participantIds.every((pid) => Boolean(room.state!.activeChallenge?.submissions[pid]));
+    const chAfter = room.state.activeChallenge!;
+    const allSubmitted = chAfter.participantIds.every((pid) => Boolean(chAfter.submissions[pid]));
     if (allSubmitted) {
       if (room.challengeTimer) clearTimeout(room.challengeTimer);
       this.finalizeChallenge(room);
