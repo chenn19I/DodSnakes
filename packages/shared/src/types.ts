@@ -190,6 +190,8 @@ export type ChallengeArchetype =
   | 'pair_flip'
   | 'number_order'
   | 'odd_one_out'
+  | 'pattern_next'
+  | 'math_compare'
   | 'boss_doodle';
 
 export type ChallengeMode = 'solo' | 'duel' | 'all_play';
