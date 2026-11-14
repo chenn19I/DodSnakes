@@ -166,7 +166,9 @@ describe('Serverless P2pRoomHost realtime multiplayer roundtrip', () => {
         c.archetype === 'quick_math' ||
         c.archetype === 'stroop_color' ||
         c.archetype === 'color_count' ||
-        c.archetype === 'odd_one_out'
+        c.archetype === 'odd_one_out' ||
+        c.archetype === 'pattern_next' ||
+        c.archetype === 'math_compare'
       ) {
         base.answerIndex = Number(c.params.correctIndex);
         base.reactionMs = 450;
