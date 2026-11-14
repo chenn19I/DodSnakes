@@ -19,6 +19,7 @@ import {
   shouldBotBuyStarItem,
   simulateBotChallengeSubmission,
   startGame,
+  type AccessoryId,
   type ActiveChallenge,
   type BotDifficulty,
   type ChallengeSubmission,
@@ -39,6 +40,7 @@ export interface ServerPlayerSlot {
   name: string;
   pawn: PawnId;
   color: PlayerColorId;
+  accessory: AccessoryId;
   ready: boolean;
   connected: boolean;
   isBot: boolean;
@@ -68,6 +70,7 @@ export interface RoomInstance {
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // exclude I, O for readability
 const ALL_PAWNS: PawnId[] = ['kucing', 'kodok', 'bebek', 'panda', 'dino', 'jamur'];
 const ALL_COLORS: PlayerColorId[] = ['pink', 'kuning', 'mint', 'biru', 'oranye', 'ungu'];
+const BOT_ACCESSORIES: AccessoryId[] = ['glasses', 'scarf', 'flower', 'backpack', 'headset', 'crown'];
 
 export class RoomManager {
   private readonly rooms = new Map<string, RoomInstance>();
@@ -118,6 +121,7 @@ export class RoomManager {
       name: p.name,
       pawn: p.pawn,
       color: p.color,
+      accessory: p.accessory,
       ready: p.ready,
       connected: p.connected,
       isBot: p.isBot,
@@ -139,7 +143,7 @@ export class RoomManager {
 
   public createRoom(
     socketId: string,
-    payload: { playerName: string; pawn: PawnId; color: PlayerColorId },
+    payload: { playerName: string; pawn: PawnId; color: PlayerColorId; accessory?: AccessoryId },
   ): { roomCode: string; playerId: string; reconnectToken: string } {
     const code = this.generateRoomCode();
     const playerId = this.newId('p');
@@ -152,6 +156,7 @@ export class RoomManager {
       name: payload.playerName,
       pawn: payload.pawn,
       color: payload.color,
+      accessory: payload.accessory ?? 'none',
       ready: true,
       connected: true,
       isBot: false,
@@ -182,6 +187,7 @@ export class RoomManager {
       playerName: string;
       pawn: PawnId;
       color: PlayerColorId;
+      accessory?: AccessoryId;
       reconnectToken?: string;
       asSpectator?: boolean;
     },
@@ -269,6 +275,7 @@ export class RoomManager {
       name: payload.playerName,
       pawn,
       color,
+      accessory: payload.accessory ?? 'none',
       ready: false,
       connected: true,
       isBot: false,
@@ -303,13 +310,14 @@ export class RoomManager {
 
   public customizePlayer(
     socketId: string,
-    patch: { playerName?: string; pawn?: PawnId; color?: PlayerColorId },
+    patch: { playerName?: string; pawn?: PawnId; color?: PlayerColorId; accessory?: AccessoryId },
   ): void {
     const { room, player } = this.getContext(socketId);
     if (!player || room.inGame) return;
     if (patch.playerName) player.name = patch.playerName;
     if (patch.pawn) player.pawn = patch.pawn;
     if (patch.color) player.color = patch.color;
+    if (patch.accessory !== undefined) player.accessory = patch.accessory;
     this.broadcastRoomState(room);
   }
 
@@ -325,6 +333,7 @@ export class RoomManager {
     const usedColors = new Set(room.players.map((p) => p.color));
     const pawn = ALL_PAWNS.find((x) => !usedPawns.has(x)) ?? 'dino';
     const color = ALL_COLORS.find((x) => !usedColors.has(x)) ?? 'oranye';
+    const accessory = BOT_ACCESSORIES[room.players.length % BOT_ACCESSORIES.length];
     const baseName = PAWN_META[pawn].shortName;
     const tag = botDifficulty === 'juara' ? 'Juara' : botDifficulty === 'santai' ? 'Santai' : 'Bot';
 
@@ -335,6 +344,7 @@ export class RoomManager {
       name: `${baseName} (${tag})`,
       pawn,
       color,
+      accessory,
       ready: true,
       connected: true,
       isBot: true,
@@ -394,6 +404,7 @@ export class RoomManager {
         name: p.name,
         pawn: p.pawn,
         color: p.color,
+        accessory: p.accessory,
         isBot: p.isBot,
         botDifficulty: p.botDifficulty,
       })),

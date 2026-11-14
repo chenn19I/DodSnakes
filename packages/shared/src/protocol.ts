@@ -2,6 +2,15 @@ import { z } from 'zod';
 
 export const PawnIdSchema = z.enum(['kucing', 'kodok', 'bebek', 'panda', 'dino', 'jamur']);
 export const PlayerColorIdSchema = z.enum(['pink', 'kuning', 'mint', 'biru', 'oranye', 'ungu']);
+export const AccessoryIdSchema = z.enum([
+  'none',
+  'crown',
+  'glasses',
+  'scarf',
+  'headset',
+  'flower',
+  'backpack',
+]);
 export const BotDifficultySchema = z.enum(['santai', 'pintar', 'juara']);
 export const GameModePresetSchema = z.enum(['klasik', 'kilat', 'pesta_item']);
 export const EmoteIdSchema = z.enum(['jempol', 'ketawa', 'kaget', 'nangis', 'api', 'mahkota']);
@@ -10,6 +19,7 @@ export const RoomCreateSchema = z.object({
   playerName: z.string().trim().min(1).max(18),
   pawn: PawnIdSchema,
   color: PlayerColorIdSchema,
+  accessory: AccessoryIdSchema.optional(),
 });
 
 export const RoomJoinSchema = z.object({
@@ -17,6 +27,7 @@ export const RoomJoinSchema = z.object({
   playerName: z.string().trim().min(1).max(18),
   pawn: PawnIdSchema,
   color: PlayerColorIdSchema,
+  accessory: AccessoryIdSchema.optional(),
   reconnectToken: z.string().optional(),
   asSpectator: z.boolean().optional(),
 });
@@ -29,6 +40,7 @@ export const PlayerCustomizeSchema = z.object({
   playerName: z.string().trim().min(1).max(18).optional(),
   pawn: PawnIdSchema.optional(),
   color: PlayerColorIdSchema.optional(),
+  accessory: AccessoryIdSchema.optional(),
 });
 
 export const RoomAddBotSchema = z.object({
@@ -105,6 +117,7 @@ export interface LobbyPlayerInfo {
   name: string;
   pawn: z.infer<typeof PawnIdSchema>;
   color: z.infer<typeof PlayerColorIdSchema>;
+  accessory?: z.infer<typeof AccessoryIdSchema>;
   ready: boolean;
   connected: boolean;
   isBot: boolean;

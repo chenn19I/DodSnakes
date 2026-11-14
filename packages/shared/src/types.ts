@@ -78,6 +78,60 @@ export const PAWN_META: Record<PawnId, PawnMetaInfo> = {
   },
 };
 
+export type AccessoryId = 'none' | 'crown' | 'glasses' | 'scarf' | 'headset' | 'flower' | 'backpack';
+
+export interface AccessoryMetaInfo {
+  id: AccessoryId;
+  name: string;
+  shortName: string;
+  description: string;
+}
+
+export const ACCESSORY_META: Record<AccessoryId, AccessoryMetaInfo> = {
+  none: {
+    id: 'none',
+    name: 'Gaya Asli',
+    shortName: 'Asli',
+    description: 'Tampil dengan ciri khas bawaan karakter tanpa tambahan.',
+  },
+  crown: {
+    id: 'crown',
+    name: 'Mahkota Mini',
+    shortName: 'Mahkota',
+    description: 'Mahkota keemasan mungil untuk calon juara papan.',
+  },
+  glasses: {
+    id: 'glasses',
+    name: 'Kacamata Bulat',
+    shortName: 'Kacamata',
+    description: 'Kacamata santai penuh gaya buat pecinta tantangan kuis.',
+  },
+  scarf: {
+    id: 'scarf',
+    name: 'Syal Rajut',
+    shortName: 'Syal',
+    description: 'Syal rajut hangat bergaris yang bikin langkah makin nyaman.',
+  },
+  headset: {
+    id: 'headset',
+    name: 'Headset Pastel',
+    shortName: 'Headset',
+    description: 'Headset gaming imut untuk fokus mendengarkan musik & ritme.',
+  },
+  flower: {
+    id: 'flower',
+    name: 'Jepit Bunga',
+    shortName: 'Bunga',
+    description: 'Kelopak bunga mekar ceria di atas kepala karakter.',
+  },
+  backpack: {
+    id: 'backpack',
+    name: 'Ransel Bintang',
+    shortName: 'Ransel',
+    description: 'Tas petualang mini dengan gantungan bintang keberuntungan.',
+  },
+};
+
 export type ZoneId = 'taman_permen' | 'hutan_ngantuk' | 'gunung_es' | 'kastil_awan';
 
 export interface ZoneDef {
@@ -247,6 +301,7 @@ export interface Player {
   name: string;
   pawn: PawnId;
   color: PlayerColorId;
+  accessory?: AccessoryId;
   position: number; // 1..100
   stars: number;
   items: ItemType[]; // max 2
@@ -337,6 +392,7 @@ export interface PodiumEntry {
   name: string;
   pawn: PawnId;
   color: PlayerColorId;
+  accessory?: AccessoryId;
   position: number;
   stars: number;
   isWinner: boolean;
