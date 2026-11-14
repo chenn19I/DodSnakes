@@ -438,15 +438,24 @@ export function buildBotPlayers(
   humanColor: CreatePlayerInput['color'],
   botCount: number,
   difficulty: BotDifficulty,
+  humanAccessory: CreatePlayerInput['accessory'] = 'none',
 ): CreatePlayerInput[] {
   const pawns = ['kucing', 'kodok', 'bebek', 'panda', 'dino', 'jamur'] as const;
   const colors = ['pink', 'kuning', 'mint', 'biru', 'oranye', 'ungu'] as const;
+  const botAccessories = ['glasses', 'scarf', 'flower', 'backpack', 'headset', 'crown'] as const;
   const availPawns = pawns.filter((p) => p !== humanPawn);
   const availColors = colors.filter((c) => c !== humanColor);
   const diffLabel = difficulty === 'juara' ? 'Juara' : difficulty === 'santai' ? 'Santai' : 'Bot';
 
   const list: CreatePlayerInput[] = [
-    { id: 'human_1', name: humanName, pawn: humanPawn, color: humanColor, isBot: false },
+    {
+      id: 'human_1',
+      name: humanName,
+      pawn: humanPawn,
+      color: humanColor,
+      accessory: humanAccessory,
+      isBot: false,
+    },
   ];
   for (let i = 0; i < botCount; i++) {
     const pawn = availPawns[i % availPawns.length];
@@ -455,6 +464,7 @@ export function buildBotPlayers(
       name: `${PAWN_META[pawn].shortName} (${diffLabel})`,
       pawn,
       color: availColors[i % availColors.length],
+      accessory: botAccessories[i % botAccessories.length],
       isBot: true,
       botDifficulty: difficulty,
     });
