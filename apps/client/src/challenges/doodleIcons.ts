@@ -381,6 +381,7 @@ export type UiIconKind =
   | 'home'
   | 'leave'
   | 'sticker'
+  | 'heart'
   | 'bolt';
 
 export function renderUiIconSvg(kind: UiIconKind, size = 20): string {
@@ -555,6 +556,10 @@ export function renderUiIconSvg(kind: UiIconKind, size = 20): string {
         <circle cx="18" cy="18" r="12" fill="#FFD15C" stroke="${INK}" stroke-width="2.6"/>
         <circle cx="14" cy="15" r="1.9" fill="${INK}"/><circle cx="22" cy="15" r="1.9" fill="${INK}"/>
         <path d="M13 21 Q18 25 23 21" fill="none" stroke="${INK}" stroke-width="2.4" stroke-linecap="round"/>
+      </svg>`;
+    case 'heart':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <path d="M18 30 C18 30 6 22 6 13.5 C6 9.5 9.2 6.5 13 6.5 C15.4 6.5 17 7.8 18 9.6 C19 7.8 20.6 6.5 23 6.5 C26.8 6.5 30 9.5 30 13.5 C30 22 18 30 18 30 Z" fill="#FF86AD" stroke="${INK}" stroke-width="2.6" stroke-linejoin="round"/>
       </svg>`;
     case 'bolt':
     default:
