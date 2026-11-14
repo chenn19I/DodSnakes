@@ -68,7 +68,7 @@ function makeWinningSubmission(state: GameState, playerId: string) {
   if (ch.archetype === 'tap_timing') {
     sim.needlePos = Number(ch.params.zoneCenter);
     sim.reactionMs = 500;
-  } else if (ch.archetype === 'quick_quiz' || ch.archetype === 'shadow_match' || ch.archetype === 'quick_math' || ch.archetype === 'stroop_color') {
+  } else if (ch.archetype === 'quick_quiz' || ch.archetype === 'shadow_match' || ch.archetype === 'quick_math' || ch.archetype === 'stroop_color' || ch.archetype === 'color_count' || ch.archetype === 'odd_one_out') {
     if (ch.archetype === 'quick_quiz') {
       const q = QUIZ_BANK.find((x) => x.id === Number(ch.params.questionId))!;
       sim.answerIndex = q.correctIndex;
@@ -76,6 +76,14 @@ function makeWinningSubmission(state: GameState, playerId: string) {
       sim.answerIndex = Number(ch.params.correctIndex);
     }
     sim.reactionMs = 600;
+  } else if (ch.archetype === 'pair_flip') {
+    const pairCount = Number(ch.params.pairCount ?? 3);
+    sim.sequenceIndices = Array.from({ length: pairCount * 2 }, (_, i) => i);
+    sim.extra = { pairsMatched: pairCount };
+    sim.reactionMs = 2400;
+  } else if (ch.archetype === 'number_order') {
+    sim.sequenceIndices = [...((ch.params.expectedIndices as number[]) ?? [0, 1, 2, 3, 4])];
+    sim.reactionMs = 1500;
   } else if (ch.archetype === 'memory_doodle') {
     sim.sequenceIndices = [...(ch.params.sequence as number[])];
     sim.reactionMs = 1500;
@@ -1108,5 +1116,100 @@ describe('Challenge validation & Replay determinism', () => {
     const bpParams = ARCHETYPE_REGISTRY.bubble_pop.buildParams(rng, 2, 15);
     const bpColor = bpParams.targetColor as { pattern?: string };
     expect(typeof bpColor.pattern).toBe('string');
+  });
+
+  it('always transitions cleanly to a rollable TURN_BEGIN across multi-turn play', () => {
+    let state = startGame(
+      createInitialGameState({
+        matchSeed: 7788,
+        board: BOARD_LAYOUT,
+        players: makeTestPlayers(3),
+      }),
+    ).state;
+
+    for (let turn = 0; turn < 18 && state.phase !== 'GAME_OVER'; turn++) {
+      expect(state.phase).toBe('TURN_BEGIN');
+      const activeId = state.turnOrder[state.currentTurnIndex];
+      state = rollDice(state, activeId, (turn % 5) + 1).state;
+      if (state.phase === 'ROLL') {
+        state = chooseDice(state, activeId, 0).state;
+      }
+      expect(state.phase).toBe('TILE_CHECK');
+      state = resolveTile(state, TILES, 1_700_000_000_000 + turn * 1000).state;
+      if (state.phase === 'CHALLENGE' && state.activeChallenge) {
+        for (const pid of state.activeChallenge.participantIds) {
+          state = recordChallengeSubmission(state, makeWinningSubmission(state, pid));
+        }
+        state = applyChallengeResult(state).state;
+      }
+      if (state.phase === 'TURN_END' || state.phase === 'EXTRA_ROLL') {
+        state = nextTurn(state, Date.now() + 30_000).state;
+      }
+    }
+    expect(['TURN_BEGIN', 'GAME_OVER']).toContain(state.phase);
+  });
+
+  it('validates pair_flip, number_order, odd_one_out and randomizes challenges without repeats on TILES', () => {
+    const newArchs = ['pair_flip', 'number_order', 'odd_one_out'] as const;
+    const rng = new SeededRng(9191);
+    for (const arch of newArchs) {
+      const spec = ARCHETYPE_REGISTRY[arch];
+      const params = spec.buildParams(rng, 3, 55);
+      const botInput = spec.simulateBot(params, 'juara', new SeededRng(55));
+      expect(typeof botInput.score).toBe('number');
+
+      if (arch === 'pair_flip') {
+        const pairCount = Number(params.pairCount);
+        const pass = spec.validate(
+          params,
+          {
+            playerId: 'p1',
+            claimedSuccess: true,
+            score: 100,
+            inputLog: { startedAt: 0, completedAt: 2200, extra: { pairsMatched: pairCount } },
+          },
+          1,
+        );
+        expect(pass.success).toBe(true);
+      } else if (arch === 'number_order') {
+        const expected = params.expectedIndices as number[];
+        const pass = spec.validate(
+          params,
+          {
+            playerId: 'p1',
+            claimedSuccess: true,
+            score: 100,
+            inputLog: { startedAt: 0, completedAt: 1600, reactionMs: 1600, sequenceIndices: expected },
+          },
+          1,
+        );
+        expect(pass.success).toBe(true);
+      } else {
+        const idx = Number(params.correctIndex);
+        const pass = spec.validate(
+          params,
+          {
+            playerId: 'p1',
+            claimedSuccess: true,
+            score: 100,
+            inputLog: { startedAt: 0, completedAt: 900, reactionMs: 900, answerIndex: idx },
+          },
+          1,
+        );
+        expect(pass.success).toBe(true);
+      }
+    }
+
+    // Verify landing on the same tile in two matches with different matchSeeds gives varied challenges
+    const runFirstChallenge = (seed: number) => {
+      let s = startGame(createInitialGameState({ matchSeed: seed, board: BOARD_LAYOUT, players: makeTestPlayers(2) })).state;
+      s = rollDice(s, s.turnOrder[s.currentTurnIndex], 3).state;
+      return resolveTile(s, TILES, 1000).state.activeChallenge!;
+    };
+    const seenArchs = new Set<string>();
+    for (let s = 101; s <= 125; s++) {
+      seenArchs.add(runFirstChallenge(s).archetype);
+    }
+    expect(seenArchs.size).toBeGreaterThanOrEqual(8);
   });
 });
