@@ -101,6 +101,7 @@ export class LocalGameController implements GameSessionController {
   private async handleBeginTurn(): Promise<void> {
     if (this.disposed || this.state.phase === 'GAME_OVER') return;
     this.clearTimers();
+    this.busy = false;
 
     const activeId = this.state.turnOrder[this.state.currentTurnIndex];
     const active = this.state.players.find((p) => p.id === activeId)!;
@@ -176,24 +177,40 @@ export class LocalGameController implements GameSessionController {
 
     window.setTimeout(async () => {
       if (this.disposed) return;
-      const rolled = rollDice(this.state, activeId, forcedDice);
-      this.state = rolled.state;
-      this.callbacks.onStateChange(this.state);
-      await this.callbacks.onEvents(rolled.events, this.state);
+      try {
+        const rolled = rollDice(this.state, activeId, forcedDice);
+        this.state = rolled.state;
+        this.callbacks.onStateChange(this.state);
+        await this.callbacks.onEvents(rolled.events, this.state);
 
-      if (this.state.phase === 'ROLL') {
-        this.busy = false;
-        if (active.isBot) {
-          const vals = this.state.pendingRoll?.diceValues ?? [1, 1];
-          const choiceIdx = chooseBotGoldenDiceIndex(this.state, active, vals);
-          window.setTimeout(() => {
-            if (!this.disposed) this.selectDice(choiceIdx);
-          }, 650);
+        if (this.state.phase === 'ROLL') {
+          this.busy = false;
+          this.callbacks.onStateChange(this.state);
+          if (active.isBot) {
+            const vals = this.state.pendingRoll?.diceValues ?? [1, 1];
+            const choiceIdx = chooseBotGoldenDiceIndex(this.state, active, vals);
+            window.setTimeout(() => {
+              if (!this.disposed) this.selectDice(choiceIdx);
+            }, 650);
+          } else {
+            this.turnTimerId = window.setTimeout(() => {
+              if (!this.disposed && this.state.phase === 'ROLL') {
+                this.selectDice(0);
+              }
+            }, 12_000);
+          }
+          return;
         }
-        return;
-      }
 
-      await this.resolveLandedTile();
+        await this.resolveLandedTile();
+      } catch (err) {
+        this.busy = false;
+        this.scene.cancelOptimisticDiceShake();
+        if (!this.disposed) {
+          this.callbacks.onStateChange(this.state);
+          this.callbacks.onError(err instanceof Error ? err.message : 'Gagal melempar dadu.');
+        }
+      }
     }, 360);
   }
 
