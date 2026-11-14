@@ -167,6 +167,12 @@ export class DoodleAppShell {
   private renderedChallengeKey = 'none';
   private renderedModalKey = 'none';
   private challengeTimerRaf = 0;
+  private animatingCount = 0;
+  private rollRequestPending = false;
+  private rollPendingTimer: number | null = null;
+  private lastTurnAudioKey = '';
+  private lastUrgentTickSec = -1;
+  private showLegendPopover = false;
 
   // Player setup drafts
   private draftName = 'Pemain Kece';
@@ -238,6 +244,8 @@ export class DoodleAppShell {
     this.overlayLayer = this.root.querySelector<HTMLElement>('#overlay-slot')!;
     this.challengeLayer = this.root.querySelector<HTMLElement>('#layer-challenge')!;
     this.modalLayer = this.root.querySelector<HTMLElement>('#layer-modals')!;
+
+    this.setupResilientTurnHandlers();
 
     this.scene.setSpeedChangeCallback((enabled) => {
       this.speed2x = enabled;
@@ -395,6 +403,7 @@ export class DoodleAppShell {
     return {
       onStateChange: (state) => {
         this.gameState = state;
+        this.syncTurnAudioCue(state);
         if (state && this.screen !== 'game') {
           this.studioPreviewStage?.dispose();
           this.studioPreviewStage = null;
@@ -410,13 +419,25 @@ export class DoodleAppShell {
       },
       onEvents: async (events, finalState) => {
         this.ingestEventsIntoFeed(events, finalState);
-        this.isAnimating = true;
-        this.renderOverlaysOnly();
-        await this.scene.enqueueEvents(events, finalState);
-        this.isAnimating = false;
+        if (events.some((e) => e.type === 'DiceRolled' || e.type === 'TurnStarted' || e.type === 'GameWon')) {
+          this.clearRollPending();
+          this.scene.cancelOptimisticDiceShake();
+        }
         this.gameState = finalState;
-        this.recordCareerIfFinished(finalState);
+        this.syncTurnAudioCue(finalState);
+        this.animatingCount += 1;
+        this.isAnimating = this.animatingCount > 0;
         this.render();
+        try {
+          await this.scene.enqueueEvents(events, finalState);
+        } finally {
+          this.animatingCount = Math.max(0, this.animatingCount - 1);
+          this.isAnimating = this.animatingCount > 0;
+          this.gameState = finalState;
+          this.syncTurnAudioCue(finalState);
+          this.recordCareerIfFinished(finalState);
+          this.render();
+        }
       },
       onChallengePrompt: (challenge, localParticipantId) => {
         const sameDuel =
@@ -831,22 +852,234 @@ export class DoodleAppShell {
     return Math.max(0, Math.ceil((st.turnDeadlineAt - Date.now()) / 1000));
   }
 
+  private setupResilientTurnHandlers(): void {
+    // Capture-phase delegation prevents DOM rebuilds or lingering animations from dropping taps
+    this.mainLayer.addEventListener(
+      'click',
+      (e) => {
+        const target = e.target as HTMLElement | null;
+        if (!target) return;
+        if (target.closest('#btn-roll-dice')) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.triggerLocalRoll();
+          return;
+        }
+        if (target.closest('#btn-hud-legend')) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.sound.playUiClick();
+          this.showLegendPopover = !this.showLegendPopover;
+          this.render();
+          return;
+        }
+        if (target.closest('#btn-close-legend')) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.sound.playUiClick();
+          this.showLegendPopover = false;
+          this.render();
+        }
+      },
+      true,
+    );
+
+    // Capture Space so leftover animations never lock keyboard dice rolling
+    window.addEventListener(
+      'keydown',
+      (e) => {
+        if (e.code !== 'Space' || e.repeat) return;
+        const activeTag = (document.activeElement as HTMLElement | null)?.tagName ?? '';
+        if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT') return;
+        if (
+          this.screen !== 'game' ||
+          this.showSettings ||
+          this.showHowToPlay ||
+          this.showSupportModal ||
+          this.studioContext ||
+          this.activeChallengeModal
+        ) {
+          return;
+        }
+        if (this.canLocalRollNow()) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.triggerLocalRoll();
+        }
+      },
+      true,
+    );
+
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && this.screen === 'game') {
+        if (this.scene.hasActiveAnimation()) {
+          this.scene.skipCurrentAnimation(true);
+        }
+        this.animatingCount = 0;
+        this.isAnimating = false;
+        this.clearRollPending();
+        this.render();
+      }
+    });
+  }
+
+  private clearRollPending(): void {
+    if (this.rollPendingTimer !== null) {
+      clearTimeout(this.rollPendingTimer);
+      this.rollPendingTimer = null;
+    }
+    this.rollRequestPending = false;
+  }
+
+  private armRollPending(): void {
+    this.clearRollPending();
+    this.rollRequestPending = true;
+    this.render();
+    this.rollPendingTimer = window.setTimeout(() => {
+      this.rollPendingTimer = null;
+      this.rollRequestPending = false;
+      this.scene.cancelOptimisticDiceShake();
+      this.render();
+    }, 1800);
+  }
+
+  private canLocalRollNow(state: GameState | null = this.gameState): boolean {
+    if (!state || state.phase !== 'TURN_BEGIN' || this.rollRequestPending) return false;
+    if (this.controller?.isSpectator()) return false;
+    const activeId = state.turnOrder[state.currentTurnIndex];
+    const localId = this.controller?.getLocalPlayerId();
+    return Boolean(localId && activeId === localId);
+  }
+
+  private triggerLocalRoll(): void {
+    if (!this.canLocalRollNow()) return;
+    if (this.scene.hasActiveAnimation()) {
+      this.scene.skipCurrentAnimation(true);
+    }
+    this.animatingCount = 0;
+    this.isAnimating = false;
+    this.showLegendPopover = false;
+    this.armRollPending();
+    this.controller?.rollDice();
+  }
+
+  private syncTurnAudioCue(state: GameState | null): void {
+    if (!state) {
+      this.clearRollPending();
+      this.scene.cancelOptimisticDiceShake();
+      return;
+    }
+    if (
+      state.phase !== 'CHALLENGE' &&
+      !state.activeChallenge &&
+      this.activeChallengeModal &&
+      !this.activeChallengeModal.stamp
+    ) {
+      this.activeChallengeModal.cleanup?.();
+      this.activeChallengeModal = null;
+      this.renderChallengeLayerIfNeeded();
+    }
+    if (state.phase !== 'TURN_BEGIN') {
+      this.clearRollPending();
+      if (state.phase !== 'MOVE' && state.phase !== 'ROLL') {
+        this.scene.cancelOptimisticDiceShake();
+      }
+      return;
+    }
+    const activeId = state.turnOrder[state.currentTurnIndex];
+    const localId = this.controller?.getLocalPlayerId();
+    if (!this.controller?.isSpectator() && localId && activeId === localId) {
+      const turnKey = `${state.turnNumber}:${activeId}:${state.turnDeadlineAt ?? 0}`;
+      if (turnKey !== this.lastTurnAudioKey) {
+        this.lastTurnAudioKey = turnKey;
+        this.lastUrgentTickSec = -1;
+        this.clearRollPending();
+        this.sound.playTurnReady();
+      }
+    }
+  }
+
+  private computeTurnForecastHint(state: GameState, player: Player): string | null {
+    const en = this.lang === 'en';
+    const maxDie = player.activeBrake ? 3 : 6;
+    const ladderHits: string[] = [];
+    const snakeHits: string[] = [];
+    let canWin = false;
+    for (let die = 1; die <= maxDie; die++) {
+      const prev = previewDiceLanding(
+        BOARD_LAYOUT,
+        player.position,
+        die,
+        player.activeTurbo,
+        player.pawn,
+      );
+      if (prev.to === 100 && !prev.bounced) canWin = true;
+      if (prev.ladderTo) ladderHits.push(`+${die}`);
+      if (prev.snakeTo) snakeHits.push(`+${die}`);
+    }
+    if (canWin) return en ? 'Shot at 100!' : 'Bisa Finis 100!';
+    if (ladderHits.length > 0) {
+      return `${en ? 'Ladder' : 'Tangga'}: ${ladderHits.slice(0, 2).join('/')}`;
+    }
+    if (snakeHits.length > 0) {
+      return `${en ? 'Snake' : 'Ular'}: ${snakeHits.slice(0, 2).join('/')}`;
+    }
+    if (player.items.length > 0) {
+      return en ? `${player.items.length} item ready` : `${player.items.length} item siap`;
+    }
+    return null;
+  }
+
+  private renderLegendPopoverHtml(state: GameState): string {
+    const en = this.lang === 'en';
+    const modeInfo = getModeMeta(state.rulePreset, this.lang);
+    return `
+      <div class="doodle-card legend-popover" role="dialog" aria-label="${en ? 'Board Guide' : 'Panduan Papan'}">
+        <div class="legend-head">
+          <b>${escapeHtml(modeInfo.name)}</b>
+          <button class="doodle-btn" id="btn-close-legend" style="min-height:24px;padding:1px 7px;font-size:0.74rem">x</button>
+        </div>
+        <p style="margin:3px 0 6px;font-size:0.76rem;opacity:0.85">${escapeHtml(modeInfo.description)}</p>
+        <div class="legend-grid">
+          <span class="legend-chip">${renderUiIconSvg('ladder', 13)} ${en ? 'Ladder: Win duel/quiz to climb' : 'Tangga: Tantangan sukses = naik'}</span>
+          <span class="legend-chip">${renderUiIconSvg('snake', 13)} ${en ? 'Snake: Pass check or Shield to dodge' : 'Ular: Lolos uji / Perisai = aman'}</span>
+          <span class="legend-chip">${renderUiIconSvg('star', 13)} ${en ? 'Star Tiles: Mini-games & Star Shop' : 'Petak Bintang: Mini-game & Toko'}</span>
+          <span class="legend-chip">${renderUiIconSvg('trophy', 13)} ${en ? 'Tile 100: Boss Trial to win' : 'Petak 100: Ujian Boss untuk juara'}</span>
+        </div>
+      </div>
+    `;
+  }
+
   private startTurnCountdown(): void {
     const updateBadge = () => {
       const el = this.mainLayer.querySelector<HTMLElement>('#hud-turn-timer');
       if (!el) return;
-      if (this.isAnimating) {
-        el.style.display = 'none';
-        return;
-      }
       const sec = this.computeTurnSecondsLeft();
       if (sec === null) {
         el.style.display = 'none';
+        el.classList.remove('is-urgent');
         return;
       }
       el.style.display = 'flex';
+      el.classList.toggle('is-urgent', sec <= 8);
       el.innerHTML = `<span class="ui-ico-row">${renderUiIconSvg('timer', 14)}<span>${sec}s</span></span>`;
       el.style.background = sec <= 8 ? 'var(--pink)' : 'rgba(255, 246, 229, 0.95)';
+
+      const st = this.gameState;
+      const activeId = st?.turnOrder[st.currentTurnIndex];
+      const localId = this.controller?.getLocalPlayerId();
+      if (
+        st?.phase === 'TURN_BEGIN' &&
+        !this.controller?.isSpectator() &&
+        localId &&
+        activeId === localId &&
+        sec <= 5 &&
+        sec >= 1 &&
+        sec !== this.lastUrgentTickSec
+      ) {
+        this.lastUrgentTickSec = sec;
+        this.sound.playTimerTick();
+      }
     };
 
     updateBadge();
@@ -911,7 +1144,7 @@ export class DoodleAppShell {
               : ''
           }
           <button class="doodle-btn doodle-btn-primary stagger-item stagger-1" id="btn-menu-online">
-            ${renderUiIconSvg('globe', 18)} ${this.t('playOnline')} (2–6)
+            ${renderUiIconSvg('globe', 18)} ${this.t('playOnline')} (2-6)
           </button>
           <button class="doodle-btn doodle-btn-mint stagger-item stagger-2" id="btn-menu-local">
             ${renderUiIconSvg('users', 18)} ${this.t('playLocal')}
@@ -974,7 +1207,7 @@ export class DoodleAppShell {
           .map((p) => {
             const pm = getPawnMeta(p, this.lang);
             return `
-          <button class="doodle-btn pawn-chip ${this.draftPawn === p ? 'selected' : ''}" data-pick-pawn="${p}" title="${escapeHtml(pm.name)} — ${escapeHtml(pm.perkTitle)}">
+          <button class="doodle-btn pawn-chip ${this.draftPawn === p ? 'selected' : ''}" data-pick-pawn="${p}" title="${escapeHtml(pm.name)} (${escapeHtml(pm.perkTitle)})">
             <span>${pawnSvg(p, this.draftColor, 24, p === this.draftPawn ? this.draftAccessory : 'none')}</span>
             <span>${escapeHtml(pm.shortName)}</span>
           </button>`;
@@ -1211,7 +1444,9 @@ export class DoodleAppShell {
     if (!state) return '';
     const activeId = state.turnOrder[state.currentTurnIndex];
     const localId = this.controller?.getLocalPlayerId();
-    const isMyTurn = !this.controller?.isSpectator() && activeId === localId && !this.isAnimating;
+    const isTurnOwner = !this.controller?.isSpectator() && activeId === localId;
+    const isMyTurn = isTurnOwner && !this.isAnimating;
+    const canRollNow = isTurnOwner && state.phase === 'TURN_BEGIN' && !this.rollRequestPending;
     const me = state.players.find((p) => p.id === (localId ?? activeId));
     const camOverview = this.scene.getPreferredCameraMode() === 'overview';
     const myShopCost = me ? getPlayerShopCost(me.pawn) : STAR_SHOP_COST;
@@ -1240,7 +1475,7 @@ export class DoodleAppShell {
               const meta = getPawnMeta(p.pawn, this.lang);
               const cname = getColorName(p.color, this.lang);
               return `
-                <div class="player-pill player-pill-clickable ${isAct ? 'active' : ''} ${!p.connected ? 'disconnected' : ''}" data-focus-player="${p.id}" style="border-left: 8px solid ${PLAYER_COLORS[p.color].hex}" title="${escapeHtml(meta.name)} — ${escapeHtml(meta.perkTitle)}: ${escapeHtml(meta.perkDesc)}">
+                <div class="player-pill player-pill-clickable ${isAct ? 'active' : ''} ${!p.connected ? 'disconnected' : ''}" data-focus-player="${p.id}" style="border-left: 8px solid ${PLAYER_COLORS[p.color].hex}" title="${escapeHtml(meta.name)} (${escapeHtml(meta.perkTitle)}: ${escapeHtml(meta.perkDesc)})">
                   ${this.settings.colorblindMode ? `<span class="cb-shape" title="${escapeHtml(cname)}">${this.colorShapes[p.color]}</span>` : ''}
                   <span>${pawnSvg(p.pawn, p.color, 26, p.accessory ?? 'none')}</span>
                   <div>
@@ -1265,9 +1500,11 @@ export class DoodleAppShell {
           <button class="doodle-btn hud-icon-btn ${this.hudCompact ? 'doodle-btn-blue' : ''}" id="btn-hud-peek" title="${this.hudCompact ? (en ? 'Show HUD Overlay' : 'Tampilkan Overlay HUD') : (en ? 'Peek Board' : 'Intip Papan Penuh')}">${renderUiIconSvg('eye', 16)}</button>
           <button class="doodle-btn hud-icon-btn ${!this.settings.musicEnabled ? 'hud-btn-off' : ''}" id="btn-hud-music" title="${this.t('musicLabel')}">${renderUiIconSvg('music', 16)}</button>
           <button class="doodle-btn hud-icon-btn ${this.settings.muted ? 'hud-btn-off' : ''}" id="btn-hud-mute" title="${this.t('muteLabel')}">${renderUiIconSvg(this.settings.muted ? 'muted' : 'sound', 16)}</button>
+          <button class="doodle-btn hud-icon-btn ${this.showLegendPopover ? 'doodle-btn-mint' : ''}" id="btn-hud-legend" title="${en ? 'Board Guide & Rules' : 'Panduan Papan & Aturan'}">${renderUiIconSvg('book', 16)}</button>
           <button class="doodle-btn hud-icon-btn" id="btn-hud-settings" title="${this.t('settingsTitle')}">${renderUiIconSvg('settings', 16)}</button>
           <button class="doodle-btn doodle-btn-pink hud-leave-btn" id="btn-hud-leave" title="${this.t('leaveRoom')}">${renderUiIconSvg('leave', 15)}<span class="hud-btn-label">${en ? 'Leave' : 'Keluar'}</span></button>
         </div>
+        ${this.showLegendPopover ? this.renderLegendPopoverHtml(state) : ''}
       </div>
 
       ${
@@ -1326,7 +1563,7 @@ export class DoodleAppShell {
               .map((idx) => {
                 const item = me?.items[idx];
                 if (!item) {
-                  return `<button class="doodle-btn item-slot-btn" disabled title="${this.t('empty')}">—</button>`;
+                  return `<button class="doodle-btn item-slot-btn" disabled title="${this.t('empty')}">-</button>`;
                 }
                 const im = getItemMeta(item, this.lang);
                 return `<button class="doodle-btn doodle-btn-mint item-slot-btn" data-use-item="${idx}" ${!isMyTurn || state.phase !== 'TURN_BEGIN' ? 'disabled' : ''} title="${escapeHtml(im.name)}: ${escapeHtml(im.description)}">
@@ -1382,15 +1619,22 @@ export class DoodleAppShell {
                     })
                     .join('')}
                  </div>`
-              : `<button class="doodle-btn roll-btn ${isMyTurn && state.phase === 'TURN_BEGIN' ? 'is-your-turn' : ''}" id="btn-roll-dice" ${!isMyTurn || state.phase !== 'TURN_BEGIN' ? 'disabled' : ''}>
+              : (() => {
+                  const localPlayer = state.players.find((p) => p.id === localId) ?? null;
+                  const forecastHint =
+                    canRollNow && localPlayer ? this.computeTurnForecastHint(state, localPlayer) : null;
+                  return `<button class="doodle-btn roll-btn ${canRollNow ? 'is-your-turn' : ''}" id="btn-roll-dice" ${!canRollNow ? 'disabled' : ''}>
                   ${
                     this.controller?.isSpectator()
                       ? this.t('spectatorMode')
-                      : isMyTurn
-                        ? `${renderUiIconSvg('dice', 24)} ${this.t('rollDice')}!`
-                        : `${this.t('turnOther')} ${escapeHtml(state.players.find((p) => p.id === activeId)?.name ?? '')}`
+                      : canRollNow
+                        ? `${renderUiIconSvg('dice', 24)} ${this.t('rollDice')}!${forecastHint ? ` <span class="roll-sub-hint">${escapeHtml(forecastHint)}</span>` : ''}`
+                        : this.rollRequestPending
+                          ? `${en ? 'Rolling...' : 'Melempar...'}`
+                          : `${this.t('turnOther')} ${escapeHtml(state.players.find((p) => p.id === activeId)?.name ?? '')}`
                   }
-                 </button>`
+                 </button>`;
+                })()
           }
         </div>
       </div>
@@ -1703,7 +1947,7 @@ export class DoodleAppShell {
                   .map((p) => {
                     const m = getPawnMeta(p, this.lang);
                     return `
-                      <button class="doodle-btn studio-char-card ${ctx.pawn === p ? 'selected' : ''}" data-studio-pawn="${p}" title="${escapeHtml(m.name)} — ${escapeHtml(m.perkDesc)}">
+                      <button class="doodle-btn studio-char-card ${ctx.pawn === p ? 'selected' : ''}" data-studio-pawn="${p}" title="${escapeHtml(m.name)}: ${escapeHtml(m.perkDesc)}">
                         <span>${pawnSvg(p, ctx.color, 36, ctx.accessory)}</span>
                         <span class="studio-char-name">${escapeHtml(m.shortName)}</span>
                         <small class="studio-char-role">${escapeHtml(m.title)}</small>
@@ -2265,7 +2509,7 @@ export class DoodleAppShell {
       } else if (typeof navigator.share === 'function') {
         void navigator
           .share({
-            title: this.lang === 'en' ? 'DodSnake — Join Room!' : 'DodSnake — Gabung Room!',
+            title: this.lang === 'en' ? 'DodSnake: Join Room!' : 'DodSnake: Gabung Room!',
             text: this.lang === 'en' ? `Play DodSnake together! Room code: ${roomCode}` : `Main DodSnake bareng yuk! Kode room: ${roomCode}`,
             url,
           })
