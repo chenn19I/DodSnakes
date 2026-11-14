@@ -158,4 +158,25 @@ describe('RoomManager multiplayer logic', () => {
       room.players[2].accessory,
     ]);
   });
+
+  it('rejects profane, NSFW, SARA, or insulting player names in create/join/customize', () => {
+    const { mgr } = createTestHarness();
+    expect(() =>
+      mgr.createRoom('s1', { playerName: 'anJ1nG', pawn: 'kucing', color: 'pink' }),
+    ).toThrow();
+
+    const ok = mgr.createRoom('s1', { playerName: 'Chenn', pawn: 'kucing', color: 'pink' });
+    expect(() =>
+      mgr.joinRoom('s2', {
+        roomCode: ok.roomCode,
+        playerName: 'p0rnstar',
+        pawn: 'kodok',
+        color: 'mint',
+      }),
+    ).toThrow();
+    expect(() => mgr.customizePlayer('s1', { playerName: 'k.a.f.i.r' })).toThrow();
+    expect(() => mgr.customizePlayer('s1', { playerName: 'tolol123' })).toThrow();
+    mgr.customizePlayer('s1', { playerName: 'Nasution' });
+    expect(mgr.getRoom(ok.roomCode)?.players[0].name).toBe('Nasution');
+  });
 });
