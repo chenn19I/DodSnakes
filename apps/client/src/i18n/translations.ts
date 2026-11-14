@@ -160,6 +160,9 @@ const ARCHETYPE_EN: Record<ChallengeArchetype, { name: string; instruction: stri
   rhythm_clap: { name: 'Rhythm Beat', instruction: 'Tap the drum right as each note hits the beat zone!' },
   color_count: { name: 'Color Count', instruction: 'Count how many stickers match the target shape & color!' },
   balance_bar: { name: 'Balance Bar', instruction: 'Steer left & right to keep the pen inside the green zone!' },
+  pair_flip: { name: 'Memory Pairs', instruction: 'Flip and match every hidden doodle pair before time runs out!' },
+  number_order: { name: 'Number Order', instruction: 'Tap the number stickers in exact ascending or descending order!' },
+  odd_one_out: { name: 'Spot the Odd One', instruction: 'Find and tap the 1 unique sticker that stands out from the rest!' },
   boss_doodle: { name: 'Boss Doodle Finale', instruction: 'Clear all 3 stages at Tile 100 to claim victory!' },
 };
 
@@ -720,7 +723,7 @@ const ID_STRINGS: Record<UiKey, string> = {
   turnYou: 'GILIRANMU!',
   turnBot: 'Giliran Bot...',
   turnOther: 'Giliran',
-  spectatorMode: 'Mode Penonton — duduk santai menikmati pertandingan!',
+  spectatorMode: 'Mode Penonton: duduk santai menikmati pertandingan!',
   animating: 'Pion sedang beraksi...',
   chooseDice: 'Pilih salah satu dadu emas:',
   rollDice: 'LEMPAR DADU',
@@ -840,7 +843,7 @@ const EN_STRINGS: Record<UiKey, string> = {
   turnYou: 'YOUR TURN!',
   turnBot: 'Bot Thinking...',
   turnOther: 'Turn:',
-  spectatorMode: 'Spectator Mode — sit back and enjoy the race!',
+  spectatorMode: 'Spectator Mode: sit back and enjoy the race!',
   animating: 'Pawns are moving...',
   chooseDice: 'Choose one Golden Die:',
   rollDice: 'ROLL DICE',
