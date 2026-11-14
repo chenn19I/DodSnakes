@@ -68,7 +68,16 @@ function makeWinningSubmission(state: GameState, playerId: string) {
   if (ch.archetype === 'tap_timing') {
     sim.needlePos = Number(ch.params.zoneCenter);
     sim.reactionMs = 500;
-  } else if (ch.archetype === 'quick_quiz' || ch.archetype === 'shadow_match' || ch.archetype === 'quick_math' || ch.archetype === 'stroop_color' || ch.archetype === 'color_count' || ch.archetype === 'odd_one_out') {
+  } else if (
+    ch.archetype === 'quick_quiz' ||
+    ch.archetype === 'shadow_match' ||
+    ch.archetype === 'quick_math' ||
+    ch.archetype === 'stroop_color' ||
+    ch.archetype === 'color_count' ||
+    ch.archetype === 'odd_one_out' ||
+    ch.archetype === 'pattern_next' ||
+    ch.archetype === 'math_compare'
+  ) {
     if (ch.archetype === 'quick_quiz') {
       const q = QUIZ_BANK.find((x) => x.id === Number(ch.params.questionId))!;
       sim.answerIndex = q.correctIndex;
@@ -1149,8 +1158,8 @@ describe('Challenge validation & Replay determinism', () => {
     expect(['TURN_BEGIN', 'GAME_OVER']).toContain(state.phase);
   });
 
-  it('validates pair_flip, number_order, odd_one_out and randomizes challenges without repeats on TILES', () => {
-    const newArchs = ['pair_flip', 'number_order', 'odd_one_out'] as const;
+  it('validates pair_flip, number_order, odd_one_out, pattern_next, math_compare and randomizes challenges without repeats on TILES', () => {
+    const newArchs = ['pair_flip', 'number_order', 'odd_one_out', 'pattern_next', 'math_compare'] as const;
     const rng = new SeededRng(9191);
     for (const arch of newArchs) {
       const spec = ARCHETYPE_REGISTRY[arch];
