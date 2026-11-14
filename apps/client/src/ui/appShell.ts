@@ -45,6 +45,7 @@ import type { GameSessionController, SessionCallbacks } from '../controllers/gam
 import {
   COLORBLIND_SHAPES,
   formatEventFeedText,
+  formatMissionText,
   getAccessoryMeta,
   getArchetypeMeta,
   getBotDiffLabel,
@@ -377,6 +378,10 @@ export class DoodleAppShell {
         icon = { item: ev.item };
       } else if (ev.type === 'ChallengeResolved') {
         icon = 'flame';
+      } else if (ev.type === 'BoardSpecialTriggered') {
+        icon = ev.kind === 'shield_shrine' ? { item: 'shield' } : ev.grantedItem ? { item: ev.grantedItem } : 'spark';
+      } else if (ev.type === 'MissionCompleted') {
+        icon = 'mission';
       } else if (ev.type === 'TurnSkipped') {
         icon = 'skip';
       } else if (ev.type === 'GameWon') {
@@ -441,11 +446,20 @@ export class DoodleAppShell {
         }
       },
       onChallengePrompt: (challenge, localParticipantId) => {
+        const isAllowedParticipant =
+          localParticipantId === challenge.ownerPlayerId ||
+          (challenge.mode === 'duel' &&
+            !challenge.awaitingDuelPick &&
+            challenge.opponentId === localParticipantId);
+        if (!isAllowedParticipant) {
+          return;
+        }
+        const duelReady = challenge.mode !== 'duel' || !challenge.awaitingDuelPick;
         const sameDuel =
           this.activeChallengeModal &&
           this.activeChallengeModal.challenge.tileId === challenge.tileId &&
           this.activeChallengeModal.challenge.seed === challenge.seed &&
-          this.activeChallengeModal.duelPicked;
+          this.activeChallengeModal.duelPicked === duelReady;
         if (sameDuel) {
           this.activeChallengeModal!.challenge = challenge;
           this.renderChallengeLayerIfNeeded();
@@ -456,7 +470,7 @@ export class DoodleAppShell {
         this.activeChallengeModal = {
           challenge,
           localParticipantId,
-          duelPicked: challenge.mode !== 'duel' || !isOwner,
+          duelPicked: challenge.mode !== 'duel' || !isOwner || !challenge.awaitingDuelPick,
         };
         this.renderChallengeLayerIfNeeded();
       },
@@ -627,8 +641,40 @@ export class DoodleAppShell {
   }
 
   private renderTransientOverlaysHtml(): string {
+    const localId = this.controller?.getLocalPlayerId() ?? null;
+    const rawCh =
+      this.screen === 'game' &&
+      !this.activeChallengeModal &&
+      this.gameState?.phase === 'CHALLENGE'
+        ? this.gameState.activeChallenge
+        : null;
+    const isMyPromptedChallenge =
+      Boolean(rawCh && localId) &&
+      (rawCh!.mode === 'duel' && rawCh!.awaitingDuelPick
+        ? rawCh!.ownerPlayerId === localId
+        : rawCh!.participantIds.includes(localId!));
+    const ch = isMyPromptedChallenge ? null : rawCh;
+    let watchBanner = '';
+    if (ch && this.gameState) {
+      const ownerName = this.gameState.players.find((p) => p.id === ch.ownerPlayerId)?.name ?? '';
+      if (ch.mode === 'duel' && ch.awaitingDuelPick) {
+        watchBanner = this.t('duelPickWait', { name: ownerName });
+      } else if (ch.mode === 'duel' && ch.opponentId) {
+        const oppName = this.gameState.players.find((p) => p.id === ch.opponentId)?.name ?? '';
+        watchBanner = this.t('spectatingDuel', { a: ownerName, b: oppName, tile: ch.tileId });
+      } else {
+        const archName = getArchetypeMeta(ch.archetype, this.lang).name;
+        watchBanner = this.t('spectatingChallenge', {
+          name: ownerName,
+          challenge: archName,
+          tile: ch.tileId,
+        });
+      }
+    }
+
     return `
       ${this.turnBannerText ? `<div class="turn-banner">${escapeHtml(this.turnBannerText)}</div>` : ''}
+      ${watchBanner ? `<div class="challenge-watch-pill">${renderUiIconSvg('timer', 14)}<span>${escapeHtml(watchBanner)}</span></div>` : ''}
       ${
         this.floatingEmote
           ? `<div class="floating-emote">
@@ -722,11 +768,12 @@ export class DoodleAppShell {
   private renderChallengeLayerIfNeeded(): void {
     const modal = this.activeChallengeModal;
     const key = modal
-      ? `${modal.challenge.tileId}:${modal.challenge.seed}:${modal.localParticipantId}:${modal.duelPicked ? 1 : 0}:${modal.stamp ? modal.stamp.summary : ''}`
+      ? `${modal.challenge.tileId}:${modal.challenge.seed}:${modal.localParticipantId}:${modal.challenge.opponentId ?? ''}:${modal.challenge.awaitingDuelPick ? 1 : 0}:${modal.duelPicked ? 1 : 0}:${modal.stamp ? modal.stamp.summary : ''}`
       : 'none';
 
     if (key === this.renderedChallengeKey) return;
     this.renderedChallengeKey = key;
+    this.renderOverlaysOnly();
 
     if (!modal) {
       this.challengeLayer.innerHTML = '';
@@ -1054,6 +1101,7 @@ export class DoodleAppShell {
           <span class="legend-chip">${renderUiIconSvg('ladder', 13)} ${en ? 'Ladder: Win duel/quiz to climb' : 'Tangga: Tantangan sukses = naik'}</span>
           <span class="legend-chip">${renderUiIconSvg('snake', 13)} ${en ? 'Snake: Pass check or Shield to dodge' : 'Ular: Lolos uji / Perisai = aman'}</span>
           <span class="legend-chip">${renderUiIconSvg('star', 13)} ${en ? 'Star Tiles: Mini-games & Star Shop' : 'Petak Bintang: Mini-game & Toko'}</span>
+          <span class="legend-chip">${renderUiIconSvg('mission', 13)} ${en ? 'Special Tiles & Bonus Missions' : 'Petak Spesial & Misi Bonus'}</span>
           <span class="legend-chip">${renderUiIconSvg('trophy', 13)} ${en ? 'Tile 100: Boss Trial to win' : 'Petak 100: Ujian Boss untuk juara'}</span>
         </div>
       </div>
@@ -1473,6 +1521,7 @@ export class DoodleAppShell {
     if (me?.activeGoldenDice) activeBuffs.push(en ? 'Golden Die' : 'Dadu Emas');
     if (me?.activeBrake) activeBuffs.push(en ? 'Brake ≤3' : 'Rem ≤3');
     if (me?.activeTurbo) activeBuffs.push('Turbo +2');
+    if (me?.activeDoubleStars) activeBuffs.push('2x ★');
 
     return `
       <div class="hud-top">
@@ -1567,6 +1616,11 @@ export class DoodleAppShell {
             : ''
         }
         ${!this.hudCompact && activeBuffs.length > 0 ? `<div class="hud-buffs-pill">${en ? 'Active' : 'Aktif'}: ${activeBuffs.join(' • ')}</div>` : ''}
+        ${
+          !this.hudCompact && me?.mission
+            ? `<div class="hud-mission-pill ${me.mission.completed ? 'is-done' : ''}">${renderUiIconSvg('mission', 13)}<span>${this.t('missionLabel')}: ${escapeHtml(formatMissionText(me.mission, this.lang))}</span></div>`
+            : ''
+        }
         <div class="hud-bottom-bar">
           <div class="item-slots">
             ${[0, 1]
@@ -1669,6 +1723,8 @@ export class DoodleAppShell {
     const displayTitle = giftLoc ? giftLoc.title : archMeta.name;
     const displayFlavor = giftLoc ? giftLoc.flavorText : archMeta.instruction;
     const owner = this.gameState?.players.find((p) => p.id === modal.localParticipantId);
+    const challenger = this.gameState?.players.find((p) => p.id === ch.ownerPlayerId);
+    const rival = ch.opponentId ? this.gameState?.players.find((p) => p.id === ch.opponentId) : undefined;
     const others = (this.gameState?.players ?? []).filter((p) => p.id !== ch.ownerPlayerId);
     const ladder = BOARD_LAYOUT.ladders.find((l) => l.from === ch.tileId);
     const snake = BOARD_LAYOUT.snakes.find((s) => s.from === ch.tileId);
@@ -1678,9 +1734,15 @@ export class DoodleAppShell {
         <div class="doodle-card challenge-modal">
           <div class="challenge-header">
             <div>
-              <div style="font-size:0.82rem;opacity:0.8">${this.t('tileLabel')} ${ch.tileId} • ${escapeHtml(archMeta.name)} ${ch.mode === 'all_play' ? (en ? '• EVERYONE PLAYS!' : '• SEMUA MAIN!') : ch.mode === 'duel' ? '• DUEL 1v1' : ''}</div>
+              <div style="font-size:0.82rem;opacity:0.8">${this.t('tileLabel')} ${ch.tileId} • ${escapeHtml(archMeta.name)} ${ch.mode === 'duel' ? '• DUEL 1v1' : ''}</div>
               <h3 style="margin:2px 0">${escapeHtml(displayTitle)}</h3>
-              ${owner ? `<div style="font-size:0.85rem;display:inline-flex;align-items:center;gap:5px">${pawnSvg(owner.pawn, owner.color, 20, owner.accessory ?? 'none')} <b>${escapeHtml(owner.name)}</b> <span style="opacity:0.75">• ${escapeHtml(getPawnMeta(owner.pawn, this.lang).shortName)}</span></div>` : ''}
+              ${
+                ch.mode === 'duel' && challenger && rival && modal.duelPicked
+                  ? `<div style="font-size:0.85rem;display:inline-flex;align-items:center;gap:5px">${pawnSvg(challenger.pawn, challenger.color, 18, challenger.accessory ?? 'none')} <b>${escapeHtml(challenger.name)}</b> <span style="opacity:0.75">vs</span> ${pawnSvg(rival.pawn, rival.color, 18, rival.accessory ?? 'none')} <b>${escapeHtml(rival.name)}</b></div>`
+                  : owner
+                    ? `<div style="font-size:0.85rem;display:inline-flex;align-items:center;gap:5px">${pawnSvg(owner.pawn, owner.color, 20, owner.accessory ?? 'none')} <b>${escapeHtml(owner.name)}</b> <span style="opacity:0.75">• ${escapeHtml(getPawnMeta(owner.pawn, this.lang).shortName)}</span></div>`
+                    : ''
+              }
             </div>
             <div class="challenge-timer-ring">
               <svg width="52" height="52">
@@ -2033,7 +2095,16 @@ export class DoodleAppShell {
   }
 
   private renderHowToPlayModal(): string {
-    const items: ItemType[] = ['shield', 'golden_dice', 'brake', 'surprise', 'magnet_star', 'swap_turbo'];
+    const items: ItemType[] = [
+      'shield',
+      'golden_dice',
+      'brake',
+      'surprise',
+      'magnet_star',
+      'swap_turbo',
+      'star_multiplier',
+      'rival_brake',
+    ];
     return `
       <div class="challenge-backdrop">
         <div class="doodle-card menu-box setup-card-compact stagger-item">
@@ -2043,6 +2114,7 @@ export class DoodleAppShell {
             <li><b>${escapeHtml(this.t('howtoTileTitle'))}:</b> ${escapeHtml(this.t('howtoTileDesc'))}</li>
             <li><b>${escapeHtml(this.t('howtoSnakeTitle'))}:</b> ${escapeHtml(this.t('howtoSnakeDesc'))}</li>
             <li><b>${escapeHtml(this.t('howtoShopTitle'))}:</b> ${escapeHtml(this.t('howtoShopDesc'))}</li>
+            <li><b>${escapeHtml(this.t('howtoSpecialTitle'))}:</b> ${escapeHtml(this.t('howtoSpecialDesc'))}</li>
           </ul>
           <div class="howto-items-grid">
             ${items
