@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { GameEvent, GameState, RoomStatePayload } from '@doodle-dash/shared';
+import {
+  ARCHETYPE_REGISTRY,
+  QUIZ_BANK,
+  SeededRng,
+  type ActiveChallenge,
+  type GameEvent,
+  type GameState,
+  type RoomStatePayload,
+} from '@doodle-dash/shared';
 import {
   MqttPacketStreamParser,
   encodeMqttConnectPacket,
@@ -142,19 +150,74 @@ describe('Serverless P2pRoomHost realtime multiplayer roundtrip', () => {
     expect(ch).not.toBeNull();
     expect(ch!.tileId).toBe(4);
 
-    // Submit winning outcome for every participant on that challenge
+    // Submit deterministic winning outcome for whichever randomized archetype was drawn on Tile 4
+    const makePassInput = (c: ActiveChallenge): Record<string, unknown> => {
+      const sim = ARCHETYPE_REGISTRY[c.archetype].simulateBot(c.params, 'juara', new SeededRng(c.seed + 3));
+      const base: Record<string, unknown> = { ...sim, startedAt: Date.now() - 2500, completedAt: Date.now() };
+      if (c.archetype === 'tap_timing') {
+        base.needlePos = Number(c.params.zoneCenter);
+        base.reactionMs = 450;
+      } else if (c.archetype === 'quick_quiz') {
+        const q = QUIZ_BANK.find((x) => x.id === Number(c.params.questionId))!;
+        base.answerIndex = q.correctIndex;
+        base.reactionMs = 500;
+      } else if (
+        c.archetype === 'shadow_match' ||
+        c.archetype === 'quick_math' ||
+        c.archetype === 'stroop_color' ||
+        c.archetype === 'color_count' ||
+        c.archetype === 'odd_one_out'
+      ) {
+        base.answerIndex = Number(c.params.correctIndex);
+        base.reactionMs = 450;
+      } else if (c.archetype === 'pair_flip') {
+        const pc = Number(c.params.pairCount ?? 3);
+        base.sequenceIndices = Array.from({ length: pc * 2 }, (_, i) => i);
+        base.extra = { pairsMatched: pc };
+        base.reactionMs = 2400;
+      } else if (c.archetype === 'number_order') {
+        base.sequenceIndices = [...((c.params.expectedIndices as number[]) ?? [0, 1, 2, 3, 4])];
+        base.reactionMs = 1500;
+      } else if (c.archetype === 'bubble_pop') {
+        const tp = Number(c.params.targetPops ?? 5);
+        base.tapTimestamps = Array.from({ length: tp }, (_, i) => 400 + i * 240);
+        base.hitsTaken = 0;
+        base.extra = { goodPopped: tp };
+      } else if (c.archetype === 'rhythm_clap') {
+        base.tapTimestamps = [...((c.params.beatTargetsMs as number[]) ?? [1050, 1900, 2750, 3600])];
+        base.reactionMs = 950;
+      } else if (c.archetype === 'balance_bar') {
+        base.tapTimestamps = [450, 1100, 1900, 2700];
+        base.hitsTaken = 0;
+        base.extra = { balanceRatio: 0.88 };
+      } else if (c.archetype === 'memory_doodle') {
+        base.sequenceIndices = [...(c.params.sequence as number[])];
+        base.reactionMs = 1500;
+      } else if (c.archetype === 'spam_tap') {
+        const t = Number(c.params.targetTaps);
+        base.tapTimestamps = Array.from({ length: t + 2 }, (_, i) => 100 + i * 110);
+      } else if (c.archetype === 'swipe_dodge') {
+        base.hitsTaken = 0;
+      } else if (c.archetype === 'word_scramble') {
+        base.answerText = String(c.params.word);
+        base.reactionMs = 700;
+      } else if (c.archetype === 'trace_line') {
+        base.pathAccuracy = 0.95;
+        base.extra = { pointsCount: 20 };
+        base.reactionMs = 900;
+      } else if (c.archetype === 'quick_duel') {
+        base.reactionMs = 180;
+      }
+      return base;
+    };
+
     for (const pid of ch!.participantIds) {
       const peer = pid === host.hostPlayerId ? 'peer_host' : 'peer_guest';
       host.handlePeerMessage(peer, 'challenge:submit', {
         tileId: ch!.tileId,
         claimedSuccess: true,
         score: 100,
-        inputLog: {
-          startedAt: Date.now() - 500,
-          completedAt: Date.now(),
-          reactionMs: 180,
-          answerIndex: 0,
-        },
+        inputLog: makePassInput(ch!),
       });
     }
 
