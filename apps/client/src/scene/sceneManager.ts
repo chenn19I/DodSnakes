@@ -356,7 +356,9 @@ export class DoodleSceneManager {
             ? 'boss'
             : p.bounced
               ? 'bounced'
-              : 'normal';
+              : p.specialKind
+                ? 'special'
+                : 'normal';
       markers.push({ tileId: p.to, kind });
     }
     this.board.setPreviewTiles(markers);
@@ -910,6 +912,53 @@ export class DoodleSceneManager {
         return;
       }
 
+      if (ev.type === 'BoardSpecialTriggered') {
+        const pv = this.pawns.get(ev.playerId);
+        if (pv) {
+          this.sound.playComboSpark();
+          this.particles.spawnStarBurst(pv.root.position, this.reducedMotion);
+          const en = this.language === 'en';
+          const tag =
+            ev.kind === 'star_fountain'
+              ? '+2★!'
+              : ev.kind === 'supply_crate'
+                ? ev.grantedItem
+                  ? '+1 Item!'
+                  : '+2★!'
+                : ev.kind === 'shield_shrine'
+                  ? en
+                    ? '+1 Shield!'
+                    : '+1 Perisai!'
+                  : en
+                    ? 'Tailwind +2!'
+                    : 'Angin +2!';
+          this.showCallout(tag, pv.root.position, DOODLE_PALETTE.mint, 0.95);
+          tl.to(pv.bodyGroup.position, { y: 0.36, yoyo: true, repeat: 1, duration: 0.16, ease: 'power2.out' });
+        } else {
+          tl.to({}, { duration: 0.12 });
+        }
+        return;
+      }
+
+      if (ev.type === 'MissionCompleted') {
+        const pv = this.pawns.get(ev.playerId);
+        if (pv) {
+          this.sound.playConfettiFanfare();
+          this.particles.spawnConfetti(pv.root.position, this.reducedMotion, 28);
+          const en = this.language === 'en';
+          this.showCallout(
+            en ? `Mission +${ev.starsDelta}★!` : `Misi +${ev.starsDelta}★!`,
+            pv.root.position,
+            DOODLE_PALETTE.yellow,
+            1.05,
+          );
+          tl.to(pv.bodyGroup.position, { y: 0.44, yoyo: true, repeat: 1, duration: 0.18, ease: 'power2.out' });
+        } else {
+          tl.to({}, { duration: 0.14 });
+        }
+        return;
+      }
+
       if (ev.type === 'ItemUsed') {
         const pv = this.pawns.get(ev.playerId);
         if (pv) {
@@ -929,15 +978,21 @@ export class DoodleSceneManager {
                   ? en
                     ? 'Brake!'
                     : 'Rem!'
-                  : ev.item === 'magnet_star'
+                  : ev.item === 'rival_brake'
                     ? en
-                      ? 'Magnet!'
-                      : 'Magnet!'
-                    : ev.item === 'swap_turbo'
-                      ? 'Turbo +2!'
-                      : en
-                        ? 'Mystery!'
-                        : 'Kejutan!';
+                      ? 'Rival Trap!'
+                      : 'Rem Lawan!'
+                    : ev.item === 'star_multiplier'
+                      ? '2x ★!'
+                      : ev.item === 'magnet_star'
+                        ? en
+                          ? 'Magnet!'
+                          : 'Magnet!'
+                        : ev.item === 'swap_turbo'
+                          ? 'Turbo +2!'
+                          : en
+                            ? 'Mystery!'
+                            : 'Kejutan!';
           this.showCallout(tag, pv.root.position, DOODLE_PALETTE.yellow, 0.85);
           tl.to(pv.bodyGroup.scale, { y: 1.18, x: 0.9, z: 0.9, yoyo: true, repeat: 1, duration: 0.14 });
         } else {
