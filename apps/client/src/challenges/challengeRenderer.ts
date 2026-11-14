@@ -1475,6 +1475,235 @@ const renderBalanceBar: ChallengeRendererFn = ({ challenge, playerId, container,
   };
 };
 
+const renderPairFlip: ChallengeRendererFn = ({
+  challenge,
+  playerId,
+  container,
+  colorblindMode,
+  language = 'id',
+  sound,
+  onSubmit,
+}) => {
+  const en = language === 'en';
+  const cards = (challenge.params.cards as string[]) ?? ['cat', 'star', 'cloud', 'cat', 'star', 'cloud'];
+  const pairCount = Number(challenge.params.pairCount ?? Math.floor(cards.length / 2));
+  const startedAt = performance.now();
+  let done = false;
+  let lockBoard = false;
+  let resetTimer: number | null = null;
+  let openIndices: number[] = [];
+  const matched = new Set<number>();
+  const sequenceIndices: number[] = [];
+
+  container.innerHTML = `
+    <div class="mg-wrap">
+      <div class="mg-sub">${en ? 'Matched:' : 'Cocok:'} <b id="mg-pair-score">0</b> / ${pairCount}</div>
+      <div class="mg-pair-grid ${cards.length >= 8 ? 'is-8' : ''}">
+        ${cards
+          .map(
+            (shape, idx) => `
+          <button class="doodle-btn mg-pair-card" data-pair-idx="${idx}" data-shape="${shape}">
+            <span class="mg-pair-face" style="display:none">${renderDoodleSvg(shape)}</span>
+            <span class="mg-pair-back">?</span>
+            ${colorblindMode ? `<span class="mg-cb-tag mg-pair-cb" style="display:none">${getLocalizedShadowLabel(shape, shape.toUpperCase(), language).slice(0, 5)}</span>` : ''}
+          </button>`,
+          )
+          .join('')}
+      </div>
+    </div>
+  `;
+
+  const scoreEl = container.querySelector<HTMLElement>('#mg-pair-score')!;
+  const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-pair-idx]'));
+
+  const syncCardVisual = (btn: HTMLButtonElement, revealed: boolean, isMatchedCard: boolean) => {
+    const face = btn.querySelector<HTMLElement>('.mg-pair-face');
+    const back = btn.querySelector<HTMLElement>('.mg-pair-back');
+    const cb = btn.querySelector<HTMLElement>('.mg-pair-cb');
+    btn.classList.toggle('is-open', revealed && !isMatchedCard);
+    btn.classList.toggle('is-matched', isMatchedCard);
+    if (face) face.style.display = revealed ? 'inline-flex' : 'none';
+    if (back) back.style.display = revealed ? 'none' : 'inline-flex';
+    if (cb) cb.style.display = revealed ? 'inline-block' : 'none';
+  };
+
+  buttons.forEach((btn, idx) => {
+    btn.onclick = () => {
+      if (done || lockBoard || matched.has(idx) || openIndices.includes(idx)) return;
+      sound.playUiClick();
+      openIndices.push(idx);
+      sequenceIndices.push(idx);
+      syncCardVisual(btn, true, false);
+
+      if (openIndices.length === 2) {
+        const [a, b] = openIndices;
+        if (cards[a] === cards[b]) {
+          matched.add(a);
+          matched.add(b);
+          syncCardVisual(buttons[a], true, true);
+          syncCardVisual(buttons[b], true, true);
+          openIndices = [];
+          sound.playBubblePop(matched.size);
+          const matchedPairs = matched.size / 2;
+          scoreEl.textContent = String(matchedPairs);
+          if (matchedPairs >= pairCount) {
+            done = true;
+            onSubmit(
+              makeInputSubmission(playerId, true, 100, startedAt, {
+                sequenceIndices: sequenceIndices.slice(0, 12),
+                extra: { pairsMatched: matchedPairs },
+              }),
+            );
+          }
+        } else {
+          lockBoard = true;
+          resetTimer = window.setTimeout(() => {
+            syncCardVisual(buttons[a], false, false);
+            syncCardVisual(buttons[b], false, false);
+            openIndices = [];
+            lockBoard = false;
+          }, 420);
+        }
+      }
+    };
+  });
+
+  return () => {
+    done = true;
+    if (resetTimer !== null) clearTimeout(resetTimer);
+  };
+};
+
+const renderNumberOrder: ChallengeRendererFn = ({
+  challenge,
+  playerId,
+  container,
+  language = 'id',
+  sound,
+  onSubmit,
+}) => {
+  const en = language === 'en';
+  const values = (challenge.params.values as number[]) ?? [3, 9, 14, 21, 28];
+  const descending = Boolean(challenge.params.descending);
+  const startedAt = performance.now();
+  const picked: number[] = [];
+  let submitted = false;
+
+  const orderPrompt = descending
+    ? en
+      ? 'Tap LARGEST -> SMALLEST!'
+      : 'Ketuk TERBESAR -> TERKECIL!'
+    : en
+      ? 'Tap SMALLEST -> LARGEST!'
+      : 'Ketuk TERKECIL -> TERBESAR!';
+
+  container.innerHTML = `
+    <div class="mg-wrap">
+      <div class="mg-sub"><b>${orderPrompt}</b> (<span id="mg-num-progress">0</span>/${values.length})</div>
+      <div class="mg-num-grid">
+        ${values
+          .map(
+            (val, idx) =>
+              `<button class="doodle-btn mg-num-btn tabular-num" data-num-idx="${idx}">${val}</button>`,
+          )
+          .join('')}
+      </div>
+    </div>
+  `;
+
+  const progEl = container.querySelector<HTMLElement>('#mg-num-progress')!;
+  const btns = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-num-idx]'));
+  btns.forEach((btn, idx) => {
+    btn.onclick = () => {
+      if (submitted || picked.includes(idx)) return;
+      picked.push(idx);
+      btn.classList.add('is-picked');
+      btn.disabled = true;
+      sound.playBubblePop(picked.length);
+      progEl.textContent = String(picked.length);
+
+      if (picked.length === values.length) {
+        submitted = true;
+        onSubmit(
+          makeInputSubmission(playerId, true, 90, startedAt, {
+            sequenceIndices: picked,
+          }),
+        );
+      }
+    };
+  });
+
+  return () => {
+    submitted = true;
+  };
+};
+
+const renderOddOneOut: ChallengeRendererFn = ({
+  challenge,
+  playerId,
+  container,
+  colorblindMode,
+  language = 'id',
+  sound,
+  onSubmit,
+}) => {
+  const en = language === 'en';
+  const items =
+    (challenge.params.items as Array<{
+      shape: string;
+      colorId: string;
+      hex: string;
+      pattern: string;
+      cbCode: string;
+    }>) ?? [];
+  const variant = String(challenge.params.variant ?? 'shape');
+  const startedAt = performance.now();
+  let submitted = false;
+
+  const hint =
+    variant === 'color'
+      ? en
+        ? 'Spot the 1 sticker with a DIFFERENT color / badge!'
+        : 'Temukan 1 stiker dengan WARNA / kode berbeda!'
+      : en
+        ? 'Spot the 1 sticker with a DIFFERENT shape!'
+        : 'Temukan 1 stiker dengan BENTUK berbeda!';
+
+  container.innerHTML = `
+    <div class="mg-wrap">
+      <div class="mg-sub">${hint}</div>
+      <div class="mg-odd-grid">
+        ${items
+          .map(
+            (item, idx) => `
+          <button class="doodle-btn mg-odd-card" data-odd-idx="${idx}" style="background:${item.hex}24;border-color:${item.hex}">
+            <span style="display:inline-flex;transform:scale(0.68);margin:-10px 0">${renderDoodleSvg(item.shape)}</span>
+            ${
+              colorblindMode || variant === 'color'
+                ? `<span class="mg-cb-tag" style="background:${item.hex};color:#2B2A33">${renderPatternBadge(item.pattern)} ${item.cbCode}</span>`
+                : ''
+            }
+          </button>`,
+          )
+          .join('')}
+      </div>
+    </div>
+  `;
+
+  container.querySelectorAll<HTMLButtonElement>('[data-odd-idx]').forEach((btn, idx) => {
+    btn.onclick = () => {
+      if (submitted) return;
+      submitted = true;
+      sound.playUiClick();
+      onSubmit(makeInputSubmission(playerId, true, 90, startedAt, { answerIndex: idx }));
+    };
+  });
+
+  return () => {
+    submitted = true;
+  };
+};
+
 export const CLIENT_CHALLENGE_RENDERERS: Record<string, ChallengeRendererFn> = {
   tap_timing: renderTapTiming,
   quick_quiz: renderQuickQuiz,
@@ -1493,5 +1722,8 @@ export const CLIENT_CHALLENGE_RENDERERS: Record<string, ChallengeRendererFn> = {
   rhythm_clap: renderRhythmClap,
   color_count: renderColorCount,
   balance_bar: renderBalanceBar,
+  pair_flip: renderPairFlip,
+  number_order: renderNumberOrder,
+  odd_one_out: renderOddOneOut,
   boss_doodle: renderBossDoodle,
 };
