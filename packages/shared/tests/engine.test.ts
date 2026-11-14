@@ -3,6 +3,7 @@ import {
   ACCESSORY_META,
   ARCHETYPE_REGISTRY,
   BOARD_LAYOUT,
+  BOARD_SPECIAL_TILES,
   PAWN_META,
   PLAYABLE_TILE_ARCHETYPES,
   QUIZ_BANK,
@@ -26,6 +27,7 @@ import {
   recordChallengeSubmission,
   resolveTile,
   rollDice,
+  selectDuelOpponent,
   simulateBotChallengeSubmission,
   startGame,
   validateBoardLayout,
@@ -110,6 +112,12 @@ function makeWinningSubmission(state: GameState, playerId: string) {
     sim.reactionMs = 1000;
   } else if (ch.archetype === 'quick_duel') {
     sim.reactionMs = 180;
+  } else if (ch.archetype === 'target_sum') {
+    sim.sequenceIndices = [...((ch.params.validPair as number[]) ?? [0, 1])];
+    sim.reactionMs = 700;
+  } else if (ch.archetype === 'arrow_blitz') {
+    sim.sequenceIndices = [...((ch.params.sequence as number[]) ?? [0, 1, 2, 3])];
+    sim.reactionMs = 750;
   } else if (ch.archetype === 'boss_doodle') {
     const math = ch.params.math as { correctIndex: number };
     const timing = ch.params.timing as { zoneCenter: number };
@@ -821,7 +829,8 @@ describe('Challenge validation & Replay determinism', () => {
       }),
     ).state;
 
-    // Force deterministic math wins twice in a row for p1 (set p1 consecutive wins)
+    // Force deterministic math wins twice in a row for p1 (set p1 consecutive wins; isolate from mission bonus)
+    st.players[0].mission = { kind: 'climb_2', progress: 0, target: 2, completed: false };
     st.players[0].challengeStreak = 1;
     st = rollDice(st, 'p1', 2).state;
     st = resolveTile(st, customTiles).state;
@@ -1146,6 +1155,14 @@ describe('Challenge validation & Replay determinism', () => {
       expect(state.phase).toBe('TILE_CHECK');
       state = resolveTile(state, TILES, 1_700_000_000_000 + turn * 1000).state;
       if (state.phase === 'CHALLENGE' && state.activeChallenge) {
+        if (state.activeChallenge.mode === 'duel' && state.activeChallenge.awaitingDuelPick) {
+          state = selectDuelOpponent(
+            state,
+            state.activeChallenge.ownerPlayerId,
+            undefined,
+            1_700_000_000_500 + turn * 1000,
+          );
+        }
         for (const pid of state.activeChallenge.participantIds) {
           state = recordChallengeSubmission(state, makeWinningSubmission(state, pid));
         }
@@ -1220,5 +1237,139 @@ describe('Challenge validation & Replay determinism', () => {
       seenArchs.add(runFirstChallenge(s).archetype);
     }
     expect(seenArchs.size).toBeGreaterThanOrEqual(8);
+  });
+
+  it('enforces strict challenge ownership, 1v1 duel pick flow, and blocks non-participants', () => {
+    // 1. Ladder tile (tile 4) & Snake tile (tile 17) must ALWAYS run in solo mode owned only by the roller
+    for (let seed = 10; seed < 40; seed++) {
+      let s = startGame(createInitialGameState({ matchSeed: seed, board: BOARD_LAYOUT, players: makeTestPlayers(3) })).state;
+      s = rollDice(s, 'p1', 3).state; // lands on tile 4 (Ladder)
+      const res = resolveTile(s, TILES, 1000);
+      const ch = res.state.activeChallenge!;
+      expect(ch.mode).toBe('solo');
+      expect(ch.participantIds).toEqual(['p1']);
+      expect(() =>
+        recordChallengeSubmission(res.state, {
+          playerId: 'p2',
+          claimedSuccess: true,
+          score: 90,
+          inputLog: { startedAt: 0, completedAt: 600, reactionMs: 600 },
+        }),
+      ).toThrow();
+    }
+
+    // 2. Manual duel flow waits for challenger to pick 1 rival before unlocking opponent submission
+    let duelState = startGame(createInitialGameState({ matchSeed: 909, board: BOARD_LAYOUT, players: makeTestPlayers(3) })).state;
+    duelState = rollDice(duelState, 'p1', 4).state; // tile 5 (non-junction)
+    const customDuelTiles: Tile[] = TILES.map((t) =>
+      t.id === 5 ? { ...t, archetype: 'quick_duel', mode: 'duel' } : t,
+    );
+    const duelRes = resolveTile(duelState, customDuelTiles, 5000);
+    const pendingDuel = duelRes.state.activeChallenge!;
+    expect(pendingDuel.mode).toBe('duel');
+    expect(pendingDuel.awaitingDuelPick).toBe(true);
+    expect(pendingDuel.participantIds).toEqual(['p1']);
+
+    // Even challenger cannot submit while awaitingDuelPick
+    expect(() =>
+      recordChallengeSubmission(duelRes.state, {
+        playerId: 'p1',
+        claimedSuccess: true,
+        score: 95,
+        inputLog: { startedAt: 0, completedAt: 500, reactionMs: 500 },
+      }),
+    ).toThrow();
+
+    // Challenger picks p3 as duel opponent -> p2 still blocked, p1 & p3 allowed
+    const pickedState = selectDuelOpponent(duelRes.state, 'p1', 'p3', 6000);
+    expect(pickedState.activeChallenge!.awaitingDuelPick).toBe(false);
+    expect(pickedState.activeChallenge!.opponentId).toBe('p3');
+    expect(pickedState.activeChallenge!.participantIds).toEqual(['p1', 'p3']);
+    expect(() =>
+      recordChallengeSubmission(pickedState, {
+        playerId: 'p2',
+        claimedSuccess: true,
+        score: 95,
+        inputLog: { startedAt: 0, completedAt: 500, reactionMs: 500 },
+      }),
+    ).toThrow();
+  });
+
+  it('validates target_sum & arrow_blitz, special board tiles, star_multiplier, rival_brake, and missions', () => {
+    const rng = new SeededRng(3344);
+    const sumSpec = ARCHETYPE_REGISTRY.target_sum;
+    const sumParams = sumSpec.buildParams(rng, 2, 18);
+    const validPair = sumParams.validPair as [number, number];
+    expect(
+      sumSpec.validate(
+        sumParams,
+        {
+          playerId: 'p1',
+          claimedSuccess: true,
+          score: 90,
+          inputLog: { startedAt: 0, completedAt: 900, reactionMs: 900, sequenceIndices: validPair },
+        },
+        2,
+      ).success,
+    ).toBe(true);
+    expect(
+      sumSpec.validate(
+        sumParams,
+        {
+          playerId: 'p1',
+          claimedSuccess: true,
+          score: 90,
+          inputLog: { startedAt: 0, completedAt: 900, reactionMs: 900, sequenceIndices: [0, 0] },
+        },
+        2,
+      ).success,
+    ).toBe(false);
+
+    const arrowSpec = ARCHETYPE_REGISTRY.arrow_blitz;
+    const arrowParams = arrowSpec.buildParams(rng, 2, 24);
+    const seq = arrowParams.sequence as number[];
+    expect(
+      arrowSpec.validate(
+        arrowParams,
+        {
+          playerId: 'p1',
+          claimedSuccess: true,
+          score: 90,
+          inputLog: { startedAt: 0, completedAt: 900, reactionMs: 900, sequenceIndices: seq },
+        },
+        2,
+      ).success,
+    ).toBe(true);
+
+    // Special tiles must all be disjoint from ladders & snakes
+    const ladderAndSnakeStarts = new Set([
+      ...BOARD_LAYOUT.ladders.map((l) => l.from),
+      ...BOARD_LAYOUT.snakes.map((s) => s.from),
+    ]);
+    for (const sp of BOARD_SPECIAL_TILES) {
+      expect(ladderAndSnakeStarts.has(sp.tileId)).toBe(false);
+    }
+
+    // Tile 43 tailwind moves player +2 -> 45 & emits BoardSpecialTriggered
+    let s = startGame(createInitialGameState({ matchSeed: 555, board: BOARD_LAYOUT, players: makeTestPlayers(2) })).state;
+    s.players[0].position = 40;
+    s.players[0].items = ['star_multiplier', 'rival_brake'];
+    s.players[0].mission = { kind: 'use_2_items', progress: 0, target: 2, completed: false };
+    s.players[1].position = 65;
+
+    // Using rival_brake caps p2.activeBrake, using star_multiplier enables p1.activeDoubleStars & finishes use_2_items mission
+    const useBrake = applyItem(s, 'p1', 1);
+    expect(useBrake.state.players[1].activeBrake).toBe(true);
+    const useCharm = applyItem(useBrake.state, 'p1', 0);
+    expect(useCharm.state.players[0].activeDoubleStars).toBe(true);
+    expect(useCharm.state.players[0].mission?.completed).toBe(true);
+    expect(useCharm.events.some((e) => e.type === 'MissionCompleted')).toBe(true);
+
+    // Land on tile 43 (tailwind) -> auto-advances +2 to tile 45
+    const rolled = rollDice(useCharm.state, 'p1', 3);
+    expect(rolled.state.players[0].position).toBe(43);
+    const tileRes = resolveTile(rolled.state, TILES, 2000);
+    expect(tileRes.state.players[0].position).toBe(45);
+    expect(tileRes.events.some((e) => e.type === 'BoardSpecialTriggered' && e.kind === 'tailwind')).toBe(true);
   });
 });
