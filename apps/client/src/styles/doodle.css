@@ -1347,6 +1347,73 @@ body.reduced-motion .stamp-badge {
   will-change: transform;
 }
 
+.mg-pair-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+.mg-pair-grid.is-8 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.mg-pair-card {
+  min-height: 62px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: #FFF6DC;
+  font-weight: 700;
+}
+
+.mg-pair-card.is-open {
+  background: #FFFFFF;
+}
+
+.mg-pair-card.is-matched {
+  background: var(--mint);
+}
+
+.mg-num-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.mg-num-btn {
+  min-width: 62px;
+  min-height: 52px;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.mg-num-btn.is-picked {
+  background: var(--mint);
+  opacity: 0.65;
+}
+
+.mg-odd-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+.mg-odd-card {
+  min-height: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px;
+}
+
 .activity-feed-dock {
   position: fixed;
   left: 12px;
@@ -1855,9 +1922,73 @@ body.reduced-motion .stamp-badge {
   animation: rollPulse 1.8s ease-in-out infinite;
 }
 
+.player-pill.is-urgent {
+  animation: rollPulse 0.9s ease-in-out infinite;
+}
+
+.roll-sub-hint {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 2px solid var(--ink);
+  background: var(--paper);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--ink);
+}
+
+.legend-popover {
+  position: fixed;
+  top: 56px;
+  right: 12px;
+  width: min(310px, calc(100vw - 24px));
+  padding: 10px 12px;
+  z-index: 42;
+  pointer-events: auto;
+  background: rgba(255, 250, 238, 0.97);
+}
+
+.legend-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
+.legend-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+
+.legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.76rem;
+  line-height: 1.2;
+  padding: 3px 6px;
+  border-radius: 8px;
+  border: 1.5px solid rgba(43, 42, 51, 0.25);
+  background: rgba(255, 255, 255, 0.75);
+}
+
 @media (max-width: 720px) {
   .helper-key-hint {
     display: none;
+  }
+
+  .roll-sub-hint {
+    font-size: 0.64rem;
+    padding: 1px 5px;
+  }
+
+  .legend-popover {
+    top: 48px;
+    right: 8px;
   }
 }
 
