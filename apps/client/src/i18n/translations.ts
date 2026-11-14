@@ -657,7 +657,11 @@ export type UiKey =
   | 'youWinChallenge'
   | 'youMissChallenge'
   | 'watchingChallenge'
-  | 'botPlaying';
+  | 'botPlaying'
+  | 'supportBtn'
+  | 'supportTitle'
+  | 'supportDesc'
+  | 'supportNote';
 
 const ID_STRINGS: Record<UiKey, string> = {
   langLabel: 'ID',
@@ -773,6 +777,10 @@ const ID_STRINGS: Record<UiKey, string> = {
   youMissChallenge: 'YAAH... COBA LAGI!',
   watchingChallenge: 'Menonton teman menyelesaikan tantangan...',
   botPlaying: 'Bot sedang memainkan tantangan secara otomatis...',
+  supportBtn: 'Dukung',
+  supportTitle: 'Dukung DodSnake (Saweria)',
+  supportDesc: 'Suka bermain DodSnake? Pindai QR Saweria di bawah dengan kamera HP, QRIS, e-wallet, atau m-banking!',
+  supportNote: 'Terima kasih banyak! Dukunganmu membantu biaya server online & pembaruan game.',
 };
 
 const EN_STRINGS: Record<UiKey, string> = {
@@ -889,6 +897,10 @@ const EN_STRINGS: Record<UiKey, string> = {
   youMissChallenge: 'MISSED!',
   watchingChallenge: 'Watching friend play the challenge...',
   botPlaying: 'Bot is playing this challenge automatically...',
+  supportBtn: 'Donate',
+  supportTitle: 'Support DodSnake (Saweria)',
+  supportDesc: 'Enjoying DodSnake? Scan this Saweria QR code with your phone camera, QRIS e-wallet, or banking app!',
+  supportNote: 'Thank you! Your support helps cover online servers & new game updates.',
 };
 
 export function tr(lang: AppLanguage, key: UiKey, vars?: Record<string, string | number>): string {
