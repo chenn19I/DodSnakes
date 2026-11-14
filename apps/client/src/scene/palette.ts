@@ -6,7 +6,7 @@ export const DOODLE_PALETTE = {
   deskWood: '#DFC39B',
   deskWoodDeep: '#CAA97D',
   deskMat: '#C8E6DC',
-  ink: '#24222D',
+  ink: '#2B2838',
   pink: '#FF7FA7',
   yellow: '#FFC94A',
   mint: '#58D6A3',
