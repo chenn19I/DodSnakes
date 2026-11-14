@@ -82,6 +82,7 @@ function withGuard(
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Terjadi kesalahan pada server.';
     socket.emit('error', { code: 'ACTION_FAILED', message });
+    roomManager.syncToSocket(socket.id);
     ack?.({ ok: false, error: message });
   }
 }
@@ -208,6 +209,10 @@ io.on('connection', (socket) => {
       const parsed = EmoteSendSchema.parse(raw);
       roomManager.sendEmote(socket.id, parsed.emoteId);
     });
+  });
+
+  socket.on('game:sync_request', () => {
+    roomManager.syncToSocket(socket.id);
   });
 
   socket.on('room:leave', () => {
