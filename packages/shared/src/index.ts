@@ -1,5 +1,6 @@
 export * from './types.js';
 export * from './rng.js';
+export * from './moderation/usernameFilter.js';
 export * from './content/quizBank.js';
 export * from './content/wordBank.js';
 export * from './content/archetypes.js';
