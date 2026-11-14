@@ -189,6 +189,36 @@ const ARCHETYPE_TITLE_TEMPLATES: Record<ChallengeArchetype, string[]> = {
     'Tahan Posisi Tengah!',
     'Juara Keseimbangan Papan',
   ],
+  pair_flip: [
+    'Cari Pasangan Kartu!',
+    'Memori Kartu Stiker',
+    'Cocokkan 2 Gambar Sama',
+    'Tebak Kartu Tertutup',
+    'Ingatan Cepat Doodle',
+    'Buka & Jodohkan!',
+    'Kembar Identik Papan',
+    'Pasangan Kilat Sketchbook',
+  ],
+  number_order: [
+    'Urutkan Angka Cepat!',
+    'Tangga Angka Berurutan',
+    'Susun Nilai yang Tepat',
+    'Kecil ke Besar atau Sebaliknya!',
+    'Ketuk Angka Berantai',
+    'Tes Fokus Bilangan',
+    'Balapan Urutan Angka',
+    'Antrean Angka Ajaib',
+  ],
+  odd_one_out: [
+    'Cari Yang Beda Sendiri!',
+    'Mana Stiker Penyusup?',
+    'Mata Elang Papan!',
+    'Satu Gambar Tak Sama',
+    'Tebak Yang Paling Unik',
+    'Detektif Perbedaan Kilat',
+    'Temukan Anomali Doodle!',
+    'Fokus! Cari Si Nyeleneh',
+  ],
   boss_doodle: ['Bos Doodle: Raja Coretan!'],
 };
 
@@ -326,7 +356,7 @@ export function generateTiles(board: BoardLayout, seed = DEFAULT_TILE_GENERATOR_
           ? 'Semua pemain ikut adu cepat bareng-bareng!'
           : spec.instruction;
     const specialNote = snakeHeads.has(tileId)
-      ? ' Hati-hati, kepala ular mengintip — menanglah supaya dia cuma ketawa!'
+      ? ' Hati-hati, kepala ular mengintip. Menanglah supaya dia cuma ketawa!'
       : ladderStarts.has(tileId)
         ? ' Ada pangkal tangga emas menantimu naik!'
         : '';
@@ -338,7 +368,7 @@ export function generateTiles(board: BoardLayout, seed = DEFAULT_TILE_GENERATOR_
     const stars = difficulty === 1 ? 2 : difficulty === 2 ? 2 : difficulty === 3 ? 3 : 4;
     let reward: ChallengeReward;
     const bonusRoll = tileRng.next();
-    if (bonusRoll < 0.36) {
+    if (!ladderStarts.has(tileId) && bonusRoll < 0.36) {
       reward = {
         stars,
         bonusType: 'advance',
