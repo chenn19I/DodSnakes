@@ -54,6 +54,7 @@ import {
   getLocalizedGiftVariant,
   getModeMeta,
   getPawnMeta,
+  getZoneName,
   localizeText,
   tr,
   type AppLanguage,
@@ -1033,6 +1034,10 @@ export class DoodleAppShell {
   private renderLegendPopoverHtml(state: GameState): string {
     const en = this.lang === 'en';
     const modeInfo = getModeMeta(state.rulePreset, this.lang);
+    const focusId = this.controller?.getLocalPlayerId() || state.turnOrder[state.currentTurnIndex];
+    const focusPos = state.players.find((p) => p.id === focusId)?.position ?? 1;
+    const curZone =
+      state.board.zones.find((z) => focusPos >= z.startTile && focusPos <= z.endTile) ?? state.board.zones[0];
     return `
       <div class="doodle-card legend-popover" role="dialog" aria-label="${en ? 'Board Guide' : 'Panduan Papan'}">
         <div class="legend-head">
@@ -1040,6 +1045,11 @@ export class DoodleAppShell {
           <button class="doodle-btn" id="btn-close-legend" style="min-height:24px;padding:1px 7px;font-size:0.74rem">x</button>
         </div>
         <p style="margin:3px 0 6px;font-size:0.76rem;opacity:0.85">${escapeHtml(modeInfo.description)}</p>
+        ${
+          curZone
+            ? `<div class="legend-zone-pill"><span>${escapeHtml(getZoneName(curZone.id, this.lang))} (${curZone.startTile}-${curZone.endTile})</span><span>${PLAYABLE_TILE_ARCHETYPES.length} ${en ? 'Mini-Games' : 'Mini-Game'}</span></div>`
+            : ''
+        }
         <div class="legend-grid">
           <span class="legend-chip">${renderUiIconSvg('ladder', 13)} ${en ? 'Ladder: Win duel/quiz to climb' : 'Tangga: Tantangan sukses = naik'}</span>
           <span class="legend-chip">${renderUiIconSvg('snake', 13)} ${en ? 'Snake: Pass check or Shield to dodge' : 'Ular: Lolos uji / Perisai = aman'}</span>
@@ -1763,9 +1773,11 @@ export class DoodleAppShell {
           </div>
           <div class="lobby-list">
             ${podium
-              .map(
-                (e) => `<div class="lobby-row"><span style="display:inline-flex;align-items:center;gap:6px">#${e.rank} ${this.settings.colorblindMode ? `<span class="cb-shape">${this.colorShapes[e.color]}</span>` : ''}${pawnSvg(e.pawn, e.color, 22, e.accessory ?? 'none')} <b>${escapeHtml(e.name)}</b></span><span class="tabular-num">${this.t('tileShort')}${e.position} • ★${e.stars}</span></div>`,
-              )
+              .map((e) => {
+                const pl = state.players.find((p) => p.id === e.playerId);
+                const winRatio = pl ? `${pl.stats.challengesWon}/${pl.stats.challengesTotal} • ` : '';
+                return `<div class="lobby-row"><span style="display:inline-flex;align-items:center;gap:6px">#${e.rank} ${this.settings.colorblindMode ? `<span class="cb-shape">${this.colorShapes[e.color]}</span>` : ''}${pawnSvg(e.pawn, e.color, 22, e.accessory ?? 'none')} <b>${escapeHtml(e.name)}</b></span><span class="tabular-num">${winRatio}${this.t('tileShort')}${e.position} • ★${e.stars}</span></div>`;
+              })
               .join('')}
           </div>
           ${
