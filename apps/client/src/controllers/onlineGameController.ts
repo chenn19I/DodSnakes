@@ -192,6 +192,11 @@ export class OnlineGameController implements GameSessionController {
       this.callbacks.onStateChange(payload.state);
       this.scene.syncPlayersFromState(payload.state);
     });
+    socket.on('challenge:begin', (payload: { challenge: ActiveChallenge }) => {
+      if (payload?.challenge) {
+        this.handleChallengeBegin(payload.challenge);
+      }
+    });
     socket.on('emote:received', (payload: { playerId: string; emoteId: EmoteId }) => {
       this.callbacks.onEmote(payload.playerId, payload.emoteId);
     });
@@ -310,10 +315,35 @@ export class OnlineGameController implements GameSessionController {
 
     if (challengeStarted && challengeStarted.type === 'ChallengeStarted' && this.state) {
       const ch = challengeStarted.challenge;
-      const myId = this.localPlayerId;
-      if (myId && ch.participantIds.includes(myId)) {
-        this.callbacks.onChallengePrompt(ch, myId);
+      if (this.shouldPromptChallengeForMe(ch) && this.localPlayerId) {
+        this.callbacks.onChallengePrompt(ch, this.localPlayerId);
       }
+    }
+  }
+
+  private shouldPromptChallengeForMe(ch: ActiveChallenge): boolean {
+    const myId = this.localPlayerId;
+    if (!myId || !ch.participantIds.includes(myId)) return false;
+    if (ch.mode === 'duel') {
+      if (myId === ch.ownerPlayerId) return true;
+      return !ch.awaitingDuelPick && myId === ch.opponentId;
+    }
+    return myId === ch.ownerPlayerId;
+  }
+
+  private handleChallengeBegin(challenge: ActiveChallenge): void {
+    if (this.disposed) return;
+    if (this.state) {
+      const next = structuredClone(this.state);
+      next.phase = 'CHALLENGE';
+      next.activeChallenge = challenge;
+      this.state = next;
+      this.callbacks.onStateChange(next);
+    }
+    if (this.shouldPromptChallengeForMe(challenge) && this.localPlayerId) {
+      this.callbacks.onChallengePrompt(challenge, this.localPlayerId);
+    } else {
+      this.callbacks.onChallengeClose();
     }
   }
 
@@ -363,6 +393,9 @@ export class OnlineGameController implements GameSessionController {
           if (p.pawn === 'kucing') {
             p.stars += 1;
           }
+          if (p.mission && !p.mission.completed && p.mission.kind === 'climb_2') {
+            p.mission.progress = Math.min(p.mission.target, p.mission.progress + 1);
+          }
         }
       } else if (ev.type === 'SnakeBitten') {
         const p = next.players.find((pl) => pl.id === ev.playerId);
@@ -395,9 +428,38 @@ export class OnlineGameController implements GameSessionController {
           }
           if (ev.item === 'golden_dice') p.activeGoldenDice = true;
           else if (ev.item === 'swap_turbo') p.activeTurbo = true;
-          else if (ev.item === 'brake' && ev.targetPlayerId) {
+          else if (ev.item === 'star_multiplier') p.activeDoubleStars = true;
+          else if ((ev.item === 'brake' || ev.item === 'rival_brake') && ev.targetPlayerId) {
             const target = next.players.find((pl) => pl.id === ev.targetPlayerId);
             if (target) target.activeBrake = true;
+          }
+          if (p.mission && !p.mission.completed && p.mission.kind === 'use_2_items') {
+            p.mission.progress = Math.min(p.mission.target, p.mission.progress + 1);
+          }
+        }
+      } else if (ev.type === 'BoardSpecialTriggered') {
+        const p = next.players.find((pl) => pl.id === ev.playerId);
+        if (p) {
+          if (typeof ev.starsDelta === 'number') {
+            p.stars = Math.max(0, p.stars + ev.starsDelta);
+          }
+          if (typeof ev.shieldsDelta === 'number') {
+            p.shields = Math.max(0, p.shields + ev.shieldsDelta);
+          }
+          if (typeof ev.movedTo === 'number') {
+            p.position = ev.movedTo;
+          }
+        }
+      } else if (ev.type === 'MissionCompleted') {
+        const p = next.players.find((pl) => pl.id === ev.playerId);
+        if (p) {
+          p.stars = Math.max(0, p.stars + ev.starsDelta);
+          if (typeof ev.shieldsDelta === 'number') {
+            p.shields = Math.max(0, p.shields + ev.shieldsDelta);
+          }
+          if (p.mission && p.mission.kind === ev.kind) {
+            p.mission.progress = p.mission.target;
+            p.mission.completed = true;
           }
         }
       } else if (ev.type === 'ItemGained') {
@@ -415,6 +477,10 @@ export class OnlineGameController implements GameSessionController {
         next.activeChallenge = ev.challenge;
       } else if (ev.type === 'ChallengeResolved') {
         next.activeChallenge = null;
+        const owner = next.players.find((pl) => pl.id === ev.ownerPlayerId);
+        if (owner) {
+          owner.activeDoubleStars = false;
+        }
         for (const [pid, delta] of Object.entries(ev.starsDelta)) {
           const p = next.players.find((pl) => pl.id === pid);
           if (p) p.stars = Math.max(0, p.stars + delta);
@@ -431,6 +497,13 @@ export class OnlineGameController implements GameSessionController {
           if (out.success) {
             p.stats.challengesWon += 1;
             p.challengeStreak += 1;
+            if (p.id === ev.ownerPlayerId && p.mission && !p.mission.completed) {
+              if (p.mission.kind === 'win_3') {
+                p.mission.progress = Math.min(p.mission.target, p.mission.progress + 1);
+              } else if (p.mission.kind === 'streak_2') {
+                p.mission.progress = Math.min(p.mission.target, Math.max(p.mission.progress, p.challengeStreak));
+              }
+            }
           } else {
             p.challengeStreak = 0;
           }
@@ -521,6 +594,13 @@ export class OnlineGameController implements GameSessionController {
         this.state = st;
         this.callbacks.onStateChange(st);
         this.scene.syncPlayersFromState(st);
+        break;
+      }
+      case 'challenge:begin': {
+        const ch = (payload as { challenge?: ActiveChallenge }).challenge;
+        if (ch) {
+          this.handleChallengeBegin(ch);
+        }
         break;
       }
       case 'emote:received': {
