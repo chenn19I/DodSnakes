@@ -64,8 +64,25 @@ function springCurve(t: number): number {
   return 1 - Math.exp(-zeta * omega * t) * (Math.cos(dampedFreq * t) + (zeta / Math.sqrt(1 - zeta * zeta)) * Math.sin(dampedFreq * t));
 }
 
+function createSafeWebGLRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer | null {
+  const configs: THREE.WebGLRendererParameters[] = [
+    { canvas, antialias: true, powerPreference: 'high-performance' },
+    { canvas, antialias: false, powerPreference: 'default', failIfMajorPerformanceCaveat: false },
+  ];
+  for (const cfg of configs) {
+    try {
+      return new THREE.WebGLRenderer(cfg);
+    } catch {
+      // Try next safer WebGL configuration before entering 2D fallback mode
+    }
+  }
+  console.warn('[DodSnake] WebGL context unavailable; falling back to 2D sketchbook mode.');
+  return null;
+}
+
 export class DoodleSceneManager {
-  private readonly renderer: THREE.WebGLRenderer;
+  private readonly canvasEl: HTMLCanvasElement;
+  private readonly renderer: THREE.WebGLRenderer | null;
   private readonly scene: THREE.Scene;
   private readonly cameraRig: DoodleCameraRig;
   private readonly outlineCtrl: DoodleOutlineController;
@@ -102,19 +119,22 @@ export class DoodleSceneManager {
   private onSpeedChange?: (enabled: boolean) => void;
 
   constructor(canvas: HTMLCanvasElement, sound: DoodleSoundEngine) {
+    this.canvasEl = canvas;
     this.sound = sound;
-    this.renderer = new THREE.WebGLRenderer({
-      canvas,
-      antialias: true,
-      powerPreference: 'high-performance',
-    });
-    this.renderer.setPixelRatio(Math.min(this.maxDpr, window.devicePixelRatio || 1));
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.shadowMap.autoUpdate = false;
-    this.renderer.shadowMap.needsUpdate = true;
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer = createSafeWebGLRenderer(canvas);
+    if (this.renderer) {
+      this.renderer.setPixelRatio(Math.min(this.maxDpr, window.devicePixelRatio || 1));
+      this.renderer.setSize(window.innerWidth, window.innerHeight);
+      this.renderer.shadowMap.enabled = true;
+      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      this.renderer.shadowMap.autoUpdate = false;
+      this.renderer.shadowMap.needsUpdate = true;
+      this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+      this.canvasEl.addEventListener('webglcontextlost', this.handleContextLost);
+      this.canvasEl.addEventListener('webglcontextrestored', this.handleContextRestored);
+    } else {
+      this.canvasEl.parentElement?.classList.add('canvas-fallback-2d');
+    }
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(DOODLE_PALETTE.deskWood);
@@ -162,6 +182,10 @@ export class DoodleSceneManager {
     document.addEventListener('visibilitychange', this.handleVisibility);
 
     this.startLoop();
+  }
+
+  public hasWebGL(): boolean {
+    return this.renderer !== null;
   }
 
   public setDebugStatsCallback(cb: (stats: SceneDebugStats) => void): void {
@@ -346,7 +370,9 @@ export class DoodleSceneManager {
     } else if (!this.isPlayingQueue) {
       this.board.setPreviewTiles([]);
     }
-    this.renderer.shadowMap.needsUpdate = true;
+    if (this.renderer) {
+      this.renderer.shadowMap.needsUpdate = true;
+    }
   }
 
   private computeSlotWorldPosition(
@@ -833,6 +859,8 @@ export class DoodleSceneManager {
   }
 
   private startLoop(): void {
+    if (!this.renderer) return;
+    const renderer = this.renderer;
     const tick = () => {
       this.rafId = requestAnimationFrame(tick);
       if (this.paused) return;
@@ -866,10 +894,10 @@ export class DoodleSceneManager {
         this.diceSecondary.group.visible ||
         this.idleShadowCounter === 0
       ) {
-        this.renderer.shadowMap.needsUpdate = true;
+        renderer.shadowMap.needsUpdate = true;
       }
 
-      this.renderer.render(this.scene, this.cameraRig.camera);
+      renderer.render(this.scene, this.cameraRig.camera);
 
       // Update debug FPS & draw call telemetry + automatic DPR downscale watchdog
       if (dtSec > 0) {
@@ -892,8 +920,8 @@ export class DoodleSceneManager {
           if (this.onStatsUpdate) {
             this.onStatsUpdate({
               fps: avgFps,
-              drawCalls: this.renderer.info.render.calls,
-              triangles: this.renderer.info.render.triangles,
+              drawCalls: renderer.info.render.calls,
+              triangles: renderer.info.render.triangles,
             });
           }
         }
@@ -902,11 +930,26 @@ export class DoodleSceneManager {
     tick();
   }
 
+  private readonly handleContextLost = (event: Event): void => {
+    event.preventDefault();
+    this.paused = true;
+  };
+
+  private readonly handleContextRestored = (): void => {
+    this.paused = document.hidden || this.externalPaused;
+    if (this.renderer) {
+      this.renderer.shadowMap.needsUpdate = true;
+    }
+    this.lastFrameMs = performance.now();
+  };
+
   private readonly handleResize = (): void => {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    this.renderer.setPixelRatio(Math.min(this.maxDpr, window.devicePixelRatio || 1));
-    this.renderer.setSize(w, h);
+    if (this.renderer) {
+      this.renderer.setPixelRatio(Math.min(this.maxDpr, window.devicePixelRatio || 1));
+      this.renderer.setSize(w, h);
+    }
     this.cameraRig.setAspect(w / h);
   };
 
@@ -929,6 +972,8 @@ export class DoodleSceneManager {
     if (this.rafId !== null) cancelAnimationFrame(this.rafId);
     window.removeEventListener('resize', this.handleResize);
     document.removeEventListener('visibilitychange', this.handleVisibility);
-    this.renderer.dispose();
+    this.canvasEl.removeEventListener('webglcontextlost', this.handleContextLost);
+    this.canvasEl.removeEventListener('webglcontextrestored', this.handleContextRestored);
+    this.renderer?.dispose();
   }
 }
