@@ -219,6 +219,26 @@ const ARCHETYPE_TITLE_TEMPLATES: Record<ChallengeArchetype, string[]> = {
     'Temukan Anomali Doodle!',
     'Fokus! Cari Si Nyeleneh',
   ],
+  pattern_next: [
+    'Lanjutkan Polanya!',
+    'Tebak Stiker Berikutnya',
+    'Irama Gambar Berulang',
+    'Kunci Pola Sketchbook',
+    'Apa Setelah Ini?',
+    'Puzzle Seri Doodle',
+    'Lengkapi Barisan Stiker',
+    'Detektif Pola Pintar',
+  ],
+  math_compare: [
+    'Mana Paling Besar/Kecil?',
+    'Timbangan Hitung Cepat!',
+    'Adu Nilai Matematika',
+    'Bandingkan 3 Kartu!',
+    'Tebak Hasil Ekstrem!',
+    'Siapa Jawabannya Tertinggi?',
+    'Kalkulator Crayon Kilat',
+    'Jagoan Perbandingan Angka',
+  ],
   boss_doodle: ['Bos Doodle: Raja Coretan!'],
 };
 
