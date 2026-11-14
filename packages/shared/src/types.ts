@@ -187,6 +187,9 @@ export type ChallengeArchetype =
   | 'rhythm_clap'
   | 'color_count'
   | 'balance_bar'
+  | 'pair_flip'
+  | 'number_order'
+  | 'odd_one_out'
   | 'boss_doodle';
 
 export type ChallengeMode = 'solo' | 'duel' | 'all_play';
