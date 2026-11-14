@@ -4,6 +4,7 @@ import { Server, type Socket as ServerSocket } from 'socket.io';
 import { io as ioClient, type Socket as ClientSocket } from 'socket.io-client';
 import {
   ARCHETYPE_REGISTRY,
+  ChallengeChooseOpponentSchema,
   ChallengeSubmitSchema,
   QUIZ_BANK,
   RoomCreateSchema,
@@ -77,6 +78,12 @@ function buildValidClientInput(ch: ActiveChallenge, playerId: string) {
     sim.reactionMs = 900;
   } else if (ch.archetype === 'quick_duel') {
     sim.reactionMs = 200;
+  } else if (ch.archetype === 'target_sum') {
+    sim.sequenceIndices = [...((ch.params.validPair as number[]) ?? [0, 1])];
+    sim.reactionMs = 700;
+  } else if (ch.archetype === 'arrow_blitz') {
+    sim.sequenceIndices = [...((ch.params.sequence as number[]) ?? [0, 1, 2, 3])];
+    sim.reactionMs = 750;
   } else if (ch.archetype === 'boss_doodle') {
     const math = ch.params.math as { correctIndex: number };
     const timing = ch.params.timing as { zoneCenter: number };
@@ -135,6 +142,9 @@ describe('End-to-end 4-player online Socket.IO match', () => {
       socket.on('turn:roll', (raw) => mgr.roll(socket.id, TurnRollSchema.parse(raw ?? {}).forcedDice));
       socket.on('turn:select_dice', (raw) =>
         mgr.selectDice(socket.id, TurnSelectDiceSchema.parse(raw).choiceIndex),
+      );
+      socket.on('challenge:choose_opponent', (raw) =>
+        mgr.chooseDuelOpponent(socket.id, ChallengeChooseOpponentSchema.parse(raw).opponentId),
       );
       socket.on('challenge:submit', (raw) =>
         mgr.submitChallenge(socket.id, ChallengeSubmitSchema.parse(raw)),
@@ -205,7 +215,12 @@ describe('End-to-end 4-player online Socket.IO match', () => {
     for (const c of clients) {
       c.on('challenge:begin', ({ challenge }: { challenge: ActiveChallenge }) => {
         const pid = playerIds.get(c)!;
-        if (challenge.participantIds.includes(pid)) {
+        if (challenge.mode === 'duel' && challenge.awaitingDuelPick && pid === challenge.ownerPlayerId) {
+          const oppClient = clients.find((oc) => playerIds.get(oc) !== pid)!;
+          c.emit('challenge:choose_opponent', { opponentId: playerIds.get(oppClient)! });
+          return;
+        }
+        if (!challenge.awaitingDuelPick && challenge.participantIds.includes(pid)) {
           const sub = buildValidClientInput(challenge, pid);
           c.emit('challenge:submit', sub);
         }
