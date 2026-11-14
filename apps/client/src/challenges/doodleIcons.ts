@@ -348,23 +348,42 @@ export function renderItemSvg(itemId: string, size = 24): string {
   }
 }
 
-export function renderUiIconSvg(
-  kind:
-    | 'dice'
-    | 'star'
-    | 'shop'
-    | 'camera'
-    | 'sound'
-    | 'muted'
-    | 'help'
-    | 'settings'
-    | 'flame'
-    | 'trophy'
-    | 'ladder'
-    | 'snake'
-    | 'fast',
-  size = 20,
-): string {
+export type UiIconKind =
+  | 'dice'
+  | 'star'
+  | 'shop'
+  | 'camera'
+  | 'sound'
+  | 'muted'
+  | 'help'
+  | 'settings'
+  | 'flame'
+  | 'trophy'
+  | 'ladder'
+  | 'snake'
+  | 'fast'
+  | 'skip'
+  | 'timer'
+  | 'globe'
+  | 'users'
+  | 'bot'
+  | 'back'
+  | 'play'
+  | 'link'
+  | 'check'
+  | 'music'
+  | 'eye'
+  | 'text'
+  | 'spark'
+  | 'book'
+  | 'brain'
+  | 'reset'
+  | 'home'
+  | 'leave'
+  | 'sticker'
+  | 'bolt';
+
+export function renderUiIconSvg(kind: UiIconKind, size = 20): string {
   const s = size;
   switch (kind) {
     case 'dice':
@@ -430,10 +449,161 @@ export function renderUiIconSvg(
         <circle cx="18" cy="18" r="4.5" fill="#FFFDF7" stroke="${INK}" stroke-width="2.4"/>
       </svg>`;
     case 'fast':
-    default:
       return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
         <polygon points="7,9 18,18 7,27" fill="#FFD15C" stroke="${INK}" stroke-width="2.5" stroke-linejoin="round"/>
         <polygon points="18,9 29,18 18,27" fill="#FF9852" stroke="${INK}" stroke-width="2.5" stroke-linejoin="round"/>
+      </svg>`;
+    case 'skip':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <polygon points="7,9 21,18 7,27" fill="#5EE2AD" stroke="${INK}" stroke-width="2.5" stroke-linejoin="round"/>
+        <rect x="24" y="9" width="5" height="18" rx="2" fill="#FFFDF7" stroke="${INK}" stroke-width="2.5"/>
+      </svg>`;
+    case 'timer':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <line x1="14" y1="5" x2="22" y2="5" stroke="${INK}" stroke-width="2.8" stroke-linecap="round"/>
+        <circle cx="18" cy="20" r="11" fill="#FFFDF7" stroke="${INK}" stroke-width="2.6"/>
+        <path d="M18 13 V20 L23 23" fill="none" stroke="#FF6B7B" stroke-width="2.8" stroke-linecap="round"/>
+      </svg>`;
+    case 'globe':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <circle cx="18" cy="18" r="12" fill="#72C0FF" stroke="${INK}" stroke-width="2.6"/>
+        <ellipse cx="18" cy="18" rx="6" ry="12" fill="none" stroke="${INK}" stroke-width="2"/>
+        <line x1="6" y1="18" x2="30" y2="18" stroke="${INK}" stroke-width="2"/>
+      </svg>`;
+    case 'users':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <circle cx="13" cy="13" r="4.5" fill="#5EE2AD" stroke="${INK}" stroke-width="2.4"/>
+        <path d="M5 29 C5 22 21 22 21 29 Z" fill="#5EE2AD" stroke="${INK}" stroke-width="2.4"/>
+        <circle cx="24" cy="14" r="4" fill="#FFD15C" stroke="${INK}" stroke-width="2.4"/>
+        <path d="M19 29 C19 23 31 23 31 29 Z" fill="#FFD15C" stroke="${INK}" stroke-width="2.4"/>
+      </svg>`;
+    case 'bot':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <line x1="18" y1="5" x2="18" y2="10" stroke="${INK}" stroke-width="2.6" stroke-linecap="round"/>
+        <circle cx="18" cy="5" r="2.2" fill="#FF86AD" stroke="${INK}" stroke-width="1.8"/>
+        <rect x="7" y="10" width="22" height="18" rx="6" fill="#72C0FF" stroke="${INK}" stroke-width="2.6"/>
+        <circle cx="13" cy="18" r="2.2" fill="#FFFDF7"/><circle cx="23" cy="18" r="2.2" fill="#FFFDF7"/>
+        <line x1="13" y1="24" x2="23" y2="24" stroke="${INK}" stroke-width="2.4" stroke-linecap="round"/>
+      </svg>`;
+    case 'back':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <path d="M26 18 H10 M16 11 L9 18 L16 25" fill="none" stroke="${INK}" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>`;
+    case 'play':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <polygon points="10,7 29,18 10,29" fill="#5EE2AD" stroke="${INK}" stroke-width="2.8" stroke-linejoin="round"/>
+      </svg>`;
+    case 'link':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <rect x="6" y="13" width="14" height="10" rx="5" fill="none" stroke="${INK}" stroke-width="2.8"/>
+        <rect x="16" y="13" width="14" height="10" rx="5" fill="none" stroke="#34A87F" stroke-width="2.8"/>
+      </svg>`;
+    case 'check':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <circle cx="18" cy="18" r="12" fill="#5EE2AD" stroke="${INK}" stroke-width="2.6"/>
+        <path d="M12 18 L16.5 22.5 L25 13.5" fill="none" stroke="${INK}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>`;
+    case 'music':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <path d="M14 25 V9 L28 6 V22" fill="none" stroke="${INK}" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="11" cy="26" r="4" fill="#FFD15C" stroke="${INK}" stroke-width="2.4"/>
+        <circle cx="25" cy="23" r="4" fill="#FF86AD" stroke="${INK}" stroke-width="2.4"/>
+      </svg>`;
+    case 'eye':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <path d="M4 18 C9 10 27 10 32 18 C27 26 9 26 4 18 Z" fill="#FFFDF7" stroke="${INK}" stroke-width="2.6" stroke-linejoin="round"/>
+        <circle cx="18" cy="18" r="4.8" fill="#72C0FF" stroke="${INK}" stroke-width="2.4"/>
+      </svg>`;
+    case 'text':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <path d="M6 27 L13 9 L20 27 M8.5 21 H17.5" fill="none" stroke="${INK}" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M22 21 H30 M26 15 V27" fill="none" stroke="#FF6B7B" stroke-width="2.8" stroke-linecap="round"/>
+      </svg>`;
+    case 'spark':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <path d="M18 4 L21 15 L32 18 L21 21 L18 32 L15 21 L4 18 L15 15 Z" fill="#FFD15C" stroke="${INK}" stroke-width="2.4" stroke-linejoin="round"/>
+      </svg>`;
+    case 'book':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <path d="M6 8 H17 V28 H6 Z M19 8 H30 V28 H19 Z" fill="#FFFDF7" stroke="${INK}" stroke-width="2.6" stroke-linejoin="round"/>
+        <line x1="9" y1="14" x2="14" y2="14" stroke="#FF86AD" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="22" y1="14" x2="27" y2="14" stroke="#72C0FF" stroke-width="2.2" stroke-linecap="round"/>
+      </svg>`;
+    case 'brain':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <path d="M18 8 C11 8 7 13 8 19 C7 24 11 28 18 28 C25 28 29 24 28 19 C29 13 25 8 18 8 Z" fill="#FF86AD" stroke="${INK}" stroke-width="2.6"/>
+        <line x1="18" y1="9" x2="18" y2="27" stroke="${INK}" stroke-width="2"/>
+      </svg>`;
+    case 'reset':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <path d="M27 14 A10 10 0 1 0 26 24" fill="none" stroke="${INK}" stroke-width="2.8" stroke-linecap="round"/>
+        <polygon points="29,8 29,16 21,15" fill="#5EE2AD" stroke="${INK}" stroke-width="2" stroke-linejoin="round"/>
+      </svg>`;
+    case 'home':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <polygon points="5,18 18,6 31,18" fill="#FF9852" stroke="${INK}" stroke-width="2.6" stroke-linejoin="round"/>
+        <rect x="9" y="17" width="18" height="13" rx="2" fill="#FFFDF7" stroke="${INK}" stroke-width="2.6"/>
+        <rect x="15" y="21" width="6" height="9" fill="#72C0FF" stroke="${INK}" stroke-width="2"/>
+      </svg>`;
+    case 'leave':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <path d="M18 7 H9 V29 H18" fill="none" stroke="${INK}" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M14 18 H28 M23 13 L29 18 L23 23" fill="none" stroke="${INK}" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>`;
+    case 'sticker':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <circle cx="18" cy="18" r="12" fill="#FFD15C" stroke="${INK}" stroke-width="2.6"/>
+        <circle cx="14" cy="15" r="1.9" fill="${INK}"/><circle cx="22" cy="15" r="1.9" fill="${INK}"/>
+        <path d="M13 21 Q18 25 23 21" fill="none" stroke="${INK}" stroke-width="2.4" stroke-linecap="round"/>
+      </svg>`;
+    case 'bolt':
+    default:
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <polygon points="20,4 8,20 17,20 14,32 28,16 19,16" fill="#FFD15C" stroke="${INK}" stroke-width="2.5" stroke-linejoin="round"/>
+      </svg>`;
+  }
+}
+
+export function renderEmoteSvg(emoteId: string, size = 24): string {
+  const s = size;
+  switch (emoteId) {
+    case 'jempol':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <circle cx="18" cy="18" r="13" fill="#5EE2AD" stroke="${INK}" stroke-width="2.5"/>
+        <path d="M14 17 V25 H24 L26 16 H20 L21 10 C21 9 19 9 18 11 Z" fill="#FFFDF7" stroke="${INK}" stroke-width="2.2" stroke-linejoin="round"/>
+      </svg>`;
+    case 'ketawa':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <circle cx="18" cy="18" r="13" fill="#FFD15C" stroke="${INK}" stroke-width="2.5"/>
+        <path d="M11 15 L15 13 M25 15 L21 13" stroke="${INK}" stroke-width="2.4" stroke-linecap="round"/>
+        <path d="M12 20 H24 C24 25 12 25 12 20 Z" fill="#FF6B7B" stroke="${INK}" stroke-width="2.2" stroke-linejoin="round"/>
+      </svg>`;
+    case 'kaget':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <circle cx="18" cy="18" r="13" fill="#B295FF" stroke="${INK}" stroke-width="2.5"/>
+        <circle cx="13" cy="15" r="2.2" fill="#FFFDF7" stroke="${INK}" stroke-width="1.5"/>
+        <circle cx="23" cy="15" r="2.2" fill="#FFFDF7" stroke="${INK}" stroke-width="1.5"/>
+        <ellipse cx="18" cy="23" rx="3.2" ry="4" fill="#FFFDF7" stroke="${INK}" stroke-width="2.2"/>
+      </svg>`;
+    case 'nangis':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <circle cx="18" cy="18" r="13" fill="#72C0FF" stroke="${INK}" stroke-width="2.5"/>
+        <line x1="11" y1="15" x2="15" y2="15" stroke="${INK}" stroke-width="2.4" stroke-linecap="round"/>
+        <line x1="21" y1="15" x2="25" y2="15" stroke="${INK}" stroke-width="2.4" stroke-linecap="round"/>
+        <rect x="12" y="16" width="2.5" height="6" rx="1" fill="#FFFDF7"/>
+        <rect x="21.5" y="16" width="2.5" height="6" rx="1" fill="#FFFDF7"/>
+        <path d="M13 25 Q18 21 23 25" fill="none" stroke="${INK}" stroke-width="2.4" stroke-linecap="round"/>
+      </svg>`;
+    case 'api':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <circle cx="18" cy="18" r="13" fill="#FF9852" stroke="${INK}" stroke-width="2.5"/>
+        <path d="M18 8 C22 13 24 16 24 20 A6 6 0 0 1 12 20 C12 16 14 14 15 11 C16 14 18 12 18 8 Z" fill="#FFD15C" stroke="${INK}" stroke-width="2" stroke-linejoin="round"/>
+      </svg>`;
+    case 'mahkota':
+    default:
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <circle cx="18" cy="18" r="13" fill="#FF86AD" stroke="${INK}" stroke-width="2.5"/>
+        <polygon points="10,23 11,13 15,17 18,11 21,17 25,13 26,23" fill="#FFD15C" stroke="${INK}" stroke-width="2.1" stroke-linejoin="round"/>
       </svg>`;
   }
 }
