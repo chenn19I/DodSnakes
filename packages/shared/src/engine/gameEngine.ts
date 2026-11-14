@@ -19,6 +19,7 @@ import {
   type Tile,
 } from '../types.js';
 import { deriveRng, SeededRng, hashSeed } from '../rng.js';
+import { sanitizeUsernameOrFallback, sanitizeUsernameRaw } from '../moderation/usernameFilter.js';
 import { ARCHETYPE_REGISTRY, deriveChallengeRuntimeSeed } from '../content/archetypes.js';
 import { GIFT_TRAP_VARIANTS } from '../content/wordBank.js';
 import { computeEffectiveDiceSteps, computeMove, findLadderAt, findSnakeAt } from './boardUtils.js';
@@ -114,7 +115,9 @@ export function createInitialGameState(options: CreateGameOptions): GameState {
 
     return {
       id: p.id,
-      name: p.name,
+      name: p.isBot
+        ? sanitizeUsernameRaw(p.name) || `Bot ${idx + 1}`
+        : sanitizeUsernameOrFallback(p.name, `Pemain ${idx + 1}`),
       pawn: p.pawn,
       color: p.color,
       accessory: p.accessory ?? 'none',
@@ -673,6 +676,100 @@ function movePlayerDirect(
   });
 }
 
+function resolveJunctionAtPosition(
+  state: GameState,
+  owner: Player,
+  allowChallengeDodge: boolean,
+  events: GameEvent[],
+  visitedTiles: Set<number>,
+): 'ladder' | 'snake_saved' | 'snake_bitten' | 'none' {
+  const tileId = owner.position;
+  if (visitedTiles.has(tileId)) {
+    return 'none';
+  }
+
+  const ladder = findLadderAt(state.board, tileId);
+  if (ladder) {
+    visitedTiles.add(tileId);
+    owner.position = ladder.to;
+    owner.stats.laddersClimbed += 1;
+    if (owner.pawn === 'kucing') {
+      owner.stars += 1;
+    }
+    events.push({
+      type: 'LadderClimbed',
+      seq: nextSeq(state),
+      playerId: owner.id,
+      ladderId: ladder.id,
+      from: ladder.from,
+      to: ladder.to,
+    });
+    return 'ladder';
+  }
+
+  const snake = findSnakeAt(state.board, tileId);
+  if (!snake) {
+    return 'none';
+  }
+
+  visitedTiles.add(tileId);
+  if (allowChallengeDodge) {
+    owner.stats.snakesDodged += 1;
+    if (owner.pawn === 'jamur') {
+      owner.stars += 1;
+    }
+    events.push({
+      type: 'SnakeBitten',
+      seq: nextSeq(state),
+      playerId: owner.id,
+      snakeId: snake.id,
+      from: snake.from,
+      to: snake.from,
+      blockedByShield: false,
+      dodgedByChallenge: true,
+    });
+    return 'snake_saved';
+  }
+
+  if (owner.shields > 0 || owner.items.includes('shield')) {
+    if (owner.shields > 0) {
+      owner.shields -= 1;
+    } else {
+      const shieldIdx = owner.items.indexOf('shield');
+      if (shieldIdx >= 0) owner.items.splice(shieldIdx, 1);
+    }
+    owner.stats.snakesDodged += 1;
+    if (owner.pawn === 'jamur') {
+      owner.stars += 1;
+    }
+    events.push({
+      type: 'SnakeBitten',
+      seq: nextSeq(state),
+      playerId: owner.id,
+      snakeId: snake.id,
+      from: snake.from,
+      to: snake.from,
+      blockedByShield: true,
+      dodgedByChallenge: false,
+    });
+    return 'snake_saved';
+  }
+
+  owner.position = snake.to;
+  owner.stats.snakesBitten += 1;
+  events.push({
+    type: 'SnakeBitten',
+    seq: nextSeq(state),
+    playerId: owner.id,
+    snakeId: snake.id,
+    from: snake.from,
+    to: snake.to,
+    blockedByShield: false,
+    dodgedByChallenge: false,
+  });
+  return 'snake_bitten';
+}
+
 export function computePodium(state: GameState): PodiumEntry[] {
   const sorted = [...state.players].sort((a, b) => {
     if (a.id === state.winnerId) return -1;
@@ -985,87 +1082,27 @@ export function applyChallengeResult(inputState: GameState): StepResult {
     return { state, events };
   }
 
-  // Step 3: Resolve ladder or snake at `landedTile` (NO chaining!)
-  const ladder = findLadderAt(state.board, landedTile);
-  const snake = findSnakeAt(state.board, landedTile);
+  // Step 3: Resolve ladder or snake at `landedTile`, plus any junction reached via deferred advance/retreat (guarded against cycles).
+  const visitedJunctionTiles = new Set<number>();
+  const initialJunction = resolveJunctionAtPosition(
+    state,
+    owner,
+    ownerOutcome.success,
+    events,
+    visitedJunctionTiles,
+  );
 
-  if (ladder) {
-    owner.position = ladder.to;
-    owner.stats.laddersClimbed += 1;
-    if (owner.pawn === 'kucing') {
-      owner.stars += 1;
+  if (deferredAdvance > 0 && initialJunction !== 'snake_bitten') {
+    const beforeAdvance = owner.position;
+    movePlayerDirect(state, owner, deferredAdvance, 'bonus_advance', events);
+    if (owner.position !== beforeAdvance) {
+      resolveJunctionAtPosition(state, owner, false, events, visitedJunctionTiles);
     }
-    events.push({
-      type: 'LadderClimbed',
-      seq: nextSeq(state),
-      playerId: owner.id,
-      ladderId: ladder.id,
-      from: ladder.from,
-      to: ladder.to,
-    });
-    if (deferredAdvance > 0) {
-      movePlayerDirect(state, owner, deferredAdvance, 'bonus_advance', events);
-    }
-  } else if (snake) {
-    if (ownerOutcome.success) {
-      owner.stats.snakesDodged += 1;
-      if (owner.pawn === 'jamur') {
-        owner.stars += 1;
-      }
-      events.push({
-        type: 'SnakeBitten',
-        seq: nextSeq(state),
-        playerId: owner.id,
-        snakeId: snake.id,
-        from: snake.from,
-        to: snake.from,
-        blockedByShield: false,
-        dodgedByChallenge: true,
-      });
-      if (deferredAdvance > 0) {
-        movePlayerDirect(state, owner, deferredAdvance, 'bonus_advance', events);
-      }
-    } else if (owner.shields > 0 || owner.items.includes('shield')) {
-      if (owner.shields > 0) {
-        owner.shields -= 1;
-      } else {
-        const shieldIdx = owner.items.indexOf('shield');
-        if (shieldIdx >= 0) owner.items.splice(shieldIdx, 1);
-      }
-      owner.stats.snakesDodged += 1;
-      if (owner.pawn === 'jamur') {
-        owner.stars += 1;
-      }
-      events.push({
-        type: 'SnakeBitten',
-        seq: nextSeq(state),
-        playerId: owner.id,
-        snakeId: snake.id,
-        from: snake.from,
-        to: snake.from,
-        blockedByShield: true,
-        dodgedByChallenge: false,
-      });
-    } else {
-      owner.position = snake.to;
-      owner.stats.snakesBitten += 1;
-      events.push({
-        type: 'SnakeBitten',
-        seq: nextSeq(state),
-        playerId: owner.id,
-        snakeId: snake.id,
-        from: snake.from,
-        to: snake.to,
-        blockedByShield: false,
-        dodgedByChallenge: false,
-      });
-    }
-  } else {
-    // Normal tile positional bonus/penalty
-    if (deferredAdvance > 0) {
-      movePlayerDirect(state, owner, deferredAdvance, 'bonus_advance', events);
-    } else if (deferredRetreat > 0) {
-      movePlayerDirect(state, owner, -deferredRetreat, 'penalty_retreat', events);
+  } else if (deferredRetreat > 0 && initialJunction === 'none') {
+    const beforeRetreat = owner.position;
+    movePlayerDirect(state, owner, -deferredRetreat, 'penalty_retreat', events);
+    if (owner.position !== beforeRetreat) {
+      resolveJunctionAtPosition(state, owner, false, events, visitedJunctionTiles);
     }
   }
 
