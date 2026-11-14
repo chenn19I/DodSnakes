@@ -20,7 +20,12 @@ import {
 } from '../types.js';
 import { deriveRng, SeededRng, hashSeed } from '../rng.js';
 import { sanitizeUsernameOrFallback, sanitizeUsernameRaw } from '../moderation/usernameFilter.js';
-import { ARCHETYPE_REGISTRY, deriveChallengeRuntimeSeed } from '../content/archetypes.js';
+import {
+  ARCHETYPE_REGISTRY,
+  PLAYABLE_TILE_ARCHETYPES,
+  deriveChallengeRuntimeSeed,
+} from '../content/archetypes.js';
+import { TILES } from '../data/boardData.js';
 import { GIFT_TRAP_VARIANTS } from '../content/wordBank.js';
 import { computeEffectiveDiceSteps, computeMove, findLadderAt, findSnakeAt } from './boardUtils.js';
 import {
@@ -536,22 +541,74 @@ export function resolveTile(
     return { state, events };
   }
 
-  const spec = ARCHETYPE_REGISTRY[tile.archetype];
+  const isLiveBoard = tiles === TILES;
   const runtimeSeed = deriveChallengeRuntimeSeed(state.matchSeed, state.eventSeq + 1, tile.id);
+  const pickRng = new SeededRng(
+    hashSeed(state.matchSeed, state.eventSeq + 1, state.turnNumber, tile.id, 'dyn_pick'),
+  );
+
+  let chosenArchetype = tile.archetype;
+  let chosenMode = tile.mode;
+
+  if (isLiveBoard && tile.id > 1 && tile.id < 100) {
+    // True shuffled epoch deck indexed by cumulative rolls guarantees all 20 challenges cycle cleanly without repeats
+    const isJunction = Boolean(findLadderAt(state.board, tile.id) || findSnakeAt(state.board, tile.id));
+    const pool = isJunction
+      ? PLAYABLE_TILE_ARCHETYPES.filter((a) => a !== 'gift_trap' && a !== 'lucky_wheel')
+      : PLAYABLE_TILE_ARCHETYPES;
+    const totalRolls = Math.max(
+      1,
+      state.players.reduce((sum, p) => sum + p.stats.rolls, 0),
+    );
+    const deckSize = pool.length;
+    const drawIndex = totalRolls - 1;
+    const epoch = Math.floor(drawIndex / deckSize);
+    const posInEpoch = drawIndex % deckSize;
+    const epochDeck = new SeededRng(hashSeed(state.matchSeed, epoch, isJunction ? 'j_deck' : 'challenge_deck')).shuffle(
+      pool,
+    );
+    if (epoch > 0) {
+      const prevDeck = new SeededRng(
+        hashSeed(state.matchSeed, epoch - 1, isJunction ? 'j_deck' : 'challenge_deck'),
+      ).shuffle(pool);
+      if (epochDeck[0] === prevDeck[deckSize - 1]) {
+        [epochDeck[0], epochDeck[1]] = [epochDeck[1], epochDeck[0]];
+      }
+    }
+    chosenArchetype = epochDeck[posInEpoch];
+
+    const pickedSpec = ARCHETYPE_REGISTRY[chosenArchetype];
+    if (chosenArchetype === 'quick_duel') {
+      chosenMode = state.players.length >= 2 ? 'duel' : 'solo';
+    } else if (state.players.length >= 2) {
+      if (pickedSpec.allowedModes.includes('duel') && pickRng.chance(0.14)) {
+        chosenMode = 'duel';
+      } else if (pickedSpec.allowedModes.includes('all_play') && pickRng.chance(0.26)) {
+        chosenMode = 'all_play';
+      } else {
+        chosenMode = 'solo';
+      }
+    } else {
+      chosenMode = 'solo';
+    }
+  }
+
+  const spec = ARCHETYPE_REGISTRY[chosenArchetype];
   const params = buildChallengeRuntimeParams(
-    tile.archetype,
+    chosenArchetype,
     tile.params,
     runtimeSeed,
     tile.difficulty,
     tile.id,
+    isLiveBoard,
   );
 
   let participantIds: string[] = [active.id];
   let resolvedOpponentId: string | undefined;
 
-  if (tile.mode === 'all_play') {
+  if (chosenMode === 'all_play') {
     participantIds = state.players.map((p) => p.id);
-  } else if (tile.mode === 'duel') {
+  } else if (chosenMode === 'duel') {
     const candidates = state.players.filter((p) => p.id !== active.id);
     const picked =
       candidates.find((c) => c.id === duelOpponentId) ??
@@ -565,11 +622,11 @@ export function resolveTile(
   const durationMs = spec.baseDurationMs + getChallengeBonusDurationMs(active.pawn);
   const challenge: ActiveChallenge = {
     tileId: tile.id,
-    archetype: tile.archetype,
-    mode: tile.mode,
+    archetype: chosenArchetype,
+    mode: chosenMode,
     difficulty: tile.difficulty,
-    title: tile.title,
-    flavorText: tile.flavorText,
+    title: isLiveBoard ? spec.displayName : tile.title,
+    flavorText: isLiveBoard ? spec.instruction : tile.flavorText,
     seed: runtimeSeed,
     params,
     reward: tile.reward,
@@ -953,7 +1010,7 @@ export function applyChallengeResult(inputState: GameState): StepResult {
     } else {
       owner.consecutivePenalties = 0;
     }
-    serverSummaryText = `${variant.title} — ${variant.flavorText}`;
+    serverSummaryText = `${variant.title}: ${variant.flavorText}`;
   } else if (ownerOutcome.success) {
     owner.consecutivePenalties = 0;
     owner.challengeStreak += 1;
