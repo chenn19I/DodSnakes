@@ -15,6 +15,7 @@ import {
 export interface BuildPawnVisualOptions {
   accessory?: AccessoryId;
   showNameplate?: boolean;
+  colorblindMode?: boolean;
 }
 
 export interface PawnVisual {
@@ -149,7 +150,80 @@ function addChibiArms(
   }
 }
 
-function createPawnNameSprite(displayText: string, accentHex: string): THREE.Sprite {
+function drawColorblindBadgeShape(
+  ctx: CanvasRenderingContext2D,
+  colorId: PlayerColorId,
+  cx: number,
+  cy: number,
+): void {
+  ctx.fillStyle = DOODLE_PALETTE.ink;
+  ctx.strokeStyle = '#FFFDF7';
+  ctx.lineWidth = 2;
+
+  if (colorId === 'pink') {
+    ctx.beginPath();
+    ctx.arc(cx, cy, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  } else if (colorId === 'kuning') {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - 7);
+    ctx.lineTo(cx + 6.5, cy + 5);
+    ctx.lineTo(cx - 6.5, cy + 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  } else if (colorId === 'mint') {
+    ctx.fillRect(cx - 5, cy - 5, 10, 10);
+    ctx.strokeRect(cx - 5, cy - 5, 10, 10);
+  } else if (colorId === 'biru') {
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const r = i % 2 === 0 ? 7.5 : 3.4;
+      const a = -Math.PI / 2 + (i * Math.PI) / 5;
+      const px = cx + Math.cos(a) * r;
+      const py = cy + Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  } else if (colorId === 'oranye') {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - 7);
+    ctx.lineTo(cx + 6.5, cy);
+    ctx.lineTo(cx, cy + 7);
+    ctx.lineTo(cx - 6.5, cy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    // 'ungu' cross
+    ctx.beginPath();
+    ctx.moveTo(cx - 2.5, cy - 6.5);
+    ctx.lineTo(cx + 2.5, cy - 6.5);
+    ctx.lineTo(cx + 2.5, cy - 2.5);
+    ctx.lineTo(cx + 6.5, cy - 2.5);
+    ctx.lineTo(cx + 6.5, cy + 2.5);
+    ctx.lineTo(cx + 2.5, cy + 2.5);
+    ctx.lineTo(cx + 2.5, cy + 6.5);
+    ctx.lineTo(cx - 2.5, cy + 6.5);
+    ctx.lineTo(cx - 2.5, cy + 2.5);
+    ctx.lineTo(cx - 6.5, cy + 2.5);
+    ctx.lineTo(cx - 6.5, cy - 2.5);
+    ctx.lineTo(cx - 2.5, cy - 2.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+function createPawnNameSprite(
+  displayText: string,
+  accentHex: string,
+  colorblindColorId?: PlayerColorId,
+): THREE.Sprite {
   const canvas = document.createElement('canvas');
   canvas.width = 256;
   canvas.height = 68;
@@ -167,10 +241,14 @@ function createPawnNameSprite(displayText: string, accentHex: string): THREE.Spr
 
   ctx.fillStyle = accentHex;
   ctx.beginPath();
-  ctx.arc(36, 34, 11, 0, Math.PI * 2);
+  ctx.arc(36, 34, colorblindColorId ? 14 : 11, 0, Math.PI * 2);
   ctx.fill();
   ctx.lineWidth = 3;
   ctx.stroke();
+
+  if (colorblindColorId) {
+    drawColorblindBadgeShape(ctx, colorblindColorId, 36, 34);
+  }
 
   ctx.fillStyle = DOODLE_PALETTE.ink;
   ctx.font = 'bold 26px "Patrick Hand", "Comic Sans MS", sans-serif';
@@ -739,7 +817,11 @@ export function buildPawnVisual(
       customLabel && !customLabel.toLowerCase().includes(metaShort.toLowerCase())
         ? `${customLabel.split(' ')[0]} (${metaShort})`
         : customLabel || metaShort;
-    const nameSprite = createPawnNameSprite(displayName, mainHex);
+    const nameSprite = createPawnNameSprite(
+      displayName,
+      mainHex,
+      options.colorblindMode ? colorId : undefined,
+    );
     nameSprite.position.set(0, 1.24, 0);
     root.add(nameSprite);
   }
