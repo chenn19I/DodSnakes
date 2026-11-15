@@ -260,17 +260,11 @@ export class LocalGameController implements GameSessionController {
       this.hotSeatParticipantIdx = 0;
 
       if (this.pendingLocalParticipants.length === 0) {
-        // Pure bot turn
-        const owner = this.state.players.find((p) => p.id === ch.ownerPlayerId)!;
-        const ownerSub = this.state.activeChallenge?.submissions[owner.id];
-        this.callbacks.onChallengeStamp(
-          Boolean(ownerSub?.claimedSuccess),
-          `${owner.name} memainkan ${ARCHETYPE_REGISTRY[ch.archetype].displayName}`,
-        );
+        // Pure bot turn: show live watch banner briefly, then resolve once with the authoritative outcome
         window.setTimeout(async () => {
-          this.callbacks.onChallengeClose();
+          if (this.disposed) return;
           await this.finishChallengeAndAdvance();
-        }, 1450);
+        }, 950);
       } else {
         this.busy = false;
         this.promptNextHumanParticipant();
