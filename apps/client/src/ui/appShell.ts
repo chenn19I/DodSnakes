@@ -79,6 +79,8 @@ interface CareerStats {
   wins: number;
   starsEarned: number;
   challengesWon: number;
+  bestStreak: number;
+  laddersClimbed: number;
 }
 
 const SETTINGS_STORAGE_KEY = 'doodle_dash_settings_v3';
@@ -110,11 +112,12 @@ interface SuperlativeAward {
 }
 
 function escapeHtml(text: string): string {
-  return text
+  return String(text)
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
 
 function pawnSvg(
@@ -305,10 +308,26 @@ export class DoodleAppShell {
   }
 
   private loadCareer(): CareerStats {
-    const defaults: CareerStats = { matches: 0, wins: 0, starsEarned: 0, challengesWon: 0 };
+    const defaults: CareerStats = {
+      matches: 0,
+      wins: 0,
+      starsEarned: 0,
+      challengesWon: 0,
+      bestStreak: 0,
+      laddersClimbed: 0,
+    };
     try {
       const raw = localStorage.getItem(CAREER_STORAGE_KEY);
-      return raw ? { ...defaults, ...(JSON.parse(raw) as Partial<CareerStats>) } : defaults;
+      if (!raw) return defaults;
+      const parsed = JSON.parse(raw) as Partial<CareerStats>;
+      return {
+        matches: Math.max(0, Number(parsed.matches) || 0),
+        wins: Math.max(0, Number(parsed.wins) || 0),
+        starsEarned: Math.max(0, Number(parsed.starsEarned) || 0),
+        challengesWon: Math.max(0, Number(parsed.challengesWon) || 0),
+        bestStreak: Math.max(0, Number(parsed.bestStreak) || 0),
+        laddersClimbed: Math.max(0, Number(parsed.laddersClimbed) || 0),
+      };
     } catch {
       return defaults;
     }
@@ -324,7 +343,7 @@ export class DoodleAppShell {
 
   private recordCareerIfFinished(state: GameState): void {
     if (state.phase !== 'GAME_OVER' || !state.winnerId) return;
-    const key = `${state.matchSeed}:${state.winnerId}`;
+    const key = `${state.matchSeed}:${state.turnNumber}:${state.eventSeq}:${state.winnerId}`;
     if (this.recordedMatchKey === key) return;
     this.recordedMatchKey = key;
 
@@ -335,6 +354,10 @@ export class DoodleAppShell {
       if (state.winnerId === myPlayer.id) this.career.wins += 1;
       this.career.starsEarned += myPlayer.stars;
       this.career.challengesWon += myPlayer.stats.challengesWon;
+      this.career.laddersClimbed += myPlayer.stats.laddersClimbed;
+      if ((myPlayer.challengeStreak ?? 0) > this.career.bestStreak) {
+        this.career.bestStreak = myPlayer.challengeStreak;
+      }
     }
     this.saveCareer();
   }
@@ -365,6 +388,14 @@ export class DoodleAppShell {
   }
 
   private ingestEventsIntoFeed(events: GameEvent[], state: GameState): void {
+    const myId = this.controller?.getLocalPlayerId();
+    if (myId && !this.controller?.isSpectator()) {
+      const me = state.players.find((p) => p.id === myId);
+      if (me && (me.challengeStreak ?? 0) > this.career.bestStreak) {
+        this.career.bestStreak = me.challengeStreak;
+        this.saveCareer();
+      }
+    }
     for (const ev of events) {
       const formatted = formatEventFeedText(ev, state, this.lang);
       if (!formatted) continue;
@@ -1232,7 +1263,7 @@ export class DoodleAppShell {
           </button>
           ${
             saved
-              ? `<button class="doodle-btn doodle-btn-mint stagger-item stagger-2" id="btn-splash-reconnect">${this.t('rejoinRoom')} (${saved.roomCode})</button>`
+              ? `<button class="doodle-btn doodle-btn-mint stagger-item stagger-2" id="btn-splash-reconnect">${this.t('rejoinRoom')} (${escapeHtml(saved.roomCode)})</button>`
               : ''
           }
           <div class="showcase-hint">${en ? 'Drag the 3D board to orbit • Scroll to zoom' : 'Tarik papan 3D untuk mengintip sudut lain • Scroll untuk zoom'}</div>
@@ -1264,9 +1295,10 @@ export class DoodleAppShell {
             this.career.matches > 0
               ? `<div class="career-banner tabular-num">
                    <span>${en ? 'Matches' : 'Main'}: <b>${this.career.matches}</b></span>
-                   <span>${en ? 'Wins' : 'Menang'}: <b>${this.career.wins}</b></span>
+                   <span>${en ? 'Wins' : 'Menang'}: <b>${this.career.wins}</b> (${Math.round((this.career.wins / Math.max(1, this.career.matches)) * 100)}%)</span>
                    <span>${renderUiIconSvg('star', 14)} <b>${this.career.starsEarned}</b></span>
                    <span>${en ? 'Won' : 'Duel'}: <b>${this.career.challengesWon}</b></span>
+                   ${this.career.bestStreak >= 2 ? `<span>${renderUiIconSvg('flame', 13)} <b>x${this.career.bestStreak}</b></span>` : ''}
                  </div>`
               : ''
           }
@@ -1510,7 +1542,7 @@ export class DoodleAppShell {
             <span class="ui-ico-row" style="font-size:0.88rem">${renderUiIconSvg('eye', 16)} <span>${this.t('spectators')} ${room.spectatorCount}</span></span>
           </div>
           <div style="display:flex;gap:8px;align-items:center;justify-content:center">
-            <div class="room-badge" style="margin:0">${room.roomCode}</div>
+            <div class="room-badge" style="margin:0">${escapeHtml(room.roomCode)}</div>
             <button class="doodle-btn doodle-btn-mint" id="btn-copy-invite" title="${this.t('copyInvite')}">${renderUiIconSvg('link', 16)} ${this.t('copyInvite')}</button>
           </div>
           ${this.renderRulePresetPickerHtml(isHost)}
@@ -1562,6 +1594,53 @@ export class DoodleAppShell {
           }
           <button class="doodle-btn" id="btn-leave-lobby">${this.t('leaveRoom')}</button>
         </div>
+      </div>
+    `;
+  }
+
+  private renderRaceProgressBarHtml(state: GameState): string {
+    const en = this.lang === 'en';
+    const activeId = state.turnOrder[state.currentTurnIndex];
+    const localId = this.controller?.getLocalPlayerId();
+    const me = state.players.find((p) => p.id === (localId ?? activeId));
+    const nextLadder = me
+      ? state.board.ladders
+          .filter((l) => l.from > me.position && l.from <= me.position + 12)
+          .sort((a, b) => a.from - b.from)[0]
+      : undefined;
+    const nextSnake = me
+      ? state.board.snakes
+          .filter((s) => s.from > me.position && s.from <= me.position + 12)
+          .sort((a, b) => a.from - b.from)[0]
+      : undefined;
+
+    return `
+      <div class="hud-race-bar" aria-label="${en ? 'Board Race Progress' : 'Progres Balapan Papan'}">
+        <div class="hud-race-track">
+          <div class="hud-race-zones">
+            <span class="hud-race-zone z1">1</span>
+            <span class="hud-race-zone z2">25</span>
+            <span class="hud-race-zone z3">50</span>
+            <span class="hud-race-zone z4">75</span>
+            <span class="hud-race-goal">${renderUiIconSvg('trophy', 12)}100</span>
+          </div>
+          ${state.players
+            .map((p) => {
+              const pct = Math.max(2, Math.min(97, p.position));
+              const isAct = p.id === activeId;
+              const hex = PLAYER_COLORS[p.color].hex;
+              return `<button type="button" class="hud-race-pin ${isAct ? 'is-active' : ''}" data-focus-player="${p.id}" style="left:${pct}%;background:${hex}" title="${escapeHtml(p.name)}: ${this.t('tileShort')}${p.position} (★${p.stars})">${this.settings.colorblindMode ? this.colorShapes[p.color] : escapeHtml(p.name.slice(0, 1).toUpperCase())}</button>`;
+            })
+            .join('')}
+        </div>
+        ${
+          nextLadder || nextSnake
+            ? `<div class="hud-race-radar tabular-num">
+                 ${nextLadder ? `<span class="radar-chip is-ladder" title="${en ? 'Nearest Ladder ahead' : 'Tangga terdekat di depan'}">${renderUiIconSvg('ladder', 12)}+${nextLadder.from - (me?.position ?? 1)}→${nextLadder.to}</span>` : ''}
+                 ${nextSnake ? `<span class="radar-chip is-snake" title="${en ? 'Nearest Snake ahead' : 'Ular terdekat di depan'}">${renderUiIconSvg('snake', 12)}+${nextSnake.from - (me?.position ?? 1)}↘${nextSnake.to}</span>` : ''}
+               </div>`
+            : ''
+        }
       </div>
     `;
   }
@@ -1674,6 +1753,7 @@ export class DoodleAppShell {
       }
 
       <div class="hud-bottom">
+        ${!this.hudCompact ? this.renderRaceProgressBarHtml(state) : ''}
         ${
           !this.hudCompact && isMyTurn && state.phase === 'TURN_BEGIN' && me
             ? `<div class="hud-turn-helper tabular-num">
@@ -2243,7 +2323,10 @@ export class DoodleAppShell {
             <span class="ui-ico-row">${renderUiIconSvg('spark', 16)}<span>${this.t('reducedMotionLabel')}</span></span>
             <input type="checkbox" id="set-rm" ${this.settings.reducedMotion ? 'checked' : ''} />
           </label>
-          <button class="doodle-btn doodle-btn-primary" id="btn-close-settings">${this.t('save')}</button>
+          <div style="display:flex;gap:6px;margin-top:4px">
+            <button class="doodle-btn" id="btn-reset-local-data" style="flex:1;font-size:0.82rem" title="${this.lang === 'en' ? 'Clear saved career stats and active session token' : 'Hapus statistik karir dan token sesi tersimpan'}">${renderUiIconSvg('reset', 14)} ${this.lang === 'en' ? 'Reset Local Data' : 'Reset Data Lokal'}</button>
+            <button class="doodle-btn doodle-btn-primary" id="btn-close-settings" style="flex:1">${this.t('save')}</button>
+          </div>
         </div>
       </div>
     `;
@@ -2785,6 +2868,16 @@ export class DoodleAppShell {
       this.applyAccessibilitySettings();
       this.renderMainLayer();
     });
+    q('#btn-hud-legend')?.addEventListener('click', () => {
+      this.sound.playUiClick();
+      this.showLegendPopover = !this.showLegendPopover;
+      this.renderMainLayer();
+    });
+    q('#btn-close-legend')?.addEventListener('click', () => {
+      this.sound.playUiClick();
+      this.showLegendPopover = false;
+      this.renderMainLayer();
+    });
     q('#btn-hud-settings')?.addEventListener('click', () => {
       this.sound.playUiClick();
       this.showSettings = true;
@@ -2957,6 +3050,25 @@ export class DoodleAppShell {
     q<HTMLInputElement>('#set-rm')?.addEventListener('change', (e) => {
       this.settings.reducedMotion = (e.target as HTMLInputElement).checked;
       this.applyAccessibilitySettings();
+    });
+    q('#btn-reset-local-data')?.addEventListener('click', () => {
+      this.sound.playUiClick();
+      this.career = {
+        matches: 0,
+        wins: 0,
+        starsEarned: 0,
+        challengesWon: 0,
+        bestStreak: 0,
+        laddersClimbed: 0,
+      };
+      this.saveCareer();
+      OnlineGameController.clearSavedSession();
+      this.showToast(
+        this.lang === 'en'
+          ? 'Local career stats & saved session cleared!'
+          : 'Statistik karir & sesi lokal telah dihapus!',
+      );
+      this.renderMainLayer();
     });
   }
 
