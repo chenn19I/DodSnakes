@@ -2736,3 +2736,104 @@ body.colorblind-mode .lobby-ready-pill.is-wait {
   max-width: min(92vw, 440px);
   text-align: center;
 }
+
+.hud-race-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  max-width: 520px;
+  pointer-events: auto;
+}
+
+.hud-race-track {
+  position: relative;
+  flex: 1;
+  height: 22px;
+  border-radius: 999px;
+  border: 2px solid var(--ink);
+  background: linear-gradient(
+    90deg,
+    #ffe5ec 0%,
+    #ffe5ec 25%,
+    #e2f8ee 25%,
+    #e2f8ee 50%,
+    #fff3cf 50%,
+    #fff3cf 75%,
+    #e3f1ff 75%,
+    #e3f1ff 100%
+  );
+  box-shadow: 0 2px 0 rgba(43, 40, 56, 0.25);
+  overflow: visible;
+}
+
+.hud-race-zones {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 100%;
+  padding: 0 8px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.hud-race-goal {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.hud-race-pin {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--ink);
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: left 0.28s ease, transform 0.16s ease;
+  z-index: 2;
+}
+
+.hud-race-pin.is-active {
+  transform: translate(-50%, -50%) scale(1.22);
+  box-shadow: 0 0 0 2px #ffffff, 0 2px 0 var(--ink);
+  z-index: 4;
+}
+
+.hud-race-radar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.radar-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 2px solid var(--ink);
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: #ffffff;
+  box-shadow: 0 2px 0 rgba(43, 40, 56, 0.22);
+}
+
+.radar-chip.is-ladder {
+  background: var(--mint);
+}
+
+.radar-chip.is-snake {
+  background: var(--pink);
+}
