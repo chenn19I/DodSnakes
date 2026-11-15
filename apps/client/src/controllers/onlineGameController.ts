@@ -183,11 +183,22 @@ export class OnlineGameController implements GameSessionController {
     });
     this.socket = socket;
 
+    let lastEmoteSig = '';
+    const onEmotePayload = (payload: { playerId: string; emoteId: EmoteId; sentAt?: number }) => {
+      const bucket = payload.sentAt ? String(payload.sentAt) : String(Math.floor(Date.now() / 300));
+      const sig = `${payload.playerId}:${payload.emoteId}:${bucket}`;
+      if (sig === lastEmoteSig) return;
+      lastEmoteSig = sig;
+      this.callbacks.onEmote(payload.playerId, payload.emoteId);
+    };
+
     socket.on('room:joined', (payload) => this.handleRoomJoined(payload, 'socketio'));
     socket.on('room:state', (room: RoomStatePayload) => this.handleRoomState(room));
     socket.on('game:started', (payload: { state: GameState }) => this.handleGameStarted(payload.state));
+    socket.on('game:snapshot', (payload: { state: GameState }) => this.handleGameStarted(payload.state));
     socket.on('game:events', (payload) => this.enqueueGameEvents(payload));
     socket.on('game:sync', (payload: { state: GameState }) => {
+      this.scene.cancelOptimisticDiceShake();
       this.state = payload.state;
       this.callbacks.onStateChange(payload.state);
       this.scene.syncPlayersFromState(payload.state);
@@ -197,15 +208,16 @@ export class OnlineGameController implements GameSessionController {
         this.handleChallengeBegin(payload.challenge);
       }
     });
-    socket.on('emote:received', (payload: { playerId: string; emoteId: EmoteId }) => {
-      this.callbacks.onEmote(payload.playerId, payload.emoteId);
-    });
+    socket.on('emote:received', onEmotePayload);
+    socket.on('emote:broadcast', onEmotePayload);
     socket.on('error', (err: { message?: string }) => {
       this.clearJoinTimers();
+      this.scene.cancelOptimisticDiceShake();
       this.callbacks.onError(err?.message ?? 'Terjadi kesalahan pada server.');
     });
     socket.on('connect_error', () => {
       this.clearJoinTimers();
+      this.scene.cancelOptimisticDiceShake();
       this.callbacks.onError('Gagal terhubung ke server.');
     });
 
@@ -429,13 +441,22 @@ export class OnlineGameController implements GameSessionController {
           if (ev.item === 'golden_dice') p.activeGoldenDice = true;
           else if (ev.item === 'swap_turbo') p.activeTurbo = true;
           else if (ev.item === 'star_multiplier') p.activeDoubleStars = true;
-          else if ((ev.item === 'brake' || ev.item === 'rival_brake') && ev.targetPlayerId) {
-            const target = next.players.find((pl) => pl.id === ev.targetPlayerId);
+          else if (ev.item === 'brake' || ev.item === 'rival_brake') {
+            const targetId = ev.targetPlayerId ?? ev.playerId;
+            const target = next.players.find((pl) => pl.id === targetId);
             if (target) target.activeBrake = true;
+          } else if (ev.item === 'magnet_star' && ev.targetPlayerId && (ev.starsDelta ?? 0) > 0) {
+            const target = next.players.find((pl) => pl.id === ev.targetPlayerId);
+            if (target) target.stars = Math.max(0, target.stars - 1);
           }
           if (p.mission && !p.mission.completed && p.mission.kind === 'use_2_items') {
             p.mission.progress = Math.min(p.mission.target, p.mission.progress + 1);
           }
+        }
+      } else if (ev.type === 'TurnSkipped') {
+        const p = next.players.find((pl) => pl.id === ev.playerId);
+        if (p) {
+          p.skipTurns = Math.max(0, p.skipTurns - 1);
         }
       } else if (ev.type === 'BoardSpecialTriggered') {
         const p = next.players.find((pl) => pl.id === ev.playerId);
@@ -543,6 +564,7 @@ export class OnlineGameController implements GameSessionController {
         event.startsWith('room:rematch') ||
         event.startsWith('room:leave') ||
         event.startsWith('game:start') ||
+        event === 'game:sync_request' ||
         event.startsWith('turn:') ||
         event.startsWith('item:') ||
         event.startsWith('challenge:') ||
@@ -590,6 +612,7 @@ export class OnlineGameController implements GameSessionController {
         );
         break;
       case 'game:sync': {
+        this.scene.cancelOptimisticDiceShake();
         const st = (payload as { state: GameState }).state;
         this.state = st;
         this.callbacks.onStateChange(st);
@@ -617,6 +640,7 @@ export class OnlineGameController implements GameSessionController {
       }
       case 'error': {
         this.clearJoinTimers();
+        this.scene.cancelOptimisticDiceShake();
         const errMsg = (payload as { message?: string })?.message ?? 'Terjadi kesalahan.';
         this.callbacks.onError(errMsg);
         break;

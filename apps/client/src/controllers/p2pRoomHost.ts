@@ -295,6 +295,15 @@ export class P2pRoomHost {
       return;
     }
 
+    const usedPawns = new Set(this.players.map((p) => p.pawn));
+    const usedColors = new Set(this.players.map((p) => p.color));
+    const pawn = usedPawns.has(parsed.pawn)
+      ? ALL_PAWNS.find((x) => !usedPawns.has(x)) ?? parsed.pawn
+      : parsed.pawn;
+    const color = usedColors.has(parsed.color)
+      ? ALL_COLORS.find((x) => !usedColors.has(x)) ?? parsed.color
+      : parsed.color;
+
     const playerId = this.newId('p');
     const reconnectToken = this.newId('tok');
     this.players.push({
@@ -302,8 +311,8 @@ export class P2pRoomHost {
       peerId: senderId,
       reconnectToken,
       name: nameCheck.sanitized,
-      pawn: parsed.pawn,
-      color: parsed.color,
+      pawn,
+      color,
       accessory: parsed.accessory ?? 'none',
       ready: false,
       connected: true,
@@ -463,6 +472,9 @@ export class P2pRoomHost {
     this.clearTimers();
     this.inGame = false;
     this.gameState = null;
+    for (const p of this.players) {
+      p.ready = true;
+    }
     this.startRoomGame(senderId);
   }
 
@@ -646,7 +658,8 @@ export class P2pRoomHost {
     const ch = this.gameState.activeChallenge;
 
     if (ch.mode === 'duel' && ch.awaitingDuelPick) {
-      const pickTimeoutMs = 12_000 * this.delayScale;
+      const owner = this.gameState.players.find((p) => p.id === ch.ownerPlayerId);
+      const pickTimeoutMs = (owner?.isBot ? 650 : 12_000) * this.delayScale;
       this.challengeTimer = globalThis.setTimeout(() => {
         if (this.disposed || !this.gameState?.activeChallenge?.awaitingDuelPick) return;
         this.gameState = selectDuelOpponent(this.gameState, ch.ownerPlayerId, undefined, Date.now());
@@ -718,6 +731,11 @@ export class P2pRoomHost {
       return;
     }
 
+    if (this.gameState.phase === 'CHALLENGE' && this.gameState.activeChallenge) {
+      this.scheduleChallengeResolution();
+      return;
+    }
+
     const activeId = this.gameState.turnOrder[this.gameState.currentTurnIndex];
     const active = this.gameState.players.find((p) => p.id === activeId);
     if (!active) return;
@@ -769,7 +787,8 @@ export class P2pRoomHost {
         this.gameState = bought.state;
         this.emitGameEvents(bought.events);
       }
-      const itemIdx = decideBotPreRollItemIndex(this.gameState, bot, turnRng);
+      const updatedBot = this.gameState.players.find((p) => p.id === botId) ?? bot;
+      const itemIdx = decideBotPreRollItemIndex(this.gameState, updatedBot, turnRng);
       if (itemIdx !== null) {
         const used = applyItem(this.gameState, botId, itemIdx);
         this.gameState = used.state;

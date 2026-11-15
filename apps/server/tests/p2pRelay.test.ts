@@ -249,9 +249,26 @@ describe('Serverless P2pRoomHost realtime multiplayer roundtrip', () => {
     expect(climbed!.to).toBe(25);
     expect(latestState!.players.find((p) => p.id === host.hostPlayerId)!.position).toBe(25);
 
-    // Rematch resets back to tile 1 cleanly
+    // Rematch resets back to tile 1 cleanly even if guest ready flag was toggled
+    host.handlePeerMessage('peer_guest', 'player:ready', { ready: false });
     host.handlePeerMessage('peer_host', 'room:rematch', {});
     expect(latestState!.players.every((p) => p.position === 1)).toBe(true);
+
+    // Peer leave during CHALLENGE phase reschedules challenge resolution without deadlocking
+    host.handlePeerMessage('peer_host', 'turn:roll', { forcedDice: 3 });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(latestState!.phase).toBe('CHALLENGE');
+    host.handlePeerMessage('peer_guest', 'room:leave', {});
+    expect(latestState!.phase).toBe('CHALLENGE');
+    const chRematch = latestState!.activeChallenge!;
+    host.handlePeerMessage('peer_host', 'challenge:submit', {
+      tileId: chRematch.tileId,
+      claimedSuccess: true,
+      score: 100,
+      inputLog: makePassInput(chRematch),
+    });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(latestState!.phase).toBe('TURN_BEGIN');
 
     host.dispose();
     expect(guestInbox.some((m) => m.event === 'room:closed')).toBe(true);

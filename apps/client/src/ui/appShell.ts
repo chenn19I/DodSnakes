@@ -1711,10 +1711,13 @@ export class DoodleAppShell {
     const ch = modal.challenge;
     const en = this.lang === 'en';
     const archMeta = getArchetypeMeta(ch.archetype, this.lang);
+    const giftVariantId =
+      (ch.params?.variant as { id?: string } | undefined)?.id ??
+      String(ch.params?.variantId ?? '');
     const giftLoc =
       ch.archetype === 'gift_trap'
         ? getLocalizedGiftVariant(
-            String(ch.params?.variantId ?? ''),
+            giftVariantId,
             ch.title,
             ch.flavorText,
             this.lang,
