@@ -254,21 +254,30 @@ describe('Serverless P2pRoomHost realtime multiplayer roundtrip', () => {
     host.handlePeerMessage('peer_host', 'room:rematch', {});
     expect(latestState!.players.every((p) => p.position === 1)).toBe(true);
 
-    // Peer leave during CHALLENGE phase reschedules challenge resolution without deadlocking
+    // Turn 1 after rematch: host rolls onto Tile 4 and completes challenge
     host.handlePeerMessage('peer_host', 'turn:roll', { forcedDice: 3 });
-    await vi.advanceTimersByTimeAsync(100);
-    expect(latestState!.phase).toBe('CHALLENGE');
-    host.handlePeerMessage('peer_guest', 'room:leave', {});
-    expect(latestState!.phase).toBe('CHALLENGE');
-    const chRematch = latestState!.activeChallenge!;
+    await vi.advanceTimersByTimeAsync(10);
+    const chAfterRematch = latestState!.activeChallenge!;
     host.handlePeerMessage('peer_host', 'challenge:submit', {
-      tileId: chRematch.tileId,
+      tileId: chAfterRematch.tileId,
       claimedSuccess: true,
       score: 100,
-      inputLog: makePassInput(chRematch),
+      inputLog: makePassInput(chAfterRematch),
     });
-    await vi.advanceTimersByTimeAsync(200);
+
+    // Advance to guest's turn (Turn 2)
+    await vi.advanceTimersByTimeAsync(15);
     expect(latestState!.phase).toBe('TURN_BEGIN');
+    expect(latestState!.turnOrder[latestState!.currentTurnIndex]).not.toBe(host.hostPlayerId);
+
+    // Guest rolls onto Tile 4 (solo challenge), then leaves mid-challenge -> promoted bot auto-resolves!
+    host.handlePeerMessage('peer_guest', 'turn:roll', { forcedDice: 3 });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(latestState!.phase).toBe('CHALLENGE');
+    host.handlePeerMessage('peer_guest', 'room:leave', {});
+    await vi.advanceTimersByTimeAsync(25);
+    expect(latestState!.phase).toBe('TURN_BEGIN');
+    expect(latestState!.turnOrder[latestState!.currentTurnIndex]).toBe(host.hostPlayerId);
 
     host.dispose();
     expect(guestInbox.some((m) => m.event === 'room:closed')).toBe(true);
