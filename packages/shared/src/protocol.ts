@@ -100,8 +100,8 @@ const SafeChallengeExtraSchema = z
   );
 
 export const ChallengeInputLogSchema = z.object({
-  startedAt: z.number().finite().min(0).max(86_400_000),
-  completedAt: z.number().finite().min(0).max(86_400_000),
+  startedAt: z.number().finite().min(0).max(Number.MAX_SAFE_INTEGER),
+  completedAt: z.number().finite().min(0).max(Number.MAX_SAFE_INTEGER),
   reactionMs: z.number().finite().min(-5000).max(60_000).optional(),
   tapTimestamps: z.array(z.number().finite().min(0).max(60_000)).max(120).optional(),
   answerIndex: z.number().int().min(0).max(10).optional(),
