@@ -1549,4 +1549,105 @@ describe('Challenge validation & Replay determinism', () => {
     expect(strictChallenge.params.word).toBeUndefined();
     expect(strictChallenge.params.wordLength).toBe(6);
   });
+
+  it('guarantees bot simulation claimedSuccess matches validator verdict across all archetypes and prevents ladder climbs on challenge failure', () => {
+    const botDiffs = ['santai', 'pintar', 'juara'] as const;
+    const allArchs = [...PLAYABLE_TILE_ARCHETYPES, 'boss_doodle'] as const;
+
+    for (const arch of allArchs) {
+      const spec = ARCHETYPE_REGISTRY[arch];
+      for (const difficulty of [1, 2, 3, 4] as const) {
+        for (const botDiff of botDiffs) {
+          for (let s = 1; s <= 15; s++) {
+            const paramSeed = 10_000 + s * 37 + difficulty * 7;
+            const params = spec.buildParams(new SeededRng(paramSeed), difficulty, 10 + difficulty * 20);
+            const challenge = {
+              tileId: 12,
+              archetype: arch,
+              mode: 'solo' as const,
+              difficulty,
+              title: spec.displayName,
+              flavorText: spec.instruction,
+              seed: paramSeed,
+              params,
+              reward: { stars: 2, bonusType: 'none' as const },
+              penalty: { type: 'none' as const },
+              ownerPlayerId: 'bot_1',
+              participantIds: ['bot_1'],
+              submissions: {},
+              deadlineAt: 20_000,
+              durationMs: spec.baseDurationMs,
+            };
+            const botSub = simulateBotChallengeSubmission(
+              challenge,
+              'bot_1',
+              botDiff,
+              new SeededRng(paramSeed + 999 + s),
+            );
+            const verdict = validateChallengeSubmission(challenge, botSub);
+            expect({
+              arch,
+              difficulty,
+              botDiff,
+              seed: s,
+              verdict: verdict.success,
+              reason: verdict.reason,
+            }).toMatchObject({
+              arch,
+              difficulty,
+              botDiff,
+              seed: s,
+              verdict: botSub.claimedSuccess,
+            });
+          }
+        }
+      }
+    }
+
+    // Failing a challenge directly on a ladder tile (tile 4 -> 25) must NOT climb the ladder
+    const ladderTiles: Tile[] = TILES.map((t) =>
+      t.id === 4 || t.id === 5
+        ? {
+            ...t,
+            archetype: 'quick_math',
+            mode: 'solo',
+            params: SAMPLE_MATH_PARAMS,
+            reward: { stars: 2, bonusType: 'none' },
+            penalty: { type: 'retreat', value: 1 },
+          }
+        : t,
+    );
+
+    let failOnLadder = startGame(
+      createInitialGameState({
+        matchSeed: 1212,
+        board: BOARD_LAYOUT,
+        players: makeTestPlayers(2),
+      }),
+    ).state;
+    failOnLadder = rollDice(failOnLadder, 'p1', 3).state; // 1 -> 4 (ladder 4->25)
+    failOnLadder = resolveTile(failOnLadder, ladderTiles, 1000).state;
+    failOnLadder = recordChallengeSubmission(failOnLadder, makeFailingSubmission(failOnLadder, 'p1'));
+    const failLadderRes = applyChallengeResult(failOnLadder);
+    expect(failLadderRes.events.some((e) => e.type === 'LadderClimbed')).toBe(false);
+    expect(failLadderRes.state.players[0].position).toBe(3); // retreated 4 -> 3 instead of climbing to 25
+
+    // Failing a challenge on tile 5 and retreating 1 tile onto ladder tile 4 must also NOT climb the ladder
+    let failRetreatToLadder = startGame(
+      createInitialGameState({
+        matchSeed: 1213,
+        board: BOARD_LAYOUT,
+        players: makeTestPlayers(2),
+      }),
+    ).state;
+    failRetreatToLadder = rollDice(failRetreatToLadder, 'p1', 4).state; // 1 -> 5
+    failRetreatToLadder = resolveTile(failRetreatToLadder, ladderTiles, 1000).state;
+    failRetreatToLadder = recordChallengeSubmission(
+      failRetreatToLadder,
+      makeFailingSubmission(failRetreatToLadder, 'p1'),
+    );
+    const retreatLadderRes = applyChallengeResult(failRetreatToLadder);
+    expect(retreatLadderRes.events.some((e) => e.type === 'LadderClimbed')).toBe(false);
+    expect(retreatLadderRes.state.players[0].position).toBe(4);
+  });
 });
