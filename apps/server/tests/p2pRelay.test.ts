@@ -152,9 +152,17 @@ describe('Serverless P2pRoomHost realtime multiplayer roundtrip', () => {
     expect(ch!.tileId).toBe(4);
 
     // Submit deterministic winning outcome for whichever randomized archetype was drawn on Tile 4
+    expect(latestState!.matchSeed).toBe(0);
+    expect(host.getGameState()!.matchSeed).toBeGreaterThan(0);
     const makePassInput = (c: ActiveChallenge): Record<string, unknown> => {
-      const sim = ARCHETYPE_REGISTRY[c.archetype].simulateBot(c.params, 'juara', new SeededRng(c.seed + 3));
-      const base: Record<string, unknown> = { ...sim, startedAt: Date.now() - 2500, completedAt: Date.now() };
+      const { claimedSuccess: _cs, score: _sc, ...simLog } = ARCHETYPE_REGISTRY[
+        c.archetype
+      ].simulateBot(c.params, 'juara', new SeededRng(c.seed + 3));
+      const base: Record<string, unknown> = {
+        ...simLog,
+        startedAt: Date.now() - 5500,
+        completedAt: Date.now(),
+      };
       if (c.archetype === 'tap_timing') {
         base.needlePos = Number(c.params.zoneCenter);
         base.reactionMs = 450;
