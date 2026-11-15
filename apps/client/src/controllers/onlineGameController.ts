@@ -366,6 +366,8 @@ export class OnlineGameController implements GameSessionController {
   }): Promise<void> {
     if (this.disposed) return;
 
+    const prevChallenge = this.state?.activeChallenge ?? null;
+
     if (payload.state) {
       this.state = payload.state;
     } else if (this.state) {
@@ -389,11 +391,27 @@ export class OnlineGameController implements GameSessionController {
 
     if (challengeResolved && challengeResolved.type === 'ChallengeResolved') {
       const myId = this.localPlayerId;
-      const myOut = challengeResolved.outcomes.find((o) => o.playerId === myId);
-      const myWon = myOut ? myOut.success : challengeResolved.outcomes.some((o) => o.success);
+      const myOut = myId ? challengeResolved.outcomes.find((o) => o.playerId === myId) : undefined;
+      const ownerOut = challengeResolved.outcomes.find((o) => o.playerId === challengeResolved.ownerPlayerId);
+      const myWon = myOut ? myOut.success : Boolean(ownerOut?.success);
       const key = `${payload.turnNumber}:${challengeResolved.serverSummaryText}`;
       this.activeStampChallengeKey = key;
+
+      const resolvedChallengeCtx =
+        this.state?.activeChallenge ??
+        prevChallenge ??
+        (challengeStarted && challengeStarted.type === 'ChallengeStarted' ? challengeStarted.challenge : null);
+      const restoreNullChallenge = Boolean(this.state && !this.state.activeChallenge && resolvedChallengeCtx);
+      if (this.state && restoreNullChallenge) {
+        this.state.activeChallenge = resolvedChallengeCtx;
+      }
+
       this.callbacks.onChallengeStamp(myWon, challengeResolved.serverSummaryText);
+
+      if (this.state && restoreNullChallenge) {
+        this.state.activeChallenge = payload.activeChallenge;
+      }
+
       if (this.stampCloseTimer !== null) clearTimeout(this.stampCloseTimer);
       this.stampCloseTimer = globalThis.setTimeout(() => {
         if (this.activeStampChallengeKey === key && !this.disposed) {
