@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { RoomManager } from '../src/roomManager.js';
 
-function createTestHarness(opts?: { reconnectGraceMs?: number; turnTimeoutMs?: number; botDelayMs?: number }) {
+function createTestHarness(opts?: {
+  reconnectGraceMs?: number;
+  turnTimeoutMs?: number;
+  botDelayMs?: number;
+  allowDebugDice?: boolean;
+  maxRooms?: number;
+  maxSpectatorsPerRoom?: number;
+}) {
   const roomEmits: Array<{ roomCode: string; event: string; payload: unknown }> = [];
   const socketEmits: Array<{ socketId: string; event: string; payload: unknown }> = [];
 
@@ -281,5 +288,97 @@ describe('RoomManager multiplayer logic', () => {
     expect(mgr.getRoom(c.roomCode)).toBeUndefined();
 
     vi.useRealTimers();
+  });
+
+  it('enforces allowDebugDice=false, maxSpectatorsPerRoom, maxRooms eviction, and socket rate limits', () => {
+    const { mgr } = createTestHarness({
+      allowDebugDice: false,
+      maxRooms: 2,
+      maxSpectatorsPerRoom: 2,
+    });
+
+    // 1. Create 2 rooms (reaching maxRooms=2), then attempt a 3rd room while both are active -> throws
+    const r1 = mgr.createRoom('h1', { playerName: 'HostSatu', pawn: 'kucing', color: 'pink' });
+    const r2 = mgr.createRoom('h2', { playerName: 'HostDua', pawn: 'kodok', color: 'mint' });
+    expect(() =>
+      mgr.createRoom('h3', { playerName: 'HostTiga', pawn: 'bebek', color: 'kuning' }),
+    ).toThrow(/penuh/i);
+
+    // Disconnect h2 in-game so r2 has no connected humans -> creating r3 evicts stale r2!
+    mgr.addBot('h2', 'pintar');
+    mgr.startRoomGame('h2', 111);
+    mgr.handleDisconnect('h2', false);
+    const r3 = mgr.createRoom('h3', { playerName: 'HostTiga', pawn: 'bebek', color: 'kuning' });
+    expect(r3.roomCode).toHaveLength(4);
+    expect(mgr.getRoom(r2.roomCode)).toBeUndefined();
+
+    // 2. Spectator cap enforcement (maxSpectatorsPerRoom = 2)
+    mgr.joinRoom('p2', {
+      roomCode: r1.roomCode,
+      playerName: 'Tamu',
+      pawn: 'panda',
+      color: 'biru',
+    });
+    mgr.setPlayerReady('p2', true);
+    mgr.startRoomGame('h1', 123456); // Seed 123456 rolls a non-6 on turn 1
+
+    mgr.joinRoom('spec1', {
+      roomCode: r1.roomCode,
+      playerName: 'Penonton1',
+      pawn: 'dino',
+      color: 'oranye',
+      asSpectator: true,
+    });
+    mgr.joinRoom('spec2', {
+      roomCode: r1.roomCode,
+      playerName: 'Penonton2',
+      pawn: 'jamur',
+      color: 'ungu',
+      asSpectator: true,
+    });
+    expect(() =>
+      mgr.joinRoom('spec3', {
+        roomCode: r1.roomCode,
+        playerName: 'Penonton3',
+        pawn: 'kucing',
+        color: 'pink',
+        asSpectator: true,
+      }),
+    ).toThrow(/penuh/i);
+
+    // 3. Invalid reconnectToken of different length does not throw timingSafeEqual buffer error, falls back to spectator in-game
+    mgr.handleDisconnect('spec2', true);
+    const badTokenJoin = mgr.joinRoom('spec2', {
+      roomCode: r1.roomCode,
+      playerName: 'Penonton2',
+      pawn: 'jamur',
+      color: 'ungu',
+      reconnectToken: 'short_invalid_token',
+    });
+    expect(badTokenJoin.asSpectator).toBe(true);
+
+    // 4. allowDebugDice=false ignores forcedDice: compare with a reference room with same seed and no forcedDice
+    const { mgr: refMgr } = createTestHarness({ allowDebugDice: false });
+    const refRoom = refMgr.createRoom('rh1', { playerName: 'HostSatu', pawn: 'kucing', color: 'pink' });
+    refMgr.joinRoom('rp2', {
+      roomCode: refRoom.roomCode,
+      playerName: 'Tamu',
+      pawn: 'panda',
+      color: 'biru',
+    });
+    refMgr.setPlayerReady('rp2', true);
+    refMgr.startRoomGame('rh1', 123456);
+
+    mgr.roll('h1', 6); // Client attempts to force a 6
+    refMgr.roll('rh1'); // Server rolls naturally without forcedDice
+    expect(mgr.getRoom(r1.roomCode)!.state!.players[0].position).toBe(
+      refMgr.getRoom(refRoom.roomCode)!.state!.players[0].position,
+    );
+
+    // 5. Rate limiter blocks after maxPerSec calls within 1s window
+    for (let i = 0; i < 5; i++) {
+      expect(mgr.checkRateLimit('flood_sock', 5)).toBe(true);
+    }
+    expect(mgr.checkRateLimit('flood_sock', 5)).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   BOARD_LAYOUT,
   PAWN_META,
@@ -64,9 +64,18 @@ export interface RoomInstance {
   spectatorSocketIds: Set<string>;
   inGame: boolean;
   state: GameState | null;
+  lastActiveAt: number;
   turnTimer?: ReturnType<typeof setTimeout>;
   challengeTimer?: ReturnType<typeof setTimeout>;
   botTimer?: ReturnType<typeof setTimeout>;
+}
+
+function safeTokenEquals(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
 }
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // exclude I, O for readability
@@ -82,24 +91,54 @@ export class RoomManager {
   public readonly reconnectGraceMs: number;
   public readonly turnTimeoutMs: number;
   public readonly botDelayMs: number;
+  public readonly allowDebugDice: boolean;
+  public readonly maxRooms: number;
+  public readonly maxSpectatorsPerRoom: number;
 
   constructor(
     hooks: RoomEmitHooks,
-    options?: { reconnectGraceMs?: number; turnTimeoutMs?: number; botDelayMs?: number },
+    options?: {
+      reconnectGraceMs?: number;
+      turnTimeoutMs?: number;
+      botDelayMs?: number;
+      allowDebugDice?: boolean;
+      maxRooms?: number;
+      maxSpectatorsPerRoom?: number;
+    },
   ) {
     this.hooks = hooks;
     this.reconnectGraceMs = options?.reconnectGraceMs ?? 60_000;
     this.turnTimeoutMs = options?.turnTimeoutMs ?? 30_000;
     this.botDelayMs = options?.botDelayMs ?? 900;
+    this.allowDebugDice = options?.allowDebugDice ?? process.env.NODE_ENV !== 'production';
+    this.maxRooms = options?.maxRooms ?? 500;
+    this.maxSpectatorsPerRoom = options?.maxSpectatorsPerRoom ?? 32;
   }
 
   public checkRateLimit(socketId: string, maxPerSec = 18): boolean {
     const now = Date.now();
+    if (this.socketRateLimits.size > 2000) {
+      for (const [sid, times] of this.socketRateLimits.entries()) {
+        if (times.length === 0 || now - times[times.length - 1] > 10_000) {
+          this.socketRateLimits.delete(sid);
+        }
+      }
+    }
     const list = (this.socketRateLimits.get(socketId) ?? []).filter((t) => now - t < 1000);
     if (list.length >= maxPerSec) return false;
     list.push(now);
     this.socketRateLimits.set(socketId, list);
     return true;
+  }
+
+  private evictStaleRooms(now = Date.now()): void {
+    for (const [code, room] of this.rooms.entries()) {
+      const hasConnectedHumans = room.players.some((p) => !p.isBot && p.connected);
+      if (!hasConnectedHumans || now - room.lastActiveAt > 30 * 60_000) {
+        this.clearRoomTimers(room);
+        this.rooms.delete(code);
+      }
+    }
   }
 
   private generateRoomCode(): string {
@@ -156,6 +195,13 @@ export class RoomManager {
       this.handleDisconnect(socketId, true);
     }
 
+    if (this.rooms.size >= this.maxRooms) {
+      this.evictStaleRooms();
+      if (this.rooms.size >= this.maxRooms) {
+        throw new Error('Kapasitas room server sedang penuh. Silakan coba lagi sebentar.');
+      }
+    }
+
     const code = this.generateRoomCode();
     const playerId = this.newId('p');
     const reconnectToken = randomBytes(16).toString('hex');
@@ -183,6 +229,7 @@ export class RoomManager {
       spectatorSocketIds: new Set(),
       inGame: false,
       state: null,
+      lastActiveAt: Date.now(),
     };
 
     this.rooms.set(code, room);
@@ -220,10 +267,13 @@ export class RoomManager {
       this.handleDisconnect(socketId, true);
     }
 
-    // 1. Check reconnect token first
+    // 1. Check reconnect token first (constant-time comparison)
     if (payload.reconnectToken) {
-      const existing = room.players.find((p) => p.reconnectToken === payload.reconnectToken);
+      const existing = room.players.find((p) =>
+        safeTokenEquals(p.reconnectToken, payload.reconnectToken!),
+      );
       if (existing) {
+        room.lastActiveAt = Date.now();
         if (existing.reconnectTimer) {
           clearTimeout(existing.reconnectTimer);
           existing.reconnectTimer = undefined;
@@ -259,6 +309,13 @@ export class RoomManager {
 
     // 2. Join as spectator if requested or game already started
     if (payload.asSpectator || room.inGame) {
+      if (
+        !room.spectatorSocketIds.has(socketId) &&
+        room.spectatorSocketIds.size >= this.maxSpectatorsPerRoom
+      ) {
+        throw new Error('Kursi penonton di room ini sudah penuh.');
+      }
+      room.lastActiveAt = Date.now();
       room.spectatorSocketIds.add(socketId);
       this.socketToRoom.set(socketId, { roomCode: code, playerId: null });
       this.broadcastRoomState(room);
@@ -575,8 +632,9 @@ export class RoomManager {
     if (activeId !== player.id) {
       throw new Error('Bukan giliranmu!');
     }
-    // Only allow forcedDice in non-production debug mode
-    const allowForced = process.env.NODE_ENV !== 'production' ? forcedDice : undefined;
+    room.lastActiveAt = Date.now();
+    // Only allow forcedDice when debug dice mode is explicitly enabled
+    const allowForced = this.allowDebugDice ? forcedDice : undefined;
     this.executeRoll(room, player.id, allowForced);
   }
 

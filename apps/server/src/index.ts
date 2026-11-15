@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import { Server, type Socket } from 'socket.io';
+import { ZodError } from 'zod';
 import {
   ChallengeChooseOpponentSchema,
   ChallengeSubmitSchema,
@@ -29,7 +30,33 @@ const corsOrigins = process.env.CORS_ORIGIN
   .filter(Boolean);
 const corsOriginOption = corsOrigins && corsOrigins.length > 0 ? corsOrigins : '*';
 
+const MAX_CONNECTIONS_PER_IP = Number(process.env.MAX_CONNECTIONS_PER_IP ?? 24);
+const ipConnectionCounts = new Map<string, number>();
+
+function resolveSocketIp(socket: Socket): string {
+  const forwarded = socket.handshake.headers['x-forwarded-for'];
+  const firstForwarded = Array.isArray(forwarded)
+    ? forwarded[0]
+    : typeof forwarded === 'string'
+      ? forwarded.split(',')[0]
+      : undefined;
+  return (firstForwarded?.trim() || socket.handshake.address || 'unknown').slice(0, 64);
+}
+
 const app = express();
+app.disable('x-powered-by');
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; connect-src 'self' ws: wss: https:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; script-src 'self'",
+  );
+  next();
+});
 app.use(cors({ origin: corsOriginOption }));
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', game: 'DodSnake' });
@@ -51,20 +78,40 @@ if (fs.existsSync(clientDist)) {
 
 const server = http.createServer(app);
 const io = new Server(server, {
+  maxHttpBufferSize: 64 * 1024,
+  pingTimeout: 20_000,
+  pingInterval: 25_000,
   cors: {
     origin: corsOriginOption,
     methods: ['GET', 'POST'],
   },
 });
 
-const roomManager = new RoomManager({
-  emitToRoom: (roomCode, event, payload) => {
-    io.to(roomCode).emit(event, payload);
-  },
-  emitToSocket: (socketId, event, payload) => {
-    io.to(socketId).emit(event, payload);
-  },
+io.use((socket, next) => {
+  const ip = resolveSocketIp(socket);
+  const current = ipConnectionCounts.get(ip) ?? 0;
+  if (current >= MAX_CONNECTIONS_PER_IP) {
+    next(new Error('Terlalu banyak koneksi aktif dari alamat IP ini.'));
+    return;
+  }
+  ipConnectionCounts.set(ip, current + 1);
+  socket.data.clientIp = ip;
+  next();
 });
+
+const roomManager = new RoomManager(
+  {
+    emitToRoom: (roomCode, event, payload) => {
+      io.to(roomCode).emit(event, payload);
+    },
+    emitToSocket: (socketId, event, payload) => {
+      io.to(socketId).emit(event, payload);
+    },
+  },
+  {
+    allowDebugDice: process.env.ALLOW_DEBUG_DICE === '1',
+  },
+);
 
 function withGuard(
   socket: Socket,
@@ -80,7 +127,12 @@ function withGuard(
   try {
     fn();
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'Terjadi kesalahan pada server.';
+    const message =
+      e instanceof ZodError
+        ? e.issues[0]?.message ?? 'Format data tidak valid.'
+        : e instanceof Error
+          ? e.message
+          : 'Terjadi kesalahan pada server.';
     socket.emit('error', { code: 'ACTION_FAILED', message });
     roomManager.syncToSocket(socket.id);
     ack?.({ ok: false, error: message });
@@ -220,6 +272,12 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
+    const ip = socket.data.clientIp as string | undefined;
+    if (ip) {
+      const nextCount = (ipConnectionCounts.get(ip) ?? 1) - 1;
+      if (nextCount <= 0) ipConnectionCounts.delete(ip);
+      else ipConnectionCounts.set(ip, nextCount);
+    }
     roomManager.handleDisconnect(socket.id, false);
   });
 });
