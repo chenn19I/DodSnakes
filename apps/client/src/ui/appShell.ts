@@ -591,36 +591,105 @@ export class DoodleAppShell {
   }
 
   private readonly handleGlobalKeyDown = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape' && (this.showSupportModal || this.showHowToPlay || this.showSettings)) {
+    if (e.key === 'Escape' && (this.showSupportModal || this.showHowToPlay || this.showSettings || this.showLegendPopover)) {
       this.showSupportModal = false;
       this.showHowToPlay = false;
       this.showSettings = false;
+      this.showLegendPopover = false;
       this.renderModalsLayer();
+      this.renderMainLayer();
       return;
     }
+    const targetTag = (e.target as HTMLElement | null)?.tagName;
+    if (targetTag === 'INPUT' || targetTag === 'TEXTAREA' || targetTag === 'SELECT') return;
+
+    if (
+      this.screen === 'game' &&
+      this.activeChallengeModal &&
+      !this.activeChallengeModal.duelPicked
+    ) {
+      const idx = Number(e.key) - 1;
+      const duelBtns = Array.from(
+        this.challengeLayer.querySelectorAll<HTMLButtonElement>('[data-duel-opp]'),
+      );
+      if (Number.isInteger(idx) && idx >= 0 && idx < duelBtns.length) {
+        e.preventDefault();
+        duelBtns[idx]?.click();
+      }
+      return;
+    }
+
     if (
       this.screen !== 'game' ||
       this.activeChallengeModal ||
       this.showHowToPlay ||
       this.showSettings ||
       this.showSupportModal ||
-      !this.gameState ||
-      this.isAnimating
+      !this.gameState
     ) {
       return;
     }
-    const targetTag = (e.target as HTMLElement | null)?.tagName;
-    if (targetTag === 'INPUT' || targetTag === 'TEXTAREA' || targetTag === 'SELECT') return;
+
+    if (this.isAnimating) {
+      if (e.key === 's' || e.key === 'S') {
+        e.preventDefault();
+        this.scene.skipCurrentAnimation();
+      } else if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault();
+        this.speed2x = !this.scene.isSpeedUp();
+        this.scene.toggleSpeedUp(this.speed2x);
+        this.sound.playUiClick();
+        this.renderOverlaysOnly();
+      }
+      return;
+    }
+
+    if (e.key === 'c' || e.key === 'C') {
+      e.preventDefault();
+      this.sound.playUiClick();
+      const next = this.scene.getPreferredCameraMode() === 'overview' ? 'follow' : 'overview';
+      this.scene.resetCameraOrbit();
+      this.scene.setPreferredCameraMode(next);
+      this.renderMainLayer();
+      return;
+    }
+    if (e.key === 'g' || e.key === 'G') {
+      e.preventDefault();
+      this.sound.playUiClick();
+      this.showLegendPopover = !this.showLegendPopover;
+      this.renderMainLayer();
+      return;
+    }
 
     const activeId = this.gameState.turnOrder[this.gameState.currentTurnIndex];
     const localId = this.controller?.getLocalPlayerId();
     const isMyTurn = !this.controller?.isSpectator() && activeId === localId;
     if (!isMyTurn) return;
 
-    if (e.code === 'Space' && this.gameState.phase === 'TURN_BEGIN') {
-      e.preventDefault();
-      this.sound.playUiClick();
-      this.controller?.rollDice();
+    const me = this.gameState.players.find((p) => p.id === localId);
+    if (this.gameState.phase === 'TURN_BEGIN') {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        this.sound.playUiClick();
+        this.controller?.rollDice();
+      } else if ((e.key === 'q' || e.key === 'Q') && me?.items[0]) {
+        e.preventDefault();
+        this.sound.playUiClick();
+        this.controller?.useItem(0);
+      } else if ((e.key === 'w' || e.key === 'W') && me?.items[1]) {
+        e.preventDefault();
+        this.sound.playUiClick();
+        this.controller?.useItem(1);
+      } else if (
+        (e.key === 'b' || e.key === 'B') &&
+        me &&
+        me.items.length < 2 &&
+        me.stars >= getPlayerShopCost(me.pawn)
+      ) {
+        e.preventDefault();
+        this.sound.playShopBuy();
+        this.controller?.buyStarItem();
+      }
     } else if (this.gameState.phase === 'ROLL' && this.gameState.pendingRoll) {
       if (e.key === '1') {
         e.preventDefault();
@@ -687,10 +756,10 @@ export class DoodleAppShell {
       ${
         this.isAnimating
           ? `<div class="anim-controls-pill">
-               <button class="doodle-btn" id="btn-speed-2x">
+               <button class="doodle-btn ${this.speed2x ? 'doodle-btn-mint' : ''}" id="btn-speed-2x" title="[F]">
                  <span class="ui-ico-row">${renderUiIconSvg('play', 14)}<span>${this.speed2x ? (this.lang === 'en' ? '2x Active' : '2x Aktif') : this.t('speed2x')}</span></span>
                </button>
-               <button class="doodle-btn" id="btn-skip-anim">
+               <button class="doodle-btn" id="btn-skip-anim" title="[S]">
                  <span class="ui-ico-row">${renderUiIconSvg('skip', 14)}<span>${this.t('skip')}</span></span>
                </button>
              </div>`
@@ -1626,11 +1695,12 @@ export class DoodleAppShell {
             ${[0, 1]
               .map((idx) => {
                 const item = me?.items[idx];
+                const keyHint = idx === 0 ? '[Q]' : '[W]';
                 if (!item) {
-                  return `<button class="doodle-btn item-slot-btn" disabled title="${this.t('empty')}">-</button>`;
+                  return `<button class="doodle-btn item-slot-btn" disabled title="${this.t('empty')} ${keyHint}">-</button>`;
                 }
                 const im = getItemMeta(item, this.lang);
-                return `<button class="doodle-btn doodle-btn-mint item-slot-btn" data-use-item="${idx}" ${!isMyTurn || state.phase !== 'TURN_BEGIN' ? 'disabled' : ''} title="${escapeHtml(im.name)}: ${escapeHtml(im.description)}">
+                return `<button class="doodle-btn doodle-btn-mint item-slot-btn" data-use-item="${idx}" ${!isMyTurn || state.phase !== 'TURN_BEGIN' ? 'disabled' : ''} title="${escapeHtml(im.name)} ${keyHint}: ${escapeHtml(im.description)}">
                   ${renderItemSvg(item, 22)}
                   <span>${escapeHtml(im.name.split(' ')[0])}</span>
                 </button>`;
@@ -1638,7 +1708,7 @@ export class DoodleAppShell {
               .join('')}
             ${
               me && !this.controller?.isSpectator()
-                ? `<button class="doodle-btn shop-buy-btn" id="btn-buy-star-item" ${!canBuyStarItem ? 'disabled' : ''} title="${escapeHtml(this.t('buyTooltip'))} (★${myShopCost})">
+                ? `<button class="doodle-btn shop-buy-btn" id="btn-buy-star-item" ${!canBuyStarItem ? 'disabled' : ''} title="${escapeHtml(this.t('buyTooltip'))} (★${myShopCost}) [B]">
                      ${renderUiIconSvg('shop', 18)}
                      <span class="tabular-num">${me.items.length >= 2 ? this.t('bagFull') : `${en ? 'Buy' : 'Beli'} ★${myShopCost}`}</span>
                    </button>`
@@ -1676,8 +1746,8 @@ export class DoodleAppShell {
                             : prev.bounced
                               ? `${en ? 'Bounce' : 'Pantul'} ${this.t('tileShort')}${prev.to}`
                               : `→ ${this.t('tileShort')}${prev.to}`;
-                      return `<button class="doodle-btn dice-pick-btn" data-pick-dice="${idx}">
-                        <span>${en ? 'Pick' : 'Pilih'} ${val}</span>
+                      return `<button class="doodle-btn dice-pick-btn" data-pick-dice="${idx}" title="[${idx + 1}]">
+                        <span>[${idx + 1}] ${en ? 'Pick' : 'Pilih'} ${val}</span>
                         <span class="dice-pick-hint ${hintCls} tabular-num">${hintTxt}</span>
                       </button>`;
                     })
@@ -1764,7 +1834,7 @@ export class DoodleAppShell {
                   <div class="mg-sub">${this.t('pickDuelRival')}</div>
                   ${others
                     .map(
-                      (o) => `<button class="doodle-btn doodle-btn-primary" style="width:100%" data-duel-opp="${o.id}">${pawnSvg(o.pawn, o.color, 24, o.accessory ?? 'none')} ${en ? 'Challenge' : 'Tantang'} ${escapeHtml(o.name)} (${this.t('tileShort')}${o.position})</button>`,
+                      (o, idx) => `<button class="doodle-btn doodle-btn-primary" style="width:100%" data-duel-opp="${o.id}"><span class="mg-key-pill">${idx + 1}</span> ${pawnSvg(o.pawn, o.color, 24, o.accessory ?? 'none')} ${en ? 'Challenge' : 'Tantang'} ${escapeHtml(o.name)} (${this.t('tileShort')}${o.position} • ★${o.stars})</button>`,
                     )
                     .join('')}
                  </div>`
@@ -2892,9 +2962,13 @@ export class DoodleAppShell {
 
   private bindTransientEvents(): void {
     this.overlayLayer.querySelector('#btn-speed-2x')?.addEventListener('click', () => {
-      this.scene.toggleSpeedUp(!this.scene.isSpeedUp());
+      this.speed2x = !this.scene.isSpeedUp();
+      this.scene.toggleSpeedUp(this.speed2x);
+      this.sound.playUiClick();
+      this.renderOverlaysOnly();
     });
     this.overlayLayer.querySelector('#btn-skip-anim')?.addEventListener('click', () => {
+      this.sound.playUiClick();
       this.scene.skipCurrentAnimation();
     });
   }
