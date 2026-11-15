@@ -39,6 +39,15 @@ export interface ChallengeRenderContext {
 
 export type ChallengeRendererFn = (ctx: ChallengeRenderContext) => () => void;
 
+function escapeHtml(raw: string): string {
+  return String(raw)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function makeInputSubmission(
   playerId: string,
   claimedSuccess: boolean,
@@ -136,7 +145,7 @@ const renderFourOptionMcq = (
               (opt, idx) => `
             <button class="doodle-btn mg-opt-btn" data-idx="${idx}" style="${opt.style ?? ''}">
               <span class="mg-opt-badge">${opt.badge ?? String.fromCharCode(65 + idx)}</span>
-              <span>${opt.label}</span>
+              <span>${escapeHtml(opt.label)}</span>
             </button>`,
             )
             .join('')}
@@ -183,7 +192,7 @@ const renderQuickQuiz: ChallengeRendererFn = (ctx) => {
   const rawOptions = (ctx.challenge.params.options as string[]) ?? q?.options ?? [];
   const localized = getLocalizedQuiz(qId, rawQuestion, rawOptions, lang);
   return renderFourOptionMcq(
-    `<div class="mg-quiz-text">${localized.question}</div>`,
+    `<div class="mg-quiz-text">${escapeHtml(localized.question)}</div>`,
     localized.options.map((label) => ({ label })),
     q?.correctIndex ?? 0,
   )(ctx);
@@ -194,7 +203,7 @@ const renderQuickMath: ChallengeRendererFn = (ctx) => {
   const options = (ctx.challenge.params.options as number[]) ?? [];
   const correctIndex = Number(ctx.challenge.params.correctIndex ?? 0);
   return renderFourOptionMcq(
-    `<div class="mg-math-expr">${expr} = ?</div>`,
+    `<div class="mg-math-expr">${escapeHtml(expr)} = ?</div>`,
     options.map((n) => ({ label: String(n) })),
     correctIndex,
   )(ctx);
@@ -267,7 +276,7 @@ const renderStroopColor: ChallengeRendererFn = (ctx) => {
       : 'Ketuk tombol warna <b>TINTA</b> tulisan di atas!';
 
   return renderFourOptionMcq(
-    `<div class="mg-stroop-word" style="color:${inkHex}">${wordLabel} ${hintBadge}</div>
+    `<div class="mg-stroop-word" style="color:${escapeHtml(inkHex)}">${escapeHtml(wordLabel)} ${hintBadge}</div>
      <div class="mg-sub">${promptSub}</div>`,
     options.map((o) => ({
       label: getLocalizedStroopLabel(o.id ?? o.label, o.label, lang),
@@ -552,6 +561,7 @@ const renderWordScramble: ChallengeRendererFn = ({ challenge, playerId, containe
   const hint = String(challenge.params.hint ?? '');
   const scrambled = (challenge.params.scrambledLetters as string[]) ?? [];
   const word = String(challenge.params.word ?? '');
+  const wordLen = word.length || Number(challenge.params.wordLength ?? scrambled.length);
   const startedAt = performance.now();
   const pickedIndices: number[] = [];
   let done = false;
@@ -561,27 +571,29 @@ const renderWordScramble: ChallengeRendererFn = ({ challenge, playerId, containe
     done = true;
     window.removeEventListener('keydown', onKeyDown);
     const text = pickedIndices.map((i) => scrambled[i]).join('');
-    onSubmit(makeInputSubmission(playerId, text === word, text === word ? 100 : 0, startedAt, { answerText: text }));
+    const ok = word ? text === word : text.length === wordLen;
+    onSubmit(makeInputSubmission(playerId, ok, ok ? 100 : 0, startedAt, { answerText: text }));
   };
 
   const renderState = () => {
     const answerText = pickedIndices.map((i) => scrambled[i]).join('');
-    const readyToSend = pickedIndices.length === word.length;
+    const readyToSend = pickedIndices.length === wordLen;
+    const safeHint = escapeHtml(hint);
     container.innerHTML = `
       <div class="mg-wrap">
-        <div class="mg-sub">${language === 'en' ? `Indonesian word clue: <b>${hint}</b> (${word.length} letters)` : `Petunjuk: <b>${hint}</b> (${word.length} huruf)`}</div>
+        <div class="mg-sub">${language === 'en' ? `Indonesian word clue: <b>${safeHint}</b> (${wordLen} letters)` : `Petunjuk: <b>${safeHint}</b> (${wordLen} huruf)`}</div>
         <div class="mg-word-slots">
           ${Array.from(
-            { length: word.length },
+            { length: wordLen },
             (_, i) =>
-              `<button type="button" class="mg-letter-slot ${answerText[i] ? 'has-char' : ''}" data-slot="${i}" title="${language === 'en' ? 'Click to remove letter' : 'Klik untuk hapus huruf'}">${answerText[i] ?? '_'}</button>`,
+              `<button type="button" class="mg-letter-slot ${answerText[i] ? 'has-char' : ''}" data-slot="${i}" title="${language === 'en' ? 'Click to remove letter' : 'Klik untuk hapus huruf'}">${escapeHtml(answerText[i] ?? '_')}</button>`,
           ).join('')}
         </div>
         <div class="mg-letter-bank">
           ${scrambled
             .map((ch, idx) => {
               const used = pickedIndices.includes(idx);
-              return `<button class="doodle-btn mg-letter-btn" data-idx="${idx}" ${used ? 'disabled' : ''}>${ch}</button>`;
+              return `<button class="doodle-btn mg-letter-btn" data-idx="${idx}" ${used ? 'disabled' : ''}>${escapeHtml(ch)}</button>`;
             })
             .join('')}
         </div>
@@ -594,7 +606,7 @@ const renderWordScramble: ChallengeRendererFn = ({ challenge, playerId, containe
 
     container.querySelectorAll<HTMLButtonElement>('.mg-letter-btn').forEach((btn) => {
       btn.onclick = () => {
-        if (done || pickedIndices.length >= word.length) return;
+        if (done || pickedIndices.length >= wordLen) return;
         sound.playUiClick();
         pickedIndices.push(Number(btn.dataset.idx));
         renderState();
@@ -637,7 +649,7 @@ const renderWordScramble: ChallengeRendererFn = ({ challenge, playerId, containe
       return;
     }
     const ch = e.key.toUpperCase();
-    if (/^[A-Z]$/.test(ch) && pickedIndices.length < word.length) {
+    if (/^[A-Z]$/.test(ch) && pickedIndices.length < wordLen) {
       const matchIdx = scrambled.findIndex((letter, i) => letter.toUpperCase() === ch && !pickedIndices.includes(i));
       if (matchIdx >= 0) {
         e.preventDefault();
@@ -1037,7 +1049,7 @@ const renderBossDoodle: ChallengeRendererFn = ({ challenge, playerId, container,
         <div class="mg-wrap">
           ${bossBanner(3)}
           <div class="mg-sub">${language === 'en' ? 'Stage 1/3: Crack the Boss Shield Math!' : 'Tahap 1/3: Hitung Cepat Pertahanan Bos!'}</div>
-          <div class="mg-math-expr">${math.expression} = ?</div>
+          <div class="mg-math-expr">${escapeHtml(math.expression)} = ?</div>
           <div class="mg-options-grid">
             ${math.options.map((n, i) => `<button class="doodle-btn mg-opt-btn" data-idx="${i}"><span class="mg-key-pill">${i + 1}</span> ${n}</button>`).join('')}
           </div>
@@ -1878,7 +1890,7 @@ const renderMathCompare: ChallengeRendererFn = ({
             (c, idx) => `
           <button class="doodle-btn mg-compare-card" data-cmp-idx="${idx}">
             <span class="mg-key-pill">${idx + 1}</span>
-            <span class="tabular-num" style="font-size:1.18rem;font-weight:700">${c.expr}</span>
+            <span class="tabular-num" style="font-size:1.18rem;font-weight:700">${escapeHtml(c.expr)}</span>
           </button>`,
           )
           .join('')}
