@@ -2837,3 +2837,45 @@ body.colorblind-mode .lobby-ready-pill.is-wait {
 .radar-chip.is-snake {
   background: var(--pink);
 }
+
+.toast-banner {
+  background: var(--pink);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.toast-banner.is-success {
+  background: var(--mint);
+  border-color: #1f7a4c;
+  color: #123c26;
+}
+
+.toast-banner.is-fail {
+  background: #ff8f8f;
+  border-color: #8f1d1d;
+  color: #3b0d0d;
+}
+
+.challenge-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1.5px solid var(--ink);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.2;
+  background: #fff9ec;
+}
+
+.challenge-status-chip.is-win {
+  background: var(--mint);
+  color: #103b25;
+}
+
+.challenge-status-chip.is-fail {
+  background: #ffb4b4;
+  color: #4a1212;
+}
+
