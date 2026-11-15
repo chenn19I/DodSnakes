@@ -690,19 +690,20 @@ export function resolveTile(
         });
       } else if (special.kind === 'tailwind') {
         const originTileId = tile.id;
-        movePlayerDirect(state, active, 2, 'bonus_advance', events);
-        const shiftedTile = tiles.find((t) => t.id === active.position);
-        if (shiftedTile) {
-          tile = shiftedTile;
-        }
+        const targetTileId = computeMove(originTileId, 2, state.board.size).to;
         events.push({
           type: 'BoardSpecialTriggered',
           seq: nextSeq(state),
           playerId: active.id,
           tileId: originTileId,
           kind: special.kind,
-          movedTo: active.position,
+          movedTo: targetTileId,
         });
+        movePlayerDirect(state, active, 2, 'bonus_advance', events);
+        const shiftedTile = tiles.find((t) => t.id === active.position);
+        if (shiftedTile) {
+          tile = shiftedTile;
+        }
       }
     }
   }

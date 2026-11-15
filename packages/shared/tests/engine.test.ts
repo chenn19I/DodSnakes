@@ -1365,11 +1365,33 @@ describe('Challenge validation & Replay determinism', () => {
     expect(useCharm.state.players[0].mission?.completed).toBe(true);
     expect(useCharm.events.some((e) => e.type === 'MissionCompleted')).toBe(true);
 
-    // Land on tile 43 (tailwind) -> auto-advances +2 to tile 45
+    // Land on tile 43 (tailwind) -> emits BoardSpecialTriggered first, then auto-advances +2 to tile 45
     const rolled = rollDice(useCharm.state, 'p1', 3);
     expect(rolled.state.players[0].position).toBe(43);
     const tileRes = resolveTile(rolled.state, TILES, 2000);
     expect(tileRes.state.players[0].position).toBe(45);
-    expect(tileRes.events.some((e) => e.type === 'BoardSpecialTriggered' && e.kind === 'tailwind')).toBe(true);
+    const specialIdx = tileRes.events.findIndex(
+      (e) => e.type === 'BoardSpecialTriggered' && e.kind === 'tailwind',
+    );
+    const moveIdx = tileRes.events.findIndex(
+      (e) => e.type === 'PawnMoved' && e.reason === 'bonus_advance',
+    );
+    expect(specialIdx).toBeGreaterThanOrEqual(0);
+    expect(moveIdx).toBeGreaterThan(specialIdx);
+
+    // Santai bot with Koko (kodok) accounts for Frog Leap (+1 step on die 1) when picking Golden Dice
+    const kokoSantai = startGame(
+      createInitialGameState({
+        matchSeed: 556,
+        board: BOARD_LAYOUT,
+        players: [
+          { id: 'b1', name: 'KokoBot', pawn: 'kodok', color: 'mint', isBot: true, botDifficulty: 'santai' },
+          { id: 'b2', name: 'MochiBot', pawn: 'kucing', color: 'pink', isBot: true, botDifficulty: 'santai' },
+        ],
+      }),
+    ).state;
+    kokoSantai.players[0].position = 98;
+    // Die 1 leaps 2 steps (98 -> 100 exact!), whereas die 3 bounces (98 -> 100 -> 99)
+    expect(chooseBotGoldenDiceIndex(kokoSantai, kokoSantai.players[0], [1, 3])).toBe(0);
   });
 });

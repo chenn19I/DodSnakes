@@ -139,8 +139,16 @@ export function chooseBotGoldenDiceIndex(
   const usedTurbo = Boolean(state.pendingRoll?.usedTurbo);
 
   if (player.botDifficulty === 'santai') {
-    const m0 = computeMove(player.position, v0 + (usedTurbo ? 2 : 0), state.board.size).to;
-    const m1 = computeMove(player.position, v1 + (usedTurbo ? 2 : 0), state.board.size).to;
+    const m0 = computeMove(
+      player.position,
+      computeEffectiveDiceSteps(v0, usedTurbo, player.pawn),
+      state.board.size,
+    ).to;
+    const m1 = computeMove(
+      player.position,
+      computeEffectiveDiceSteps(v1, usedTurbo, player.pawn),
+      state.board.size,
+    ).to;
     if (m0 === state.board.size) return 0;
     if (m1 === state.board.size) return 1;
     return m1 > m0 ? 1 : 0;
