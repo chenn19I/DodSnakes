@@ -381,4 +381,62 @@ describe('RoomManager multiplayer logic', () => {
     }
     expect(mgr.checkRateLimit('flood_sock', 5)).toBe(false);
   });
+
+  it('redacts matchSeed and live opponent challenge submissions in outbound socket payloads', () => {
+    const { mgr, roomEmits, socketEmits } = createTestHarness();
+    const room = mgr.createRoom('s1', {
+      playerName: 'Ayu',
+      pawn: 'kucing',
+      color: 'pink',
+    });
+    const j2 = mgr.joinRoom('s2', {
+      roomCode: room.roomCode,
+      playerName: 'Bima',
+      pawn: 'kodok',
+      color: 'mint',
+    });
+    mgr.setPlayerReady('s2', true);
+    mgr.startRoomGame('s1', 998877);
+
+    // Server internal state retains true matchSeed, but outbound snapshots mask matchSeed to 0
+    expect(mgr.getRoom(room.roomCode)!.state!.matchSeed).toBe(998877);
+    const snapEmit = roomEmits.find((e) => e.event === 'game:snapshot')?.payload as {
+      state: { matchSeed: number };
+    };
+    expect(snapEmit.state.matchSeed).toBe(0);
+
+    // Trigger an all_play or duel challenge where s1 submits first and s2 reconnects/syncs before resolution
+    mgr.roll('s1', 3); // tile 4
+    const liveRoom = mgr.getRoom(room.roomCode)!;
+    if (liveRoom.state?.activeChallenge) {
+      liveRoom.state.activeChallenge.mode = 'all_play';
+      liveRoom.state.activeChallenge.participantIds = [room.playerId, j2.playerId!];
+      mgr.submitChallenge('s1', {
+        tileId: liveRoom.state.activeChallenge.tileId,
+        claimedSuccess: true,
+        score: 145,
+        inputLog: {
+          startedAt: 10,
+          completedAt: 1200,
+          answerText: 'RAHASIA',
+        },
+      });
+
+      socketEmits.length = 0;
+      mgr.syncToSocket('s2');
+      const syncEmit = socketEmits.find((e) => e.event === 'game:sync')?.payload as {
+        state: {
+          matchSeed: number;
+          activeChallenge: {
+            submissions: Record<string, { score: number; inputLog: { answerText?: string } }>;
+          };
+        };
+      };
+      expect(syncEmit.state.matchSeed).toBe(0);
+      expect(syncEmit.state.activeChallenge.submissions[room.playerId].score).toBe(0);
+      expect(
+        syncEmit.state.activeChallenge.submissions[room.playerId].inputLog.answerText,
+      ).toBeUndefined();
+    }
+  });
 });
