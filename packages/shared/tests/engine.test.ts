@@ -26,6 +26,8 @@ import {
   nextTurn,
   previewDiceLanding,
   recordChallengeSubmission,
+  redactChallengeForClient,
+  redactGameStateForClient,
   resolveTile,
   rollDice,
   sanitizeUsernameOrFallback,
@@ -1502,5 +1504,49 @@ describe('Challenge validation & Replay determinism', () => {
     expect(validateUsername('k\u043Ent\u043El').ok).toBe(false); // Cyrillic 'о'
     expect(validateUsername('b\u03BFk\u03B5p').ok).toBe(false); // Greek 'ο' and 'ε'
     expect(sanitizeUsernameRaw('\u202ECha\u2066nn\u2069')).toBe('Chann');
+  });
+
+  it('redacts matchSeed and opponent challenge submissions in client state snapshots', () => {
+    let s = startGame(
+      createInitialGameState({
+        matchSeed: 987654,
+        board: BOARD_LAYOUT,
+        players: makeTestPlayers(2),
+      }),
+    ).state;
+    const duelTiles: Tile[] = TILES.map((t) =>
+      t.id === 4
+        ? {
+            ...t,
+            archetype: 'word_scramble',
+            mode: 'all_play',
+            params: { word: 'KANCIL', scrambled: 'LICNAK', hint: 'Hewan cerdik' },
+          }
+        : t,
+    );
+    s = rollDice(s, 'p1', 3).state;
+    s = resolveTile(s, duelTiles, 1000).state;
+    s = recordChallengeSubmission(s, {
+      playerId: 'p1',
+      claimedSuccess: true,
+      score: 140,
+      inputLog: {
+        startedAt: 0,
+        completedAt: 1800,
+        answerText: 'KANCIL',
+      },
+    });
+
+    const redacted = redactGameStateForClient(s);
+    expect(redacted.matchSeed).toBe(0);
+    expect(s.matchSeed).toBe(987654); // original server state untouched
+    expect(redacted.activeChallenge?.submissions.p1).toBeDefined();
+    expect(redacted.activeChallenge?.submissions.p1.claimedSuccess).toBe(false);
+    expect(redacted.activeChallenge?.submissions.p1.score).toBe(0);
+    expect(redacted.activeChallenge?.submissions.p1.inputLog.answerText).toBeUndefined();
+
+    const strictChallenge = redactChallengeForClient(s.activeChallenge!, { stripAnswerParams: true });
+    expect(strictChallenge.params.word).toBeUndefined();
+    expect(strictChallenge.params.wordLength).toBe(6);
   });
 });
