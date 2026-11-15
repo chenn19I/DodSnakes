@@ -27,6 +27,8 @@ import {
   hashSeed,
   nextTurn,
   recordChallengeSubmission,
+  redactChallengeForClient,
+  redactGameStateForClient,
   resolveTile,
   rollDice,
   selectDuelOpponent,
@@ -209,7 +211,7 @@ export class P2pRoomHost {
         case 'rpc:sync_request':
           this.emit('room:state', this.getRoomState(), senderId);
           if (this.gameState) {
-            this.emit('game:sync', { state: this.gameState }, senderId);
+            this.emit('game:sync', { state: redactGameStateForClient(this.gameState) }, senderId);
           }
           break;
         case 'player:ready': {
@@ -278,7 +280,7 @@ export class P2pRoomHost {
         }
         case 'game:sync_request':
           if (this.inGame && this.gameState) {
-            this.emit('game:sync', { state: this.gameState }, senderId);
+            this.emit('game:sync', { state: redactGameStateForClient(this.gameState) }, senderId);
           }
           break;
         case 'room:leave':
@@ -289,7 +291,7 @@ export class P2pRoomHost {
       const message = err instanceof Error ? err.message : 'Aksi gagal diproses.';
       this.emit('error', { code: 'ACTION_FAILED', message }, senderId);
       if (this.inGame && this.gameState) {
-        this.emit('game:sync', { state: this.gameState }, senderId);
+        this.emit('game:sync', { state: redactGameStateForClient(this.gameState) }, senderId);
       }
     }
   }
@@ -386,7 +388,7 @@ export class P2pRoomHost {
         reconnectToken,
         reconnected,
         roomState: this.getRoomState(),
-        gameState: this.gameState,
+        gameState: this.gameState ? redactGameStateForClient(this.gameState) : null,
       },
       targetPeerId,
     );
@@ -509,7 +511,7 @@ export class P2pRoomHost {
     this.gameState = started.state;
     this.inGame = true;
     this.broadcastRoomState();
-    this.emit('game:started', { state: started.state }, '*');
+    this.emit('game:started', { state: redactGameStateForClient(started.state) }, '*');
     this.scheduleTurnOrBot();
   }
 
@@ -580,8 +582,8 @@ export class P2pRoomHost {
 
     this.gameState = selectDuelOpponent(this.gameState, slot.id, opponentId, Date.now());
     const updated = this.gameState.activeChallenge!;
-    this.emit('challenge:begin', { challenge: updated }, '*');
-    this.emit('game:sync', { state: this.gameState }, '*');
+    this.emit('challenge:begin', { challenge: redactChallengeForClient(updated) }, '*');
+    this.emit('game:sync', { state: redactGameStateForClient(this.gameState) }, '*');
     this.scheduleChallengeResolution();
   }
 
@@ -662,7 +664,7 @@ export class P2pRoomHost {
           p.id === slot.id ? { ...p, isBot: true, connected: false } : p,
         ),
       };
-      this.emit('game:sync', { state: this.gameState }, '*');
+      this.emit('game:sync', { state: redactGameStateForClient(this.gameState) }, '*');
     }
     this.broadcastRoomState();
     this.scheduleTurnOrBot();
@@ -713,8 +715,8 @@ export class P2pRoomHost {
         if (this.disposed || !this.gameState?.activeChallenge?.awaitingDuelPick) return;
         this.gameState = selectDuelOpponent(this.gameState, ch.ownerPlayerId, undefined, Date.now());
         const updated = this.gameState.activeChallenge!;
-        this.emit('challenge:begin', { challenge: updated }, '*');
-        this.emit('game:sync', { state: this.gameState }, '*');
+        this.emit('challenge:begin', { challenge: redactChallengeForClient(updated) }, '*');
+        this.emit('game:sync', { state: redactGameStateForClient(this.gameState) }, '*');
         this.scheduleChallengeResolution();
       }, pickTimeoutMs);
       return;
@@ -862,13 +864,14 @@ export class P2pRoomHost {
 
   private emitGameEvents(events: GameEvent[]): void {
     if (!this.gameState) return;
+    const clientState = redactGameStateForClient(this.gameState);
     this.emit(
       'game:events',
       {
         turnNumber: this.gameState.turnNumber,
         events,
-        activeChallenge: this.gameState.activeChallenge,
-        state: this.gameState,
+        activeChallenge: clientState.activeChallenge,
+        state: clientState,
       },
       '*',
     );
