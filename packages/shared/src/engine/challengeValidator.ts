@@ -2,9 +2,61 @@ import type {
   ActiveChallenge,
   BotDifficulty,
   ChallengeSubmission,
+  GameState,
 } from '../types.js';
 import { SeededRng } from '../rng.js';
 import { ARCHETYPE_REGISTRY, type ValidationOutcome } from '../content/archetypes.js';
+
+export interface RedactChallengeOptions {
+  stripAnswerParams?: boolean;
+}
+
+export function redactChallengeForClient(
+  challenge: ActiveChallenge,
+  options?: RedactChallengeOptions,
+): ActiveChallenge {
+  const redactedSubmissions: Record<string, ChallengeSubmission> = {};
+  for (const [pid, sub] of Object.entries(challenge.submissions ?? {})) {
+    redactedSubmissions[pid] = {
+      playerId: sub?.playerId ?? pid,
+      claimedSuccess: false,
+      score: 0,
+      inputLog: {
+        startedAt: 0,
+        completedAt: 0,
+      },
+    };
+  }
+
+  let redactedParams: Record<string, unknown> = { ...challenge.params };
+  if (options?.stripAnswerParams) {
+    delete redactedParams.correctAnswer;
+    delete redactedParams.validPair;
+    if (challenge.archetype === 'word_scramble' && typeof redactedParams.word === 'string') {
+      redactedParams.wordLength = redactedParams.word.length;
+      delete redactedParams.word;
+    }
+  }
+
+  return {
+    ...challenge,
+    params: redactedParams,
+    submissions: redactedSubmissions,
+  };
+}
+
+export function redactGameStateForClient(
+  state: GameState,
+  options?: RedactChallengeOptions,
+): GameState {
+  return {
+    ...state,
+    matchSeed: 0,
+    activeChallenge: state.activeChallenge
+      ? redactChallengeForClient(state.activeChallenge, options)
+      : null,
+  };
+}
 
 export function validateChallengeSubmission(
   challenge: ActiveChallenge,
