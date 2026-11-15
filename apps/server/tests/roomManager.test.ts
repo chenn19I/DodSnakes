@@ -245,4 +245,41 @@ describe('RoomManager multiplayer logic', () => {
       }),
     ).toThrow();
   });
+
+  it('auto-resolves active CHALLENGE without deadlocking when active player leaves mid-challenge', () => {
+    vi.useFakeTimers();
+    const { mgr, roomEmits } = createTestHarness({ reconnectGraceMs: 1000, turnTimeoutMs: 5000, botDelayMs: 50 });
+    const c = mgr.createRoom('s1', { playerName: 'Ali', pawn: 'kucing', color: 'pink' });
+    mgr.joinRoom('s2', {
+      roomCode: c.roomCode,
+      playerName: 'Bima',
+      pawn: 'kodok',
+      color: 'mint',
+    });
+    mgr.setPlayerReady('s2', true);
+    mgr.startRoomGame('s1', 4242);
+
+    // s1 rolls onto tile 4 (CHALLENGE phase)
+    mgr.roll('s1', 3);
+    const room = mgr.getRoom(c.roomCode)!;
+    expect(room.state?.phase).toBe('CHALLENGE');
+
+    // s1 intentionally leaves mid-challenge -> promoted to bot -> challenge timer must reschedule and resolve!
+    mgr.handleDisconnect('s1', true);
+    vi.advanceTimersByTime(700);
+    expect(room.state?.phase).toBe('TURN_BEGIN');
+    expect(room.state?.activeChallenge).toBeNull();
+
+    // Emote broadcast emits both emote:broadcast and emote:received
+    mgr.sendEmote('s2', 'jempol');
+    expect(roomEmits.some((e) => e.event === 'emote:broadcast')).toBe(true);
+    expect(roomEmits.some((e) => e.event === 'emote:received')).toBe(true);
+
+    // Creating a new room with an already-joined socket cleans up its previous room membership
+    const c2 = mgr.createRoom('s2', { playerName: 'Bima', pawn: 'kodok', color: 'mint' });
+    expect(c2.roomCode).not.toBe(c.roomCode);
+    expect(mgr.getRoom(c.roomCode)).toBeUndefined();
+
+    vi.useRealTimers();
+  });
 });

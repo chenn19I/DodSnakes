@@ -152,6 +152,10 @@ export class RoomManager {
       throw new Error(nameCheck.error ?? 'Username tidak diizinkan.');
     }
 
+    if (this.socketToRoom.has(socketId)) {
+      this.handleDisconnect(socketId, true);
+    }
+
     const code = this.generateRoomCode();
     const playerId = this.newId('p');
     const reconnectToken = randomBytes(16).toString('hex');
@@ -209,6 +213,11 @@ export class RoomManager {
     const room = this.rooms.get(code);
     if (!room) {
       throw new Error(`Room ${code} tidak ditemukan.`);
+    }
+
+    const priorLink = this.socketToRoom.get(socketId);
+    if (priorLink && priorLink.roomCode !== code) {
+      this.handleDisconnect(socketId, true);
     }
 
     // 1. Check reconnect token first
@@ -434,6 +443,7 @@ export class RoomManager {
 
     this.broadcastRoomState(room);
     this.hooks.emitToRoom(room.code, 'game:snapshot', { state: room.state });
+    this.hooks.emitToRoom(room.code, 'game:started', { state: room.state });
     this.emitGameEvents(room, started.events);
     this.scheduleTurnActions(room);
   }
@@ -456,7 +466,10 @@ export class RoomManager {
     if (!room.state || events.length === 0) return;
     this.hooks.emitToRoom(room.code, 'game:events', {
       stateVersion: room.state.stateVersion,
+      turnNumber: room.state.turnNumber,
       events,
+      activeChallenge: room.state.activeChallenge,
+      state: room.state,
     });
   }
 
@@ -473,6 +486,11 @@ export class RoomManager {
     this.clearRoomTimers(room);
     const state = room.state;
     if (!state || state.phase === 'GAME_OVER') return;
+
+    if (state.phase === 'CHALLENGE' && state.activeChallenge) {
+      this.scheduleChallengeResolution(room, state.activeChallenge);
+      return;
+    }
 
     const activeId = state.turnOrder[state.currentTurnIndex];
     const activePlayer = state.players.find((p) => p.id === activeId);
@@ -620,6 +638,8 @@ export class RoomManager {
     }
 
     if (challenge.mode === 'duel' && challenge.awaitingDuelPick) {
+      const owner = room.state?.players.find((x) => x.id === challenge.ownerPlayerId);
+      const pickDelayMs = owner?.isBot ? this.botDelayMs : 12_000;
       room.challengeTimer = setTimeout(() => {
         if (!room.state || room.state.phase !== 'CHALLENGE' || !room.state.activeChallenge?.awaitingDuelPick) {
           return;
@@ -628,14 +648,14 @@ export class RoomManager {
         const picked = room.state.activeChallenge!;
         this.hooks.emitToRoom(room.code, 'challenge:begin', { challenge: picked });
         this.scheduleChallengeResolution(room, picked);
-      }, 12_000);
+      }, pickDelayMs);
       return;
     }
 
     // Pre-fill bot participants
     for (const pid of challenge.participantIds) {
       const p = room.state!.players.find((x) => x.id === pid);
-      if (p?.isBot) {
+      if (p?.isBot && !room.state!.activeChallenge?.submissions[pid]) {
         const botRng = new SeededRng(hashSeed(challenge.seed, pid, 'bot_srv'));
         const sub = simulateBotChallengeSubmission(challenge, pid, p.botDifficulty, botRng);
         room.state = recordChallengeSubmission(room.state!, sub);
@@ -745,11 +765,13 @@ export class RoomManager {
       throw new Error('Tunggu sebentar sebelum kirim stiker lagi!');
     }
     player.lastEmoteAt = now;
-    this.hooks.emitToRoom(room.code, 'emote:broadcast', {
+    const emotePayload = {
       playerId: player.id,
       emoteId,
       sentAt: now,
-    });
+    };
+    this.hooks.emitToRoom(room.code, 'emote:broadcast', emotePayload);
+    this.hooks.emitToRoom(room.code, 'emote:received', emotePayload);
   }
 
   public handleDisconnect(socketId: string, intentionalLeave = false): void {
