@@ -955,6 +955,7 @@ function resolveJunctionAtPosition(
   allowChallengeDodge: boolean,
   events: GameEvent[],
   visitedTiles: Set<number>,
+  allowLadderClimb = allowChallengeDodge,
 ): 'ladder' | 'snake_saved' | 'snake_bitten' | 'none' {
   const tileId = owner.position;
   if (visitedTiles.has(tileId)) {
@@ -964,6 +965,9 @@ function resolveJunctionAtPosition(
   const ladder = findLadderAt(state.board, tileId);
   if (ladder) {
     visitedTiles.add(tileId);
+    if (!allowLadderClimb) {
+      return 'none';
+    }
     owner.position = ladder.to;
     owner.stats.laddersClimbed += 1;
     if (owner.pawn === 'kucing') {
@@ -1386,19 +1390,20 @@ export function applyChallengeResult(inputState: GameState): StepResult {
     ownerOutcome.success,
     events,
     visitedJunctionTiles,
+    ownerOutcome.success,
   );
 
   if (deferredAdvance > 0 && initialJunction !== 'snake_bitten') {
     const beforeAdvance = owner.position;
     movePlayerDirect(state, owner, deferredAdvance, 'bonus_advance', events);
     if (owner.position !== beforeAdvance) {
-      resolveJunctionAtPosition(state, owner, false, events, visitedJunctionTiles);
+      resolveJunctionAtPosition(state, owner, false, events, visitedJunctionTiles, true);
     }
   } else if (deferredRetreat > 0 && initialJunction === 'none') {
     const beforeRetreat = owner.position;
     movePlayerDirect(state, owner, -deferredRetreat, 'penalty_retreat', events);
     if (owner.position !== beforeRetreat) {
-      resolveJunctionAtPosition(state, owner, false, events, visitedJunctionTiles);
+      resolveJunctionAtPosition(state, owner, false, events, visitedJunctionTiles, false);
     }
   }
 
