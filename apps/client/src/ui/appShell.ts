@@ -1708,8 +1708,8 @@ export class DoodleAppShell {
               const lastArchName = lastOut ? getArchetypeMeta(lastOut.archetype, this.lang).name : '';
               const lastBadgeTitle = lastOut
                 ? en
-                  ? `Last challenge (${lastArchName} @ Tile ${lastOut.tileId}): ${lastOut.success ? 'Succeeded' : 'Failed'} • Record: ${p.stats.challengesWon}/${p.stats.challengesPlayed}`
-                  : `Tantangan terakhir (${lastArchName} @ Kt.${lastOut.tileId}): ${lastOut.success ? 'Berhasil' : 'Gagal'} • Rekor: ${p.stats.challengesWon}/${p.stats.challengesPlayed}`
+                  ? `Last challenge (${lastArchName} @ Tile ${lastOut.tileId}): ${lastOut.success ? 'Succeeded' : 'Failed'} • Record: ${p.stats.challengesWon}/${p.stats.challengesTotal}`
+                  : `Tantangan terakhir (${lastArchName} @ Kt.${lastOut.tileId}): ${lastOut.success ? 'Berhasil' : 'Gagal'} • Rekor: ${p.stats.challengesWon}/${p.stats.challengesTotal}`
                 : '';
               return `
                 <div class="player-pill player-pill-clickable ${isAct ? 'active' : ''} ${!p.connected ? 'disconnected' : ''}" data-focus-player="${p.id}" style="border-left: 8px solid ${PLAYER_COLORS[p.color].hex}" title="${escapeHtml(meta.name)} (${escapeHtml(meta.perkTitle)}: ${escapeHtml(meta.perkDesc)})">
@@ -1722,7 +1722,7 @@ export class DoodleAppShell {
                       ${streak >= 2 ? `<span class="streak-badge" title="${en ? 'Challenge Streak!' : 'Kombo Tantangan!'}">${renderUiIconSvg('flame', 13)}x${streak}</span>` : ''}
                       ${
                         lastOut
-                          ? `<span class="challenge-status-chip ${lastOut.success ? 'is-win' : 'is-fail'}" title="${escapeHtml(lastBadgeTitle)}">${lastOut.success ? (en ? '✓ Pass' : '✓ Lolos') : (en ? '✗ Fail' : '✗ Gagal')} (${p.stats.challengesWon}/${p.stats.challengesPlayed})</span>`
+                          ? `<span class="challenge-status-chip ${lastOut.success ? 'is-win' : 'is-fail'}" title="${escapeHtml(lastBadgeTitle)}">${lastOut.success ? (en ? '✓ Pass' : '✓ Lolos') : (en ? '✗ Fail' : '✗ Gagal')} (${p.stats.challengesWon}/${p.stats.challengesTotal})</span>`
                           : ''
                       }
                     </div>
