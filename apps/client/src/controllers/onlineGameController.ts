@@ -20,6 +20,7 @@ import { RoomRelayChannel } from './realtimeTransport.js';
 import { P2pRoomHost } from './p2pRoomHost.js';
 
 const SESSION_STORAGE_KEY = 'dodsnake_online_session_v1';
+const MAX_SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 const ROOM_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 
 interface StoredSession {
@@ -27,6 +28,7 @@ interface StoredSession {
   reconnectToken: string;
   playerId: string | null;
   transport?: 'socketio' | 'relay';
+  savedAt?: number;
 }
 
 export type OnlineTransportMode = 'socketio' | 'relay';
@@ -40,6 +42,7 @@ export class OnlineGameController implements GameSessionController {
   private relay: RoomRelayChannel | null = null;
   private p2pHost: P2pRoomHost | null = null;
   private peerId = `peer_${Math.random().toString(36).slice(2, 10)}`;
+  private hostPeerId: string | null = null;
 
   private transportMode: OnlineTransportMode;
   private relayStatus: 'connecting' | 'connected' | 'local_only' | 'closed' = 'connecting';
@@ -66,12 +69,44 @@ export class OnlineGameController implements GameSessionController {
     }
   }
 
+  public static sanitizeServerUrl(raw: string | null | undefined, allowExternal = false): string {
+    if (!raw || typeof raw !== 'string') return '';
+    const trimmed = raw.trim();
+    if (!trimmed) return '';
+    try {
+      const base =
+        typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001';
+      const parsed = new URL(trimmed, base);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+      if (!allowExternal) {
+        const host = parsed.hostname.toLowerCase();
+        const currentHost =
+          typeof window !== 'undefined' ? window.location.hostname.toLowerCase() : '';
+        const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+        if (!isLocal && (!currentHost || host !== currentHost)) {
+          return '';
+        }
+      }
+      return parsed.origin;
+    } catch {
+      return '';
+    }
+  }
+
   public static getServerUrl(): string {
-    const queryUrl =
-      typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('server') : null;
-    if (queryUrl && queryUrl.trim().length > 0) return queryUrl.trim();
-    const envUrl = import.meta.env.VITE_SERVER_URL as string | undefined;
-    if (envUrl && envUrl.trim().length > 0) return envUrl.trim();
+    const queryRaw =
+      typeof window !== 'undefined'
+        ? new URLSearchParams(window.location.search).get('server')
+        : null;
+    const safeQueryUrl = OnlineGameController.sanitizeServerUrl(queryRaw, false);
+    if (safeQueryUrl) return safeQueryUrl;
+
+    const envUrl = OnlineGameController.sanitizeServerUrl(
+      import.meta.env.VITE_SERVER_URL as string | undefined,
+      true,
+    );
+    if (envUrl) return envUrl;
+
     if (typeof window !== 'undefined') {
       const { hostname, port, origin, protocol } = window.location;
       if (hostname === 'localhost' || hostname === '127.0.0.1') {
@@ -82,11 +117,18 @@ export class OnlineGameController implements GameSessionController {
   }
 
   public static hasConfiguredServer(): boolean {
-    const queryUrl =
-      typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('server') : null;
-    if (queryUrl && queryUrl.trim().length > 0) return true;
-    const envUrl = import.meta.env.VITE_SERVER_URL as string | undefined;
-    if (envUrl && envUrl.trim().length > 0) return true;
+    const queryRaw =
+      typeof window !== 'undefined'
+        ? new URLSearchParams(window.location.search).get('server')
+        : null;
+    if (OnlineGameController.sanitizeServerUrl(queryRaw, false)) return true;
+
+    const envUrl = OnlineGameController.sanitizeServerUrl(
+      import.meta.env.VITE_SERVER_URL as string | undefined,
+      true,
+    );
+    if (envUrl) return true;
+
     if (typeof window !== 'undefined') {
       return window.location.port === '3001';
     }
@@ -106,14 +148,47 @@ export class OnlineGameController implements GameSessionController {
     try {
       const raw = localStorage.getItem(SESSION_STORAGE_KEY);
       if (!raw) return null;
-      return JSON.parse(raw) as StoredSession;
+      const parsed = JSON.parse(raw) as Partial<StoredSession>;
+      if (
+        !parsed ||
+        typeof parsed.roomCode !== 'string' ||
+        !/^[A-Z0-9]{4}$/.test(parsed.roomCode) ||
+        typeof parsed.reconnectToken !== 'string' ||
+        parsed.reconnectToken.length === 0 ||
+        parsed.reconnectToken.length > 128
+      ) {
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+        return null;
+      }
+      if (
+        typeof parsed.savedAt === 'number' &&
+        Number.isFinite(parsed.savedAt) &&
+        Date.now() - parsed.savedAt > MAX_SESSION_TTL_MS
+      ) {
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+        return null;
+      }
+      return {
+        roomCode: parsed.roomCode,
+        reconnectToken: parsed.reconnectToken,
+        playerId: typeof parsed.playerId === 'string' ? parsed.playerId : null,
+        transport:
+          parsed.transport === 'socketio' || parsed.transport === 'relay'
+            ? parsed.transport
+            : undefined,
+        savedAt: parsed.savedAt,
+      };
     } catch {
       return null;
     }
   }
 
   public static clearSavedSession(): void {
-    localStorage.removeItem(SESSION_STORAGE_KEY);
+    try {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch {
+      // Ignore storage access errors
+    }
   }
 
   private readonly handleBeforeUnload = (): void => {
@@ -134,7 +209,13 @@ export class OnlineGameController implements GameSessionController {
     try {
       localStorage.setItem(
         SESSION_STORAGE_KEY,
-        JSON.stringify({ roomCode, reconnectToken, playerId, transport }),
+        JSON.stringify({
+          roomCode: roomCode.toUpperCase(),
+          reconnectToken,
+          playerId,
+          transport,
+          savedAt: Date.now(),
+        }),
       );
     } catch {
       // Ignore storage quota errors
@@ -552,25 +633,41 @@ export class OnlineGameController implements GameSessionController {
 
   private handleRelayEnvelope(event: string, payload: unknown, senderId: string): void {
     if (this.disposed) return;
+    if (!senderId || typeof senderId !== 'string' || senderId.length > 64) return;
 
-    // If this tab owns the room host, forward client RPC actions to P2pRoomHost
-    if (
-      this.p2pHost &&
-      (event.startsWith('rpc:') ||
+    // If this tab owns the room host, only forward valid client RPC actions to P2pRoomHost
+    // and never allow external peers to inject host broadcasts into the host tab.
+    if (this.p2pHost) {
+      if (
+        event.startsWith('rpc:') ||
         event.startsWith('player:') ||
-        event.startsWith('room:add_bot') ||
-        event.startsWith('room:remove_bot') ||
-        event.startsWith('room:settings') ||
-        event.startsWith('room:rematch') ||
-        event.startsWith('room:leave') ||
-        event.startsWith('game:start') ||
+        event === 'room:add_bot' ||
+        event === 'room:remove_bot' ||
+        event === 'room:settings' ||
+        event === 'room:rematch' ||
+        event === 'room:leave' ||
+        event === 'game:start' ||
         event === 'game:sync_request' ||
         event.startsWith('turn:') ||
         event.startsWith('item:') ||
-        event.startsWith('challenge:') ||
-        event.startsWith('emote:'))
-    ) {
-      this.p2pHost.handlePeerMessage(senderId, event, payload);
+        event === 'challenge:choose_opponent' ||
+        event === 'challenge:submit' ||
+        event === 'emote:send'
+      ) {
+        this.p2pHost.handlePeerMessage(senderId, event, payload);
+      }
+      return;
+    }
+
+    // Guest tab: pin the host peer ID on the first valid room:joined response and
+    // reject broadcast spoofing from any other peer on the public relay topic.
+    if (event === 'room:joined') {
+      if (!this.hostPeerId) {
+        this.hostPeerId = senderId;
+      } else if (senderId !== this.hostPeerId) {
+        return;
+      }
+    } else if (this.hostPeerId && senderId !== this.hostPeerId) {
       return;
     }
 
@@ -633,6 +730,7 @@ export class OnlineGameController implements GameSessionController {
       }
       case 'room:closed': {
         const reason = (payload as { reason?: string })?.reason ?? 'Host menutup room.';
+        OnlineGameController.clearSavedSession();
         this.cleanupConnections();
         this.callbacks.onError(reason);
         this.callbacks.onExitToMenu();
