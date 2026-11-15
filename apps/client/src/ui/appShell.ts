@@ -161,6 +161,10 @@ export class DoodleAppShell {
   private floatingEmoteTimer: number | null = null;
   private debugStats: SceneDebugStats = { fps: 60, drawCalls: 0, triangles: 0 };
   private activityFeed: ActivityEntry[] = [];
+  private lastChallengeOutcomes = new Map<
+    string,
+    { success: boolean; archetype: ChallengeArchetype; tileId: number }
+  >();
 
   private activeChallengeModal: {
     challenge: ActiveChallenge;
@@ -397,6 +401,16 @@ export class DoodleAppShell {
       }
     }
     for (const ev of events) {
+      if (ev.type === 'ChallengeResolved') {
+        for (const out of ev.outcomes) {
+          this.lastChallengeOutcomes.set(out.playerId, {
+            success: out.success,
+            archetype: ev.archetype,
+            tileId: ev.tileId,
+          });
+        }
+      }
+
       const formatted = formatEventFeedText(ev, state, this.lang);
       if (!formatted) continue;
 
@@ -408,7 +422,8 @@ export class DoodleAppShell {
       } else if (ev.type === 'ItemUsed' || ev.type === 'ItemGained') {
         icon = { item: ev.item };
       } else if (ev.type === 'ChallengeResolved') {
-        icon = 'flame';
+        const ownerOut = ev.outcomes.find((o) => o.playerId === ev.ownerPlayerId);
+        icon = ownerOut?.success ? 'spark' : 'flame';
       } else if (ev.type === 'BoardSpecialTriggered') {
         icon = ev.kind === 'shield_shrine' ? { item: 'shield' } : ev.grantedItem ? { item: ev.grantedItem } : 'spark';
       } else if (ev.type === 'MissionCompleted') {
@@ -448,6 +463,7 @@ export class DoodleAppShell {
           this.scene.setExternalPause(false);
           this.screen = 'game';
           this.activityFeed = [];
+          this.lastChallengeOutcomes.clear();
         }
         if (state) {
           this.recordCareerIfFinished(state);
@@ -612,6 +628,7 @@ export class DoodleAppShell {
         this.roomState = null;
         this.gameState = null;
         this.activityFeed = [];
+        this.lastChallengeOutcomes.clear();
         this.floatingEmote = null;
         this.hudCompact = false;
         this.scene.setPreferredCameraMode('overview');
@@ -772,6 +789,12 @@ export class DoodleAppShell {
       }
     }
 
+    const toastTone = this.toastMessage?.startsWith('✅')
+      ? 'toast-banner is-success'
+      : this.toastMessage?.startsWith('❌')
+        ? 'toast-banner is-fail'
+        : 'toast-banner';
+
     return `
       ${this.turnBannerText ? `<div class="turn-banner">${escapeHtml(this.turnBannerText)}</div>` : ''}
       ${watchBanner ? `<div class="challenge-watch-pill">${renderUiIconSvg('timer', 14)}<span>${escapeHtml(watchBanner)}</span></div>` : ''}
@@ -783,7 +806,7 @@ export class DoodleAppShell {
              </div>`
           : ''
       }
-      ${this.toastMessage ? `<div class="floating-emote" style="background:var(--pink)">${escapeHtml(this.toastMessage)}</div>` : ''}
+      ${this.toastMessage ? `<div class="floating-emote ${toastTone}" role="status" aria-live="polite">${escapeHtml(this.toastMessage)}</div>` : ''}
       ${
         this.isAnimating
           ? `<div class="anim-controls-pill">
@@ -1681,15 +1704,27 @@ export class DoodleAppShell {
               const streak = p.challengeStreak ?? 0;
               const meta = getPawnMeta(p.pawn, this.lang);
               const cname = getColorName(p.color, this.lang);
+              const lastOut = this.lastChallengeOutcomes.get(p.id);
+              const lastArchName = lastOut ? getArchetypeMeta(lastOut.archetype, this.lang).name : '';
+              const lastBadgeTitle = lastOut
+                ? en
+                  ? `Last challenge (${lastArchName} @ Tile ${lastOut.tileId}): ${lastOut.success ? 'Succeeded' : 'Failed'} • Record: ${p.stats.challengesWon}/${p.stats.challengesPlayed}`
+                  : `Tantangan terakhir (${lastArchName} @ Kt.${lastOut.tileId}): ${lastOut.success ? 'Berhasil' : 'Gagal'} • Rekor: ${p.stats.challengesWon}/${p.stats.challengesPlayed}`
+                : '';
               return `
                 <div class="player-pill player-pill-clickable ${isAct ? 'active' : ''} ${!p.connected ? 'disconnected' : ''}" data-focus-player="${p.id}" style="border-left: 8px solid ${PLAYER_COLORS[p.color].hex}" title="${escapeHtml(meta.name)} (${escapeHtml(meta.perkTitle)}: ${escapeHtml(meta.perkDesc)})">
                   ${this.settings.colorblindMode ? `<span class="cb-shape" title="${escapeHtml(cname)}">${this.colorShapes[p.color]}</span>` : ''}
                   <span>${pawnSvg(p.pawn, p.color, 26, p.accessory ?? 'none')}</span>
                   <div>
-                    <div style="display:flex;align-items:center;gap:4px">
+                    <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
                       <b>${escapeHtml(p.name)}</b>
                       ${p.shields > 0 ? renderItemSvg('shield', 15) : ''}
                       ${streak >= 2 ? `<span class="streak-badge" title="${en ? 'Challenge Streak!' : 'Kombo Tantangan!'}">${renderUiIconSvg('flame', 13)}x${streak}</span>` : ''}
+                      ${
+                        lastOut
+                          ? `<span class="challenge-status-chip ${lastOut.success ? 'is-win' : 'is-fail'}" title="${escapeHtml(lastBadgeTitle)}">${lastOut.success ? (en ? '✓ Pass' : '✓ Lolos') : (en ? '✗ Fail' : '✗ Gagal')} (${p.stats.challengesWon}/${p.stats.challengesPlayed})</span>`
+                          : ''
+                      }
                     </div>
                     <div class="tabular-num" style="font-size:0.78rem;display:flex;align-items:center;gap:4px">
                       <span>${this.t('tileShort')}${p.position}</span> • <span data-star-pid="${p.id}">★${this.getDisplayedStars(p.id, p.stars)}</span> • <span style="opacity:0.75">${escapeHtml(meta.shortName)}</span>
@@ -1924,7 +1959,21 @@ export class DoodleAppShell {
             modal.stamp
               ? `<div class="stamp-overlay">
                   <div class="stamp-badge ${modal.stamp.success ? 'stamp-win' : 'stamp-lose'}">
-                    ${modal.stamp.success ? this.t('youWinChallenge') : en ? 'OOPS...' : 'YAAH...'}
+                    ${escapeHtml(
+                      modal.stamp.success
+                        ? challenger && challenger.id !== this.controller?.getLocalPlayerId()
+                          ? en
+                            ? `✅ ${challenger.name} SUCCEEDED!`
+                            : `✅ ${challenger.name} BERHASIL!`
+                          : `✅ ${this.t('youWinChallenge')}`
+                        : challenger && challenger.id !== this.controller?.getLocalPlayerId()
+                          ? en
+                            ? `❌ ${challenger.name} FAILED!`
+                            : `❌ ${challenger.name} GAGAL!`
+                          : en
+                            ? '❌ CHALLENGE FAILED!'
+                            : '❌ YAAH... GAGAL!',
+                    )}
                   </div>
                   <p style="margin-top:14px;font-size:1.05rem">${escapeHtml(modal.stamp.summary)}</p>
                 </div>`
@@ -2987,6 +3036,7 @@ export class DoodleAppShell {
       this.sound.playUiClick();
       this.recordedMatchKey = null;
       this.activityFeed = [];
+      this.lastChallengeOutcomes.clear();
       this.controller?.rematch();
     });
     q('#btn-podium-menu')?.addEventListener('click', () => {
