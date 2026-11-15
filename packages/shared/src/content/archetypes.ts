@@ -191,10 +191,13 @@ export const ARCHETYPE_REGISTRY: Record<ChallengeArchetype, ArchetypeSpec> = {
       const width = Number(params.zoneWidth ?? 0.2);
       const diff = Number(params.difficulty ?? 1);
       const win = rng.chance(botSuccessRate(botDiff, diff));
+      const missDir = center > 0.5 ? -1 : 1;
+      const minMiss = width / 2 + 0.065;
+      const maxMiss = Math.max(minMiss + 0.06, width + 0.14);
       const offset = win
-        ? rng.nextFloat(-width * 0.42, width * 0.42)
-        : rng.pick([-1, 1]) * rng.nextFloat(width * 0.65, width * 1.3);
-      const needlePos = Math.max(0.02, Math.min(0.98, center + offset));
+        ? rng.nextFloat(-width * 0.4, width * 0.4)
+        : missDir * rng.nextFloat(minMiss, maxMiss);
+      const needlePos = Number(Math.max(0.02, Math.min(0.98, center + offset)).toFixed(3));
       const reactionMs = rng.nextInt(450, 2200);
       return {
         startedAt: 0,
@@ -352,18 +355,18 @@ export const ARCHETYPE_REGISTRY: Record<ChallengeArchetype, ArchetypeSpec> = {
       const diff = Number(params.difficulty ?? 1);
       const win = rng.chance(botSuccessRate(botDiff, diff));
       const taps = win
-        ? rng.nextInt(targetTaps, targetTaps + 8)
-        : rng.nextInt(Math.max(4, targetTaps - 5), targetTaps - 1);
+        ? rng.nextInt(targetTaps, targetTaps + 6)
+        : rng.nextInt(Math.max(1, targetTaps - 5), Math.max(1, targetTaps - 1));
       const tapTimestamps: number[] = [];
       let t = 150;
-      const step = Math.floor(4600 / Math.max(1, taps));
+      const step = Math.max(70, Math.floor(4200 / Math.max(1, taps)));
       for (let i = 0; i < taps; i++) {
-        t += Math.max(55, step + rng.nextInt(-15, 15));
-        tapTimestamps.push(Math.min(4950, t));
+        t += Math.max(55, step + rng.nextInt(-12, 12));
+        tapTimestamps.push(t);
       }
       return {
         startedAt: 0,
-        completedAt: 5000,
+        completedAt: Math.max(5000, t + 180),
         reactionMs: tapTimestamps[0] ?? 200,
         tapTimestamps,
         claimedSuccess: win,
@@ -939,8 +942,15 @@ export const ARCHETYPE_REGISTRY: Record<ChallengeArchetype, ArchetypeSpec> = {
       const difficulty = Number(params.difficulty ?? 2);
       const targetPops = Number(params.targetPops ?? 5);
       const maxBombHits = Number(params.maxBombHits ?? 1);
+      const bubbles = Array.isArray(params.bubbles) ? params.bubbles : [];
+      const maxGoodCount =
+        bubbles.length > 0
+          ? bubbles.filter((b) => (b as { kind?: string })?.kind === 'good').length
+          : targetPops + 1;
       const win = rng.chance(botSuccessRate(botDiff, difficulty));
-      const goodPopped = win ? targetPops + rng.nextInt(0, 1) : Math.max(1, targetPops - 2);
+      const goodPopped = win
+        ? Math.min(maxGoodCount, targetPops + rng.nextInt(0, 1))
+        : Math.max(1, targetPops - 2);
       const hitsTaken = win ? 0 : maxBombHits + 1;
       const tapTimestamps = Array.from(
         { length: goodPopped + hitsTaken },
@@ -1029,12 +1039,12 @@ export const ARCHETYPE_REGISTRY: Record<ChallengeArchetype, ArchetypeSpec> = {
       const toleranceMs = Number(params.toleranceMs ?? 280);
       const requiredHits = Number(params.requiredHits ?? 3);
       const win = rng.chance(botSuccessRate(botDiff, difficulty));
-      const hitCount = win ? rng.nextInt(requiredHits, beatTargetsMs.length) : Math.max(0, requiredHits - 2);
-      const tapTimestamps = beatTargetsMs.map((t, idx) =>
-        idx < hitCount
-          ? t + rng.nextInt(-Math.floor(toleranceMs * 0.55), Math.floor(toleranceMs * 0.55))
-          : t + toleranceMs + 280,
-      );
+      const hitCount = win
+        ? rng.nextInt(requiredHits, beatTargetsMs.length)
+        : Math.max(0, requiredHits - 2);
+      const tapTimestamps = beatTargetsMs
+        .slice(0, hitCount)
+        .map((t) => t + rng.nextInt(-Math.floor(toleranceMs * 0.55), Math.floor(toleranceMs * 0.55)));
       return {
         startedAt: 0,
         completedAt: (beatTargetsMs[beatTargetsMs.length - 1] ?? 3600) + 500,
