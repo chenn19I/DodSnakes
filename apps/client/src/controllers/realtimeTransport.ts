@@ -116,11 +116,20 @@ export function encodeMqttDisconnectPacket(): Uint8Array {
   return new Uint8Array([0xe0, 0x00]);
 }
 
+const MAX_MQTT_BUFFER_BYTES = 256 * 1024;
+const MAX_MQTT_PACKET_BYTES = 128 * 1024;
+const MAX_ENVELOPE_AGE_MS = 120_000;
+
 export class MqttPacketStreamParser {
   private buffer: Uint8Array = new Uint8Array(0);
 
   public push(chunk: Uint8Array): MqttParsedPacket[] {
     if (chunk.length === 0) return [];
+    if (this.buffer.length + chunk.length > MAX_MQTT_BUFFER_BYTES) {
+      // Guard against memory exhaustion from malformed or oversized stream frames
+      this.buffer = new Uint8Array(0);
+      return [];
+    }
     const combined = new Uint8Array(this.buffer.length + chunk.length);
     combined.set(this.buffer, 0);
     combined.set(chunk, this.buffer.length);
@@ -144,7 +153,17 @@ export class MqttPacketStreamParser {
         multiplier *= 128;
       }
 
-      if (!completeVarInt) break;
+      if (!completeVarInt) {
+        if (this.buffer.length >= 5) {
+          // Malformed 4+ byte MQTT varint header -> reset buffer
+          this.buffer = new Uint8Array(0);
+        }
+        break;
+      }
+      if (remLen > MAX_MQTT_PACKET_BYTES) {
+        this.buffer = new Uint8Array(0);
+        break;
+      }
       const totalLen = headerBytes + remLen;
       if (this.buffer.length < totalLen) break;
 
@@ -466,6 +485,9 @@ export class RoomRelayChannel {
         if (pkt.packetId !== undefined) {
           ws.send(encodeMqttPubackPacket(pkt.packetId));
         }
+        if (pkt.payload.byteLength > 64 * 1024) {
+          continue;
+        }
         try {
           const text = decoder.decode(pkt.payload);
           const parsed = JSON.parse(text);
@@ -496,7 +518,28 @@ export class RoomRelayChannel {
   private handleIncomingRaw(raw: unknown): void {
     if (!raw || typeof raw !== 'object') return;
     const env = raw as Partial<RelayEnvelope>;
-    if (env.v !== 1 || typeof env.msgId !== 'string' || typeof env.event !== 'string') return;
+    if (
+      env.v !== 1 ||
+      typeof env.msgId !== 'string' ||
+      env.msgId.length < 2 ||
+      env.msgId.length > 96 ||
+      typeof env.senderId !== 'string' ||
+      env.senderId.length < 2 ||
+      env.senderId.length > 64 ||
+      typeof env.event !== 'string' ||
+      env.event.length < 1 ||
+      env.event.length > 64
+    ) {
+      return;
+    }
+    if (
+      env.ts !== undefined &&
+      (typeof env.ts !== 'number' ||
+        !Number.isFinite(env.ts) ||
+        Math.abs(Date.now() - env.ts) > MAX_ENVELOPE_AGE_MS)
+    ) {
+      return;
+    }
     if ((env.roomCode ?? '').toUpperCase() !== this.roomCode) return;
     if (env.senderId === this.clientId) return;
     if (env.targetId && env.targetId !== '*' && env.targetId !== this.clientId) return;

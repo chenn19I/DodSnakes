@@ -1593,7 +1593,7 @@ const renderPairFlip: ChallengeRendererFn = ({
             done = true;
             onSubmit(
               makeInputSubmission(playerId, true, 100, startedAt, {
-                sequenceIndices: sequenceIndices.slice(0, 12),
+                sequenceIndices: sequenceIndices.slice(0, 24),
                 extra: { pairsMatched: matchedPairs },
               }),
             );

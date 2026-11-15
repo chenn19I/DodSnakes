@@ -66,6 +66,17 @@ export interface P2pHostOptions {
   hostCreate: RoomCreatePayload;
   emit: (event: string, payload: unknown, targetId?: string) => void;
   delayScale?: number;
+  allowDebugDice?: boolean;
+  maxSpectators?: number;
+}
+
+function safeTokenEquals(a: string, b: string): boolean {
+  if (!a || !b || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
 }
 
 const ALL_PAWNS: PawnId[] = ['kucing', 'kodok', 'bebek', 'panda', 'dino', 'jamur'];
@@ -77,6 +88,8 @@ export class P2pRoomHost {
   public readonly hostPeerId: string;
   public readonly hostPlayerId: string;
   public readonly hostReconnectToken: string;
+  public readonly allowDebugDice: boolean;
+  public readonly maxSpectators: number;
 
   private readonly emit: (event: string, payload: unknown, targetId?: string) => void;
   private readonly delayScale: number;
@@ -86,6 +99,7 @@ export class P2pRoomHost {
   private players: HostPlayerSlot[] = [];
   private spectators = new Map<string, string>();
   private peerToPlayer = new Map<string, string | null>();
+  private peerRateLimits = new Map<string, number[]>();
   private gameState: GameState | null = null;
   private disposed = false;
 
@@ -104,9 +118,12 @@ export class P2pRoomHost {
     this.hostPeerId = options.hostPeerId;
     this.emit = options.emit;
     this.delayScale = options.delayScale ?? 1;
+    this.allowDebugDice =
+      options.allowDebugDice ?? Boolean(options.delayScale !== undefined && options.delayScale < 1);
+    this.maxSpectators = options.maxSpectators ?? 32;
 
     this.hostPlayerId = this.newId('p');
-    this.hostReconnectToken = this.newId('tok');
+    this.hostReconnectToken = this.newToken();
 
     this.players.push({
       id: this.hostPlayerId,
@@ -157,8 +174,33 @@ export class P2pRoomHost {
     this.emit('room:closed', { reason: 'Host menutup room.' }, '*');
   }
 
+  public checkPeerRateLimit(senderId: string, maxPerSec = 18): boolean {
+    const now = Date.now();
+    if (this.peerRateLimits.size > 500) {
+      for (const [pid, times] of this.peerRateLimits.entries()) {
+        if (times.length === 0 || now - times[times.length - 1] > 10_000) {
+          this.peerRateLimits.delete(pid);
+        }
+      }
+    }
+    const list = (this.peerRateLimits.get(senderId) ?? []).filter((t) => now - t < 1000);
+    if (list.length >= maxPerSec) return false;
+    list.push(now);
+    this.peerRateLimits.set(senderId, list);
+    return true;
+  }
+
   public handlePeerMessage(senderId: string, event: string, rawPayload: unknown): void {
     if (this.disposed) return;
+    if (!senderId || typeof senderId !== 'string' || senderId.length > 64) return;
+    if (!this.checkPeerRateLimit(senderId)) {
+      this.emit(
+        'error',
+        { code: 'RATE_LIMIT', message: 'Terlalu cepat! Pelan-pelan ya.' },
+        senderId,
+      );
+      return;
+    }
     try {
       switch (event) {
         case 'rpc:join':
@@ -276,7 +318,9 @@ export class P2pRoomHost {
     }
 
     if (parsed.reconnectToken) {
-      const reconnectSlot = this.players.find((p) => p.reconnectToken === parsed.reconnectToken);
+      const reconnectSlot = this.players.find((p) =>
+        safeTokenEquals(p.reconnectToken, parsed.reconnectToken!),
+      );
       if (reconnectSlot) {
         reconnectSlot.peerId = senderId;
         reconnectSlot.connected = true;
@@ -288,6 +332,9 @@ export class P2pRoomHost {
     }
 
     if (this.inGame || parsed.asSpectator || this.players.length >= 6) {
+      if (!this.spectators.has(senderId) && this.spectators.size >= this.maxSpectators) {
+        throw new Error('Kursi penonton di room ini sudah penuh.');
+      }
       this.spectators.set(senderId, nameCheck.sanitized);
       this.peerToPlayer.set(senderId, null);
       this.broadcastRoomState();
@@ -305,7 +352,7 @@ export class P2pRoomHost {
       : parsed.color;
 
     const playerId = this.newId('p');
-    const reconnectToken = this.newId('tok');
+    const reconnectToken = this.newToken();
     this.players.push({
       id: playerId,
       peerId: senderId,
@@ -489,7 +536,8 @@ export class P2pRoomHost {
       throw new Error('Belum siap lempar dadu pada fase ini.');
     }
     this.clearTimers();
-    const res = rollDice(this.gameState, slot.id, forcedDice);
+    const allowForced = this.allowDebugDice ? forcedDice : undefined;
+    const res = rollDice(this.gameState, slot.id, allowForced);
     this.gameState = res.state;
     this.emitGameEvents(res.events);
     this.afterMoveEvents(res.events);
@@ -557,7 +605,7 @@ export class P2pRoomHost {
         : ch.mode === 'solo'
           ? slot.id === ch.ownerPlayerId
           : true);
-    if (!allowedParticipant) return;
+    if (!allowedParticipant || ch.submissions[slot.id]) return;
 
     this.gameState = recordChallengeSubmission(this.gameState, {
       playerId: slot.id,
@@ -586,6 +634,7 @@ export class P2pRoomHost {
       this.dispose();
       return;
     }
+    this.peerRateLimits.delete(senderId);
     const playerId = this.peerToPlayer.get(senderId);
     this.peerToPlayer.delete(senderId);
     if (playerId === undefined) return;
@@ -842,5 +891,14 @@ export class P2pRoomHost {
 
   private newId(prefix: string): string {
     return `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
+  }
+
+  private newToken(): string {
+    if (typeof globalThis.crypto?.getRandomValues === 'function') {
+      const bytes = new Uint8Array(16);
+      globalThis.crypto.getRandomValues(bytes);
+      return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    }
+    return `tok_${Math.random().toString(36).slice(2, 12)}${Math.random().toString(36).slice(2, 12)}`;
   }
 }

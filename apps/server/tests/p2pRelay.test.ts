@@ -11,6 +11,7 @@ import {
 import {
   MqttPacketStreamParser,
   encodeMqttConnectPacket,
+  encodeMqttPingreqPacket,
   encodeMqttPubackPacket,
   encodeMqttPublishPacket,
   encodeMqttSubscribePacket,
@@ -282,5 +283,70 @@ describe('Serverless P2pRoomHost realtime multiplayer roundtrip', () => {
     host.dispose();
     expect(guestInbox.some((m) => m.event === 'room:closed')).toBe(true);
     vi.useRealTimers();
+  });
+
+  it('guards MqttPacketStreamParser against oversized buffers and hardens P2pRoomHost against forcedDice/flooding', () => {
+    // 1. MqttPacketStreamParser safely resets on oversized chunks (> 256KB) and recovers cleanly
+    const parser = new MqttPacketStreamParser();
+    const oversizedChunk = new Uint8Array(300 * 1024);
+    expect(parser.push(oversizedChunk)).toEqual([]);
+
+    const malformedVarInt = new Uint8Array([0x30, 0x80, 0x80, 0x80, 0x80, 0x01]);
+    expect(parser.push(malformedVarInt)).toEqual([]);
+
+    const validPing = encodeMqttPingreqPacket();
+    const recovered = parser.push(validPing);
+    expect(recovered).toHaveLength(1);
+    expect(recovered[0].type).toBe(12);
+
+    // 2. P2pRoomHost with allowDebugDice=false, maxSpectators=1, and peer rate limiting
+    const errors: Array<{ target?: string; code?: string; message?: string }> = [];
+    const host = new P2pRoomHost({
+      roomCode: 'SAFE',
+      hostPeerId: 'peer_host',
+      hostCreate: {
+        playerName: 'Host',
+        pawn: 'kucing',
+        color: 'pink',
+      },
+      allowDebugDice: false,
+      maxSpectators: 1,
+      emit: (event, payload, targetId) => {
+        if (event === 'error') {
+          const p = payload as { code?: string; message?: string };
+          errors.push({ target: targetId, code: p.code, message: p.message });
+        }
+      },
+    });
+    expect(host.allowDebugDice).toBe(false);
+    expect(host.hostReconnectToken.length).toBeGreaterThanOrEqual(16);
+
+    // Spectator cap = 1
+    host.handlePeerMessage('spec_1', 'rpc:join', {
+      roomCode: 'SAFE',
+      playerName: 'SpecSatu',
+      pawn: 'kodok',
+      color: 'mint',
+      asSpectator: true,
+    });
+    expect(host.getRoomState().spectatorCount).toBe(1);
+
+    host.handlePeerMessage('spec_2', 'rpc:join', {
+      roomCode: 'SAFE',
+      playerName: 'SpecDua',
+      pawn: 'bebek',
+      color: 'kuning',
+      asSpectator: true,
+    });
+    expect(host.getRoomState().spectatorCount).toBe(1);
+    expect(errors.some((e) => e.target === 'spec_2' && e.code === 'ACTION_FAILED')).toBe(true);
+
+    // Peer rate limit blocks rapid message floods
+    errors.length = 0;
+    for (let i = 0; i < 22; i++) {
+      host.handlePeerMessage('flood_peer', 'rpc:sync_request', {});
+    }
+    expect(errors.some((e) => e.target === 'flood_peer' && e.code === 'RATE_LIMIT')).toBe(true);
+    host.dispose();
   });
 });

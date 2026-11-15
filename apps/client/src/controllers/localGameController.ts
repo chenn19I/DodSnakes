@@ -262,7 +262,7 @@ export class LocalGameController implements GameSessionController {
       if (this.pendingLocalParticipants.length === 0) {
         // Pure bot turn
         const owner = this.state.players.find((p) => p.id === ch.ownerPlayerId)!;
-        const ownerSub = ch.submissions[owner.id];
+        const ownerSub = this.state.activeChallenge?.submissions[owner.id];
         this.callbacks.onChallengeStamp(
           Boolean(ownerSub?.claimedSuccess),
           `${owner.name} memainkan ${ARCHETYPE_REGISTRY[ch.archetype].displayName}`,
@@ -332,6 +332,7 @@ export class LocalGameController implements GameSessionController {
 
   public submitChallenge(submission: ChallengeSubmission): void {
     if (this.state.phase !== 'CHALLENGE' || !this.state.activeChallenge) return;
+    if (this.state.activeChallenge.submissions[submission.playerId]) return;
     if (this.challengeTimerId !== null) {
       clearTimeout(this.challengeTimerId);
       this.challengeTimerId = null;
