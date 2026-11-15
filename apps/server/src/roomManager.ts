@@ -14,6 +14,8 @@ import {
   hashSeed,
   nextTurn,
   recordChallengeSubmission,
+  redactChallengeForClient,
+  redactGameStateForClient,
   resolveTile,
   rollDice,
   selectDuelOpponent,
@@ -291,10 +293,12 @@ export class RoomManager {
         this.socketToRoom.set(socketId, { roomCode: code, playerId: existing.id });
         this.broadcastRoomState(room);
         if (room.state) {
-          this.hooks.emitToSocket(socketId, 'game:snapshot', { state: room.state });
+          this.hooks.emitToSocket(socketId, 'game:snapshot', {
+            state: redactGameStateForClient(room.state),
+          });
           if (room.state.activeChallenge) {
             this.hooks.emitToSocket(socketId, 'challenge:begin', {
-              challenge: room.state.activeChallenge,
+              challenge: redactChallengeForClient(room.state.activeChallenge),
             });
           }
         }
@@ -320,7 +324,9 @@ export class RoomManager {
       this.socketToRoom.set(socketId, { roomCode: code, playerId: null });
       this.broadcastRoomState(room);
       if (room.state) {
-        this.hooks.emitToSocket(socketId, 'game:snapshot', { state: room.state });
+        this.hooks.emitToSocket(socketId, 'game:snapshot', {
+          state: redactGameStateForClient(room.state),
+        });
       }
       return { roomCode: code, playerId: null, asSpectator: true };
     }
@@ -499,8 +505,9 @@ export class RoomManager {
     room.state = started.state;
 
     this.broadcastRoomState(room);
-    this.hooks.emitToRoom(room.code, 'game:snapshot', { state: room.state });
-    this.hooks.emitToRoom(room.code, 'game:started', { state: room.state });
+    const clientState = redactGameStateForClient(room.state);
+    this.hooks.emitToRoom(room.code, 'game:snapshot', { state: clientState });
+    this.hooks.emitToRoom(room.code, 'game:started', { state: clientState });
     this.emitGameEvents(room, started.events);
     this.scheduleTurnActions(room);
   }
@@ -521,12 +528,13 @@ export class RoomManager {
 
   private emitGameEvents(room: RoomInstance, events: GameEvent[]): void {
     if (!room.state || events.length === 0) return;
+    const clientState = redactGameStateForClient(room.state);
     this.hooks.emitToRoom(room.code, 'game:events', {
       stateVersion: room.state.stateVersion,
       turnNumber: room.state.turnNumber,
       events,
-      activeChallenge: room.state.activeChallenge,
-      state: room.state,
+      activeChallenge: clientState.activeChallenge,
+      state: clientState,
     });
   }
 
@@ -679,7 +687,9 @@ export class RoomManager {
 
     if (room.state.phase === 'CHALLENGE' && room.state.activeChallenge) {
       const challenge = room.state.activeChallenge;
-      this.hooks.emitToRoom(room.code, 'challenge:begin', { challenge });
+      this.hooks.emitToRoom(room.code, 'challenge:begin', {
+        challenge: redactChallengeForClient(challenge),
+      });
       this.scheduleChallengeResolution(room, challenge);
     } else if (room.state.phase === 'TURN_END' || room.state.phase === 'EXTRA_ROLL') {
       const nxt = nextTurn(room.state, Date.now() + this.turnTimeoutMs);
@@ -704,7 +714,9 @@ export class RoomManager {
         }
         room.state = selectDuelOpponent(room.state, challenge.ownerPlayerId, undefined, Date.now());
         const picked = room.state.activeChallenge!;
-        this.hooks.emitToRoom(room.code, 'challenge:begin', { challenge: picked });
+        this.hooks.emitToRoom(room.code, 'challenge:begin', {
+          challenge: redactChallengeForClient(picked),
+        });
         this.scheduleChallengeResolution(room, picked);
       }, pickDelayMs);
       return;
@@ -751,7 +763,9 @@ export class RoomManager {
 
     room.state = selectDuelOpponent(room.state, player.id, opponentId, Date.now());
     const updated = room.state.activeChallenge!;
-    this.hooks.emitToRoom(room.code, 'challenge:begin', { challenge: updated });
+    this.hooks.emitToRoom(room.code, 'challenge:begin', {
+      challenge: redactChallengeForClient(updated),
+    });
     this.scheduleChallengeResolution(room, updated);
   }
 
@@ -890,7 +904,9 @@ export class RoomManager {
           sp.isBot = true;
           sp.botDifficulty = 'pintar';
         }
-        this.hooks.emitToRoom(room.code, 'game:snapshot', { state: room.state });
+        this.hooks.emitToRoom(room.code, 'game:snapshot', {
+          state: redactGameStateForClient(room.state),
+        });
       }
       this.broadcastRoomState(room);
       // If all humans gone, clean up room
@@ -923,6 +939,8 @@ export class RoomManager {
     if (!link) return;
     const room = this.rooms.get(link.roomCode);
     if (!room || !room.inGame || !room.state) return;
-    this.hooks.emitToSocket(socketId, 'game:sync', { state: room.state });
+    this.hooks.emitToSocket(socketId, 'game:sync', {
+      state: redactGameStateForClient(room.state),
+    });
   }
 }
