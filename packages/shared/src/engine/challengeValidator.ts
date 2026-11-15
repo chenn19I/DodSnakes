@@ -14,7 +14,27 @@ export function validateChallengeSubmission(
   if (!spec) {
     return { success: false, score: 0, reason: `Unknown archetype: ${challenge.archetype}` };
   }
-  return spec.validate(challenge.params, submission, challenge.seed);
+  const log = submission?.inputLog;
+  if (
+    !log ||
+    !Number.isFinite(log.startedAt) ||
+    !Number.isFinite(log.completedAt) ||
+    log.completedAt < log.startedAt ||
+    log.completedAt - log.startedAt > Math.max(30_000, (challenge.durationMs || 15_000) + 15_000)
+  ) {
+    return { success: false, score: 0, reason: 'Durasi tantangan tidak valid' };
+  }
+  if (log.reactionMs !== undefined && !Number.isFinite(log.reactionMs)) {
+    return { success: false, score: 0, reason: 'Waktu reaksi tidak valid' };
+  }
+  const outcome = spec.validate(challenge.params, submission, challenge.seed);
+  const safeScore = Number.isFinite(outcome.score)
+    ? Math.max(0, Math.min(1500, Math.round(outcome.score)))
+    : 0;
+  return {
+    ...outcome,
+    score: safeScore,
+  };
 }
 
 export function buildChallengeRuntimeParams(

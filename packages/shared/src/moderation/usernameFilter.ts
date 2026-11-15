@@ -312,16 +312,59 @@ function collapseToTwo(input: string): string {
   return input.replace(/(.)\1{2,}/g, '$1$1');
 }
 
+const HOMOGLYPH_MAP: Record<string, string> = {
+  // Cyrillic lookalikes
+  '\u0430': 'a',
+  '\u0432': 'b',
+  '\u0441': 'c',
+  '\u0435': 'e',
+  '\u0454': 'e',
+  '\u04bb': 'h',
+  '\u043d': 'h',
+  '\u0456': 'i',
+  '\u0457': 'i',
+  '\u0458': 'j',
+  '\u043a': 'k',
+  '\u043c': 'm',
+  '\u043e': 'o',
+  '\u0440': 'p',
+  '\u0455': 's',
+  '\u0442': 't',
+  '\u0443': 'y',
+  '\u0445': 'x',
+  // Greek lookalikes
+  '\u03b1': 'a',
+  '\u03b2': 'b',
+  '\u03b5': 'e',
+  '\u03b7': 'n',
+  '\u03b9': 'i',
+  '\u03ba': 'k',
+  '\u03bd': 'v',
+  '\u03bf': 'o',
+  '\u03c1': 'p',
+  '\u03c4': 't',
+  '\u03c5': 'u',
+  '\u03c7': 'x',
+};
+
 function normalizeBase(raw: string): string {
-  return raw
+  const decomposed = raw
     .normalize('NFKD')
     .replace(/\p{M}/gu, '')
     .toLowerCase();
+  let mapped = '';
+  for (const ch of decomposed) {
+    mapped += HOMOGLYPH_MAP[ch] ?? ch;
+  }
+  return mapped;
 }
 
 export function sanitizeUsernameRaw(raw: string): string {
   return raw
-    .replace(/[\u200B-\u200D\uFEFF\u00AD\u0000-\u001F\u007F]/g, '')
+    .replace(
+      /[\u200B-\u200F\u2028-\u202E\u2060-\u2069\uFEFF\u00AD\u0000-\u001F\u007F-\u009F]/g,
+      '',
+    )
     .replace(/\s+/g, ' ')
     .trim();
 }

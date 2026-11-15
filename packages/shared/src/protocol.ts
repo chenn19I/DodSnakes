@@ -41,12 +41,12 @@ export const RoomCreateSchema = z.object({
 });
 
 export const RoomJoinSchema = z.object({
-  roomCode: z.string().trim().toUpperCase().length(4),
+  roomCode: z.string().trim().toUpperCase().length(4).regex(/^[A-Z0-9]+$/),
   playerName: SafePlayerNameSchema,
   pawn: PawnIdSchema,
   color: PlayerColorIdSchema,
   accessory: AccessoryIdSchema.optional(),
-  reconnectToken: z.string().optional(),
+  reconnectToken: z.string().max(128).optional(),
   asSpectator: z.boolean().optional(),
 });
 
@@ -66,7 +66,7 @@ export const RoomAddBotSchema = z.object({
 });
 
 export const RoomRemoveBotSchema = z.object({
-  botId: z.string().min(1),
+  botId: z.string().min(1).max(64),
 });
 
 export const RoomSettingsSchema = z.object({
@@ -81,31 +81,49 @@ export const TurnSelectDiceSchema = z.object({
   choiceIndex: z.union([z.literal(0), z.literal(1)]),
 });
 
+const FORBIDDEN_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+const SafeChallengeExtraValueSchema = z.union([
+  z.number().finite().min(-1_000_000).max(1_000_000),
+  z.string().max(64),
+  z.boolean(),
+]);
+
+const SafeChallengeExtraSchema = z
+  .record(z.string().min(1).max(32), SafeChallengeExtraValueSchema)
+  .refine(
+    (obj) => {
+      const ownKeys = Object.getOwnPropertyNames(obj);
+      return ownKeys.length <= 12 && ownKeys.every((k) => !FORBIDDEN_OBJECT_KEYS.has(k));
+    },
+    { message: 'Extra challenge log contains invalid or excessive keys' },
+  );
+
 export const ChallengeInputLogSchema = z.object({
-  startedAt: z.number(),
-  completedAt: z.number(),
-  reactionMs: z.number().optional(),
-  tapTimestamps: z.array(z.number()).max(120).optional(),
+  startedAt: z.number().finite().min(0).max(86_400_000),
+  completedAt: z.number().finite().min(0).max(86_400_000),
+  reactionMs: z.number().finite().min(-5000).max(60_000).optional(),
+  tapTimestamps: z.array(z.number().finite().min(0).max(60_000)).max(120).optional(),
   answerIndex: z.number().int().min(0).max(10).optional(),
   answerText: z.string().max(40).optional(),
-  sequenceIndices: z.array(z.number().int().min(0).max(10)).max(12).optional(),
-  pathAccuracy: z.number().min(0).max(1).optional(),
+  sequenceIndices: z.array(z.number().int().min(0).max(10)).max(24).optional(),
+  pathAccuracy: z.number().finite().min(0).max(1).optional(),
   hitsTaken: z.number().int().min(0).max(50).optional(),
-  needlePos: z.number().min(0).max(1).optional(),
-  duelOpponentId: z.string().optional(),
+  needlePos: z.number().finite().min(0).max(1).optional(),
+  duelOpponentId: z.string().max(64).optional(),
   bossStagesPassed: z.number().int().min(0).max(3).optional(),
-  extra: z.record(z.unknown()).optional(),
+  extra: SafeChallengeExtraSchema.optional(),
 });
 
 export const ChallengeSubmitSchema = z.object({
   tileId: z.number().int().min(1).max(100),
   claimedSuccess: z.boolean(),
-  score: z.number().min(0).max(5000),
+  score: z.number().finite().min(0).max(5000),
   inputLog: ChallengeInputLogSchema,
 });
 
 export const ChallengeChooseOpponentSchema = z.object({
-  opponentId: z.string().min(1),
+  opponentId: z.string().min(1).max(64),
 });
 
 export const ItemUseSchema = z.object({

@@ -175,10 +175,10 @@ export const ARCHETYPE_REGISTRY: Record<ChallengeArchetype, ArchetypeSpec> = {
       const needlePos = sub.inputLog.needlePos ?? -1;
       const center = Number(params.zoneCenter ?? 0.5);
       const width = Number(params.zoneWidth ?? 0.25);
-      if (reactionMs < MIN_REACTION_MS) {
+      if (!Number.isFinite(reactionMs) || reactionMs < MIN_REACTION_MS) {
         return { success: false, score: 0, reason: 'Terlalu cepat (<120ms)' };
       }
-      if (needlePos < 0 || needlePos > 1) {
+      if (!Number.isFinite(needlePos) || needlePos < 0 || needlePos > 1) {
         return { success: false, score: 0, reason: 'Posisi jarum tidak valid' };
       }
       const dist = Math.abs(needlePos - center);
@@ -900,19 +900,32 @@ export const ARCHETYPE_REGISTRY: Record<ChallengeArchetype, ArchetypeSpec> = {
     validate: (params, sub) => {
       const targetPops = Number(params.targetPops ?? 5);
       const maxBombHits = Number(params.maxBombHits ?? 1);
+      const bubbles = Array.isArray(params.bubbles) ? params.bubbles : [];
+      const maxGoodCount =
+        bubbles.length > 0
+          ? bubbles.filter((b) => (b as { kind?: string })?.kind === 'good').length
+          : 12;
       const extra = sub.inputLog.extra ?? {};
-      const goodPopped = typeof extra.goodPopped === 'number' ? extra.goodPopped : 0;
+      const rawGoodPopped = typeof extra.goodPopped === 'number' ? extra.goodPopped : 0;
       const hitsTaken = sub.inputLog.hitsTaken ?? 0;
       const taps = sub.inputLog.tapTimestamps ?? [];
-      if (taps.length > 45) {
+      if (
+        taps.length > 45 ||
+        !Number.isFinite(rawGoodPopped) ||
+        rawGoodPopped < 0 ||
+        rawGoodPopped > maxGoodCount ||
+        !Number.isFinite(hitsTaken) ||
+        hitsTaken < 0
+      ) {
         return { success: false, score: 0, reason: 'Klik tidak wajar terdeteksi' };
       }
+      const goodPopped = Math.floor(rawGoodPopped);
       const elapsed = sub.inputLog.completedAt - sub.inputLog.startedAt;
       if (elapsed < 300) {
         return { success: false, score: 0, reason: 'Durasi terlalu singkat' };
       }
-      const validTaps = taps.filter((t, i) => i === 0 || t - taps[i - 1] >= 40).length;
-      if (validTaps < Math.min(goodPopped, targetPops)) {
+      const validTaps = taps.filter((t, i) => Number.isFinite(t) && t >= 0 && (i === 0 || t - taps[i - 1] >= 40)).length;
+      if (validTaps < goodPopped) {
         return { success: false, score: 0, reason: 'Jejak ketukan gelembung tidak valid' };
       }
       const ok = goodPopped >= targetPops && hitsTaken <= maxBombHits;
@@ -1173,13 +1186,22 @@ export const ARCHETYPE_REGISTRY: Record<ChallengeArchetype, ArchetypeSpec> = {
       const hitsTaken = sub.inputLog.hitsTaken ?? 0;
       const taps = sub.inputLog.tapTimestamps ?? [];
       const elapsed = sub.inputLog.completedAt - sub.inputLog.startedAt;
-      if (elapsed < 1200 || taps.length < 2 || taps.length > 90) {
+      if (
+        elapsed < 1200 ||
+        taps.length < 2 ||
+        taps.length > 90 ||
+        !Number.isFinite(balanceRatio) ||
+        balanceRatio < 0 ||
+        balanceRatio > 1 ||
+        !Number.isFinite(hitsTaken) ||
+        hitsTaken < 0
+      ) {
         return { success: false, score: 0, reason: 'Kontrol keseimbangan tidak valid' };
       }
       const ok = balanceRatio >= targetRatio && hitsTaken <= maxDrops;
       return {
         success: ok,
-        score: Math.round(Math.max(0, balanceRatio) * 100),
+        score: Math.round(Math.max(0, Math.min(1, balanceRatio)) * 100),
         reason: `Seimbang ${Math.round(balanceRatio * 100)}% (target ${Math.round(targetRatio * 100)}%)`,
       };
     },
@@ -1220,16 +1242,33 @@ export const ARCHETYPE_REGISTRY: Record<ChallengeArchetype, ArchetypeSpec> = {
     },
     validate: (params, sub) => {
       const pairCount = Number(params.pairCount ?? 3);
+      const cards = Array.isArray(params.cards) ? (params.cards as string[]) : [];
       const matched = Number(sub.inputLog.extra?.pairsMatched ?? 0);
       const elapsed = sub.inputLog.completedAt - sub.inputLog.startedAt;
-      if (elapsed < 600) {
+      if (
+        !Number.isFinite(matched) ||
+        matched < 0 ||
+        matched > pairCount ||
+        elapsed < Math.max(600, pairCount * 220)
+      ) {
         return { success: false, score: 0, reason: 'Kartu terlalu cepat diselesaikan' };
       }
-      const ok = matched >= pairCount && sub.claimedSuccess;
+      if (Array.isArray(sub.inputLog.sequenceIndices)) {
+        const seq = sub.inputLog.sequenceIndices;
+        if (
+          seq.length < Math.min(12, Math.floor(matched) * 2) ||
+          (cards.length > 0 &&
+            seq.some((idx) => typeof idx !== 'number' || !Number.isInteger(idx) || idx < 0 || idx >= cards.length))
+        ) {
+          return { success: false, score: 0, reason: 'Jejak buka kartu tidak valid' };
+        }
+      }
+      const safeMatched = Math.min(pairCount, Math.floor(matched));
+      const ok = safeMatched >= pairCount && sub.claimedSuccess;
       return {
         success: ok,
-        score: Math.round((Math.min(matched, pairCount) / pairCount) * 100),
-        reason: `Cocok ${matched}/${pairCount} pasang`,
+        score: Math.round((safeMatched / pairCount) * 100),
+        reason: `Cocok ${safeMatched}/${pairCount} pasang`,
       };
     },
     simulateBot: (params, botDiff, rng) => {

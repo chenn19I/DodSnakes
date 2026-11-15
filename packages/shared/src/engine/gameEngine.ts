@@ -876,6 +876,9 @@ export function recordChallengeSubmission(
   if (!allowed) {
     throw new Error(`Player ${submission.playerId} is not a participant in this challenge`);
   }
+  if (ch.submissions[submission.playerId]) {
+    throw new Error(`Player ${submission.playerId} has already submitted to this challenge`);
+  }
   ch.submissions[submission.playerId] = submission;
   state.stateVersion += 1;
   return state;

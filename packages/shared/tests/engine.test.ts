@@ -4,6 +4,7 @@ import {
   ARCHETYPE_REGISTRY,
   BOARD_LAYOUT,
   BOARD_SPECIAL_TILES,
+  ChallengeInputLogSchema,
   PAWN_META,
   PLAYABLE_TILE_ARCHETYPES,
   QUIZ_BANK,
@@ -27,13 +28,14 @@ import {
   recordChallengeSubmission,
   resolveTile,
   rollDice,
+  sanitizeUsernameOrFallback,
+  sanitizeUsernameRaw,
   selectDuelOpponent,
   simulateBotChallengeSubmission,
   startGame,
   validateBoardLayout,
   validateChallengeSubmission,
   validateUsername,
-  sanitizeUsernameOrFallback,
   type GameEvent,
   type GameState,
   type Tile,
@@ -1393,5 +1395,112 @@ describe('Challenge validation & Replay determinism', () => {
     kokoSantai.players[0].position = 98;
     // Die 1 leaps 2 steps (98 -> 100 exact!), whereas die 3 bounces (98 -> 100 -> 99)
     expect(chooseBotGoldenDiceIndex(kokoSantai, kokoSantai.players[0], [1, 3])).toBe(0);
+  });
+
+  it('hardens ChallengeInputLogSchema, anti-cheat validators, duplicate submissions, and homoglyph/RTL usernames', () => {
+    // 1. ChallengeInputLogSchema blocks non-finite numbers, prototype keys, and nested/excessive extra fields
+    expect(
+      ChallengeInputLogSchema.safeParse({
+        startedAt: 0,
+        completedAt: Number.POSITIVE_INFINITY,
+      }).success,
+    ).toBe(false);
+
+    const protoPayload = JSON.parse(
+      '{"startedAt":0,"completedAt":1000,"extra":{"__proto__":{"polluted":1},"pairsMatched":3}}',
+    );
+    expect(ChallengeInputLogSchema.safeParse(protoPayload).success).toBe(false);
+
+    expect(
+      ChallengeInputLogSchema.safeParse({
+        startedAt: 0,
+        completedAt: 1000,
+        extra: { nested: { bad: true } },
+      }).success,
+    ).toBe(false);
+
+    // 2. Anti-cheat blocks forged balanceRatio > 1, forged bubble_pop goodPopped > validTaps, and forged pair_flip flips
+    const rng = new SeededRng(2026);
+    const balParams = ARCHETYPE_REGISTRY.balance_bar.buildParams(rng, 2, 20);
+    expect(
+      ARCHETYPE_REGISTRY.balance_bar.validate(
+        balParams,
+        {
+          playerId: 'p1',
+          claimedSuccess: true,
+          score: 9999,
+          inputLog: {
+            startedAt: 0,
+            completedAt: 5000,
+            tapTimestamps: [300, 900, 1500],
+            hitsTaken: 0,
+            extra: { balanceRatio: 99 },
+          },
+        },
+        1,
+      ).success,
+    ).toBe(false);
+
+    const bpopParams = ARCHETYPE_REGISTRY.bubble_pop.buildParams(rng, 2, 21);
+    expect(
+      ARCHETYPE_REGISTRY.bubble_pop.validate(
+        bpopParams,
+        {
+          playerId: 'p1',
+          claimedSuccess: true,
+          score: 9999,
+          inputLog: {
+            startedAt: 0,
+            completedAt: 3000,
+            tapTimestamps: [300, 600],
+            hitsTaken: 0,
+            extra: { goodPopped: 6 },
+          },
+        },
+        1,
+      ).success,
+    ).toBe(false);
+
+    const pairParams = ARCHETYPE_REGISTRY.pair_flip.buildParams(rng, 2, 22);
+    expect(
+      ARCHETYPE_REGISTRY.pair_flip.validate(
+        pairParams,
+        {
+          playerId: 'p1',
+          claimedSuccess: true,
+          score: 100,
+          inputLog: {
+            startedAt: 0,
+            completedAt: 2500,
+            sequenceIndices: [0, 1],
+            extra: { pairsMatched: Number(pairParams.pairCount) },
+          },
+        },
+        1,
+      ).success,
+    ).toBe(false);
+
+    // 3. Duplicate submission for the same player in an active challenge is rejected
+    let s = startGame(
+      createInitialGameState({
+        matchSeed: 7070,
+        board: BOARD_LAYOUT,
+        players: makeTestPlayers(2),
+      }),
+    ).state;
+    s = rollDice(s, 'p1', 2).state;
+    s = resolveTile(s, TILES, 1000).state;
+    if (s.activeChallenge?.awaitingDuelPick) {
+      s = selectDuelOpponent(s, 'p1', 'p2', 1100);
+    }
+    const winSub = makeWinningSubmission(s, 'p1');
+    const afterFirst = recordChallengeSubmission(s, winSub);
+    expect(() => recordChallengeSubmission(afterFirst, winSub)).toThrow(/already submitted/);
+
+    // 4. Homoglyph (Cyrillic/Greek) profanity bypasses and RTL overrides are blocked/stripped
+    expect(validateUsername('\u0430njing').ok).toBe(false); // Cyrillic 'а'
+    expect(validateUsername('k\u043Ent\u043El').ok).toBe(false); // Cyrillic 'о'
+    expect(validateUsername('b\u03BFk\u03B5p').ok).toBe(false); // Greek 'ο' and 'ε'
+    expect(sanitizeUsernameRaw('\u202ECha\u2066nn\u2069')).toBe('Chann');
   });
 });
