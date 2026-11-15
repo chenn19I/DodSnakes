@@ -520,8 +520,31 @@ export function formatEventFeedText(
     };
   }
 
-  if (ev.type === 'ChallengeResolved' && ev.serverSummaryText.includes('Kombo')) {
-    return { text: lang === 'en' ? localizeText(ev.serverSummaryText, lang) : ev.serverSummaryText };
+  if (ev.type === 'ChallengeResolved') {
+    const ownerName = nameOf(ev.ownerPlayerId);
+    const ownerOut = ev.outcomes.find((o) => o.playerId === ev.ownerPlayerId);
+    const archName = getArchetypeMeta(ev.archetype, lang).name;
+    const isWin = Boolean(ownerOut?.success);
+    if (isWin) {
+      const starsAwarded = ev.starsDelta[ev.ownerPlayerId] ?? 0;
+      const starTag = starsAwarded > 0 ? ` (+${starsAwarded}★)` : '';
+      const bonusTag = ev.bonusApplied
+        ? ` • ${lang === 'en' ? localizeText(ev.bonusApplied, lang) : ev.bonusApplied}`
+        : '';
+      const msg =
+        lang === 'en'
+          ? `✅ ${ownerName} succeeded at ${archName}!${starTag}${bonusTag}`
+          : `✅ ${ownerName} BERHASIL menyelesaikan tantangan ${archName}!${starTag}${bonusTag}`;
+      return { text: msg, toast: msg };
+    }
+    const penTag = ev.penaltyApplied
+      ? ` (${lang === 'en' ? localizeText(ev.penaltyApplied, lang) : ev.penaltyApplied})`
+      : '';
+    const msg =
+      lang === 'en'
+        ? `❌ ${ownerName} failed ${archName}!${penTag}`
+        : `❌ ${ownerName} GAGAL menyelesaikan tantangan ${archName}!${penTag}`;
+    return { text: msg, toast: msg };
   }
 
   if (ev.type === 'TurnSkipped') {
@@ -829,7 +852,7 @@ const ID_STRINGS: Record<UiKey, string> = {
   howtoTileTitle: '2. Kotak Tantangan & Kotak 100',
   howtoTileDesc: 'Hampir semua kotak menyimpan mini-game seru (< 15 detik). Untuk menang, mendarat pas di Kotak 100 dan taklukkan Bos Doodle!',
   howtoSnakeTitle: '3. Tangga, Ular & Kartu Kasihan',
-  howtoSnakeDesc: 'Di petak Tangga, pion naik otomatis setelah tantangan! Di petak Ular, MENANG tantangan atau punya Perisai = lolos; KALAH = meluncur turun! (Jika gagal 2x beruntun, penalti dilewati.)',
+  howtoSnakeDesc: 'Di petak Tangga, MENANG tantangan = pion NAIK ke puncak tangga! Di petak Ular, MENANG tantangan atau punya Perisai = lolos; KALAH = meluncur turun! (Jika gagal 2x beruntun, penalti dilewati.)',
   howtoShopTitle: '4. Kantin Bintang (Item Taktis)',
   howtoShopDesc: 'Kumpulkan Bintang dari mini-game lalu tukar 4 Bintang (3 Bintang khusus Roro Dino) untuk membeli Kotak Item sebelum melempar dadu!',
   howtoSpecialTitle: '5. Petak Spesial, Misi & Duel 1v1',
@@ -847,7 +870,7 @@ const ID_STRINGS: Record<UiKey, string> = {
   tileLabel: 'KOTAK',
   reward: 'Hadiah:',
   penalty: 'Penalti:',
-  ladderTileBanner: 'Petak Tangga ({from} → {to}): Setelah tantangan, pion otomatis NAIK!',
+  ladderTileBanner: 'Petak Tangga ({from} → {to}): Menang tantangan agar pion NAIK ke petak {to}!',
   snakeTileBanner: 'Petak Ular ({from} → {to}): Menang tantangan atau pakai Perisai agar TIDAK turun!',
   pickDuelRival: 'Pilih Lawan Duel!',
   duelVsTitle: 'DUEL!',
@@ -955,7 +978,7 @@ const EN_STRINGS: Record<UiKey, string> = {
   howtoTileTitle: '2. Challenge Tiles & Tile 100',
   howtoTileDesc: 'Almost every tile holds a snappy mini-game (< 15s). Land cleanly on Tile 100 and defeat Boss Doodle to win!',
   howtoSnakeTitle: '3. Ladders, Snakes & Mercy Rule',
-  howtoSnakeDesc: 'Ladder tiles automatically climb UP after the tile check! On Snake heads, WINNING the mini-game or holding a Shield keeps you safe; failing slides you down!',
+  howtoSnakeDesc: 'On Ladder tiles, WINNING the challenge climbs your pawn UP to the top! On Snake heads, WINNING the mini-game or holding a Shield keeps you safe; failing slides you down!',
   howtoShopTitle: '4. Star Canteen (Tactical Shop)',
   howtoShopDesc: 'Earn Stars from mini-games and spend 4 Stars (only 3 Stars for Roro the Dino) before rolling to grab a tactical item!',
   howtoSpecialTitle: '5. Special Tiles, Missions & 1v1 Duel',
@@ -973,7 +996,7 @@ const EN_STRINGS: Record<UiKey, string> = {
   tileLabel: 'TILE',
   reward: 'Reward:',
   penalty: 'Penalty:',
-  ladderTileBanner: 'Ladder Tile ({from} → {to}): After this challenge, your pawn climbs UP!',
+  ladderTileBanner: 'Ladder Tile ({from} → {to}): Win this challenge to climb UP to tile {to}!',
   snakeTileBanner: 'Snake Tile ({from} → {to}): Win this challenge or use a Shield to avoid sliding!',
   pickDuelRival: 'Pick Your Duel Rival!',
   duelVsTitle: 'DUEL!',
