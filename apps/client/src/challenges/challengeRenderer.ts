@@ -216,6 +216,7 @@ const renderShadowMatch: ChallengeRendererFn = (ctx) => {
           .map(
             (opt, idx) => `
           <button class="doodle-btn mg-opt-btn mg-shadow-opt" data-idx="${idx}">
+            <span class="mg-key-pill">${idx + 1}</span>
             ${renderDoodleSvg(opt.shape, false)}
             <small>${getLocalizedShadowLabel(opt.id ?? opt.shape, opt.label, lang)}</small>
           </button>`,
@@ -225,13 +226,14 @@ const renderShadowMatch: ChallengeRendererFn = (ctx) => {
     </div>
   `;
 
-  ctx.container.querySelectorAll<HTMLButtonElement>('.mg-opt-btn').forEach((btn) => {
+  const btns = Array.from(ctx.container.querySelectorAll<HTMLButtonElement>('.mg-opt-btn'));
+  btns.forEach((btn) => {
     btn.onclick = () => {
       if (done) return;
       done = true;
       ctx.sound.playUiClick();
       const idx = Number(btn.dataset.idx);
-      ctx.container.querySelectorAll<HTMLButtonElement>('.mg-opt-btn').forEach((b) => (b.disabled = true));
+      btns.forEach((b) => (b.disabled = true));
       ctx.onSubmit(
         makeInputSubmission(ctx.playerId, idx === correctIndex, idx === correctIndex ? 90 : 0, startedAt, {
           answerIndex: idx,
@@ -239,8 +241,10 @@ const renderShadowMatch: ChallengeRendererFn = (ctx) => {
       );
     };
   });
+  const unbindKeys = bindChoiceKeyShortcuts(btns, () => done);
   return () => {
     done = true;
+    unbindKeys();
   };
 };
 
@@ -291,6 +295,7 @@ const renderMemoryDoodle: ChallengeRendererFn = ({ challenge, playerId, containe
           .map(
             (item, idx) => `
           <button class="doodle-btn mg-mem-btn" data-idx="${idx}" disabled>
+            <span class="mg-key-pill">${idx + 1}</span>
             ${renderDoodleSvg(item.id, false)}
             <span>${getLocalizedMemoryLabel(item.id, item.label, language)}</span>
           </button>`,
@@ -351,8 +356,11 @@ const renderMemoryDoodle: ChallengeRendererFn = ({ challenge, playerId, containe
     };
   });
 
+  const unbindKeys = bindChoiceKeyShortcuts(btns, () => !canClick || cancelled);
+
   return () => {
     cancelled = true;
+    unbindKeys();
     timers.forEach(clearTimeout);
   };
 };
@@ -849,8 +857,17 @@ const renderLuckyWheel: ChallengeRendererFn = ({ challenge, playerId, container,
     );
   };
 
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (!spun && !e.repeat && (e.code === 'Space' || e.key === 'Enter')) {
+      e.preventDefault();
+      btn.click();
+    }
+  };
+  window.addEventListener('keydown', onKeyDown);
+
   return () => {
     spun = true;
+    window.removeEventListener('keydown', onKeyDown);
     tickTimers.forEach((id) => clearTimeout(id));
   };
 };
@@ -897,8 +914,17 @@ const renderQuickDuel: ChallengeRendererFn = ({ challenge, playerId, container, 
     onSubmit(makeInputSubmission(playerId, true, Math.max(10, 1500 - reactionMs), startedAt, { reactionMs }));
   };
 
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (!done && !e.repeat && (e.code === 'Space' || e.key === 'Enter')) {
+      e.preventDefault();
+      btn.click();
+    }
+  };
+  window.addEventListener('keydown', onKeyDown);
+
   return () => {
     done = true;
+    window.removeEventListener('keydown', onKeyDown);
     clearTimeout(timer);
   };
 };
@@ -958,8 +984,17 @@ const renderGiftTrap: ChallengeRendererFn = ({ challenge, playerId, container, l
   card.onclick = reveal;
   const autoRevealTimer = window.setTimeout(reveal, 1300);
 
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (!done && !e.repeat && (e.code === 'Space' || e.key === 'Enter')) {
+      e.preventDefault();
+      btn.click();
+    }
+  };
+  window.addEventListener('keydown', onKeyDown);
+
   return () => {
     done = true;
+    window.removeEventListener('keydown', onKeyDown);
     clearTimeout(autoRevealTimer);
     clearTimeout(finishTimer);
   };
@@ -1004,7 +1039,7 @@ const renderBossDoodle: ChallengeRendererFn = ({ challenge, playerId, container,
           <div class="mg-sub">${language === 'en' ? 'Stage 1/3: Crack the Boss Shield Math!' : 'Tahap 1/3: Hitung Cepat Pertahanan Bos!'}</div>
           <div class="mg-math-expr">${math.expression} = ?</div>
           <div class="mg-options-grid">
-            ${math.options.map((n, i) => `<button class="doodle-btn mg-opt-btn" data-idx="${i}">${n}</button>`).join('')}
+            ${math.options.map((n, i) => `<button class="doodle-btn mg-opt-btn" data-idx="${i}"><span class="mg-key-pill">${i + 1}</span> ${n}</button>`).join('')}
           </div>
         </div>
       `;
@@ -1081,6 +1116,14 @@ const renderBossDoodle: ChallengeRendererFn = ({ challenge, playerId, container,
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (done || e.repeat) return;
+    if (stage === 1) {
+      const idx = Number(e.key) - 1;
+      if (Number.isInteger(idx) && idx >= 0 && idx < math.options.length) {
+        e.preventDefault();
+        container.querySelector<HTMLButtonElement>(`.mg-opt-btn[data-idx="${idx}"]`)?.click();
+      }
+      return;
+    }
     if (e.code === 'Space' || e.key === 'Enter') {
       if (stage === 2) {
         e.preventDefault();
@@ -1568,8 +1611,11 @@ const renderPairFlip: ChallengeRendererFn = ({
     };
   });
 
+  const unbindKeys = bindChoiceKeyShortcuts(buttons, () => done || lockBoard);
+
   return () => {
     done = true;
+    unbindKeys();
     if (resetTimer !== null) clearTimeout(resetTimer);
   };
 };
@@ -1633,8 +1679,11 @@ const renderNumberOrder: ChallengeRendererFn = ({
     };
   });
 
+  const unbindKeys = bindChoiceKeyShortcuts(btns, () => submitted);
+
   return () => {
     submitted = true;
+    unbindKeys();
   };
 };
 
