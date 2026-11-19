@@ -1,8 +1,8 @@
-# DodSnake
+# DodSnakes
 
 > **Disclaimer:** This project is not audited, endorsed or operated by Zama. Use at your own risk.
 
-**DodSnake** is a semi-doodle 3D multiplayer tabletop Snakes & Ladders board game set on a sketchbook wooden desk, powered by a **Confidential Onchain Arena** built with Fully Homomorphic Encryption (**FHEVM**) and **ERC-7984** confidential tokens on Ethereum Sepolia.
+**DodSnakes** is a semi-doodle 3D multiplayer tabletop Snakes & Ladders board game set on a sketchbook wooden desk, powered by a **Confidential Onchain Arena** built with Fully Homomorphic Encryption (**FHEVM**) and **ERC-7984** confidential tokens on Ethereum Sepolia.
 
 Players roll verifiable onchain FHE dice, hide secret board traps, cast encrypted rival curses, discover zero-ACL Golden Warp shortcuts, protect themselves with hidden Anti-Snake Shields, compete in blind encrypted 1v1 Rock-Paper-Scissors duels, verify secret match objectives, and wager encrypted `ERC-7984` pots (`cDOD` or Sepolia `cUSDT`) alongside 3D character customization, 24 interactive mini-games across tiles `2-99`, Online Multiplayer, Local Hot-Seat Mode, and Smart Bots.
 
@@ -11,7 +11,7 @@ Players roll verifiable onchain FHE dice, hide secret board traps, cast encrypte
 ## Visual Game Showcase
 
 ### 3D Sketchbook Diorama & Main Menu
-![DodSnake 3D Main Menu and Diorama](docs/screenshots/01-main-menu-3d.png)
+![DodSnakes 3D Main Menu and Diorama](docs/screenshots/01-main-menu-3d.png)
 
 ### Confidential Onchain Arena — Lobby & Live Match Gameplay
 
@@ -27,7 +27,7 @@ Players roll verifiable onchain FHE dice, hide secret board traps, cast encrypte
 
 ## Why This Game Requires FHE (Impossible on a Public Chain)
 
-On a transparent EVM chain, `eth_getStorageAt` and mempool inspection break strategy before a turn resolves. `DodSnake` uses encrypted FHEVM types (`euint8`, `euint32`, `euint64`, `ebool`) and OpenZeppelin `ERC-7984` so competitive secrets remain ciphertext onchain while still enforcing deterministic game rules:
+On a transparent EVM chain, `eth_getStorageAt` and mempool inspection break strategy before a turn resolves. `DodSnakes` uses encrypted FHEVM types (`euint8`, `euint32`, `euint64`, `ebool`) and OpenZeppelin `ERC-7984` so competitive secrets remain ciphertext onchain while still enforcing deterministic game rules:
 
 | Confidential Mechanic | Onchain Ciphertext & Primitives | Who Can Read Plaintext? | Why Transparent Blockchains Break |
 | --- | --- | --- | --- |
@@ -69,7 +69,7 @@ flowchart TB
 ```mermaid
 sequenceDiagram
     actor Player
-    participant Client as "DodSnake Web Client"
+    participant Client as "DodSnakes Web Client"
     participant Arena as "DodSnakeArena.sol"
     participant KMS as "FHEVM KMS & Relayer"
     participant Scene as "Three.js 3D Engine"
@@ -197,7 +197,7 @@ npm run verify:sepolia --workspace=@doodle-dash/contracts
 [`vercel.json`](vercel.json) is configured to build `@doodle-dash/shared` + `@doodle-dash/client` with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless` headers required by the `@zama-fhe/sdk` Web Worker WASM runtime.
 
 ```bash
-npx vercel --prod --name dodsnake
+npx vercel --prod --name dodsnakes
 ```
 
 - **Instant FHE Preview**, **Confidential Sepolia FHEVM Mode** (MetaMask + KMS Relayer), **Local Hot-Seat**, and **Vs Smart Bots** all work purely client-side from static Vercel hosting.
@@ -228,9 +228,10 @@ Customize any buddy inside **Character & Gear Studio** using the draggable 3D tu
 
 ## Season 5 Hackathon Submission Checklist
 
-- **Naming Policy:** Named `DodSnake` (zero protocol brand name in project, npm workspace, UI headers, or contract names).
+- **Naming Policy:** Named `DodSnakes` (zero protocol brand name in project, npm workspace, UI headers, or custom contract names).
 - **Required Disclaimer:** Shown prominently in Splash, Main Menu, Confidential Arena footer, Privacy Matrix, Faucets Modal, and this `README.md`.
 - **Single-Submission & Email Check:** Ensure you submit once using the exact email address tied to your Relayer API key request.
+- **Deploy Contracts to Sepolia Before Final Submission:** Fund deployer `0xb2e53D52d38bc87Aaf7E3C81d121dfBD845E9B7D` with Sepolia ETH and run `npm run deploy:sepolia` so [`apps/client/src/web3/deployments.json`](apps/client/src/web3/deployments.json) records live Sepolia addresses (until then, Sepolia FHEVM mode also supports pasting deployed addresses directly in the UI).
 - **3-Minute Real-Person Video Pitch Outline (No AI Video/Voice):**
   1. `0:00–0:35` — Why public chains fail hidden-information tabletop games (`eth_getStorageAt` & mempool spying).
   2. `0:35–1:45` — Live demo on Sepolia: Mint `cDOD` faucet, EIP-712 balance decrypt, Secret Trap placement, Verifiable FHE Dice + 3D hop, Secret Brake, and Blind Duel.
