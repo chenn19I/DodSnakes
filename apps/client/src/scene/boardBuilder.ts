@@ -799,7 +799,7 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
     boss: DOODLE_PALETTE.orange,
     bounced: DOODLE_PALETTE.coral,
     special: DOODLE_PALETTE.purple,
-    trap: '#FF477E',
+    trap: '#FF2E63',
   };
   const previewKindColorsCb: Record<TilePreviewMarker['kind'], string> = {
     normal: '#E69F00',
@@ -818,7 +818,7 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
     const mat = new THREE.MeshBasicMaterial({
       color: DOODLE_PALETTE.yellow,
       transparent: true,
-      opacity: 0.72,
+      opacity: 0.86,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
