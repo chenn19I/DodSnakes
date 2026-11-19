@@ -70,6 +70,14 @@ export interface OnchainMatchSnapshot {
     stakeMicro?: bigint;
   };
   myPlantedTrapTiles: number[];
+  duel?: {
+    active: boolean;
+    challenger: Address;
+    opponent: Address;
+    challengerCommitted: boolean;
+    opponentCommitted: boolean;
+    pendingResultHandle: Hex;
+  };
 }
 
 const STORAGE_CUSTOM_ADDR_KEY = 'dodsnake_custom_contracts_v1';
@@ -513,7 +521,7 @@ export class FheArenaClient {
     const { sdk, publicClient, account, addrs } = this.requireSdk();
     const arenaAddr = addrs.arenaAddress as Address;
 
-    const [summary, playersAddrs] = await Promise.all([
+    const [summary, playersAddrs, duelState] = await Promise.all([
       publicClient.readContract({
         address: arenaAddr,
         abi: DOD_SNAKE_ARENA_ABI,
@@ -526,6 +534,12 @@ export class FheArenaClient {
         functionName: 'getMatchPlayers',
         args: [matchId],
       }) as Promise<readonly Address[]>,
+      publicClient.readContract({
+        address: arenaAddr,
+        abi: DOD_SNAKE_ARENA_ABI,
+        functionName: 'getBlindDuelState',
+        args: [matchId],
+      }) as Promise<readonly [boolean, Address, Address, boolean, boolean, Hex]>,
     ]);
 
     const players = await Promise.all(
@@ -626,7 +640,60 @@ export class FheArenaClient {
       players,
       mySecret,
       myPlantedTrapTiles,
+      duel: duelState[0]
+        ? {
+            active: Boolean(duelState[0]),
+            challenger: duelState[1],
+            opponent: duelState[2],
+            challengerCommitted: Boolean(duelState[3]),
+            opponentCommitted: Boolean(duelState[4]),
+            pendingResultHandle: duelState[5],
+          }
+        : undefined,
     };
+  }
+
+  public async readMatchLobbyInfo(matchId: bigint): Promise<{
+    stakeToken: Address;
+    boardSize: number;
+    maxPlayers: number;
+    playerCount: number;
+    status: number;
+  }> {
+    const { publicClient, addrs } = this.requireSdk();
+    const summary = (await publicClient.readContract({
+      address: addrs.arenaAddress as Address,
+      abi: DOD_SNAKE_ARENA_ABI,
+      functionName: 'getMatchSummary',
+      args: [matchId],
+    })) as readonly [Address, Address, number, number, number, number, number, number, number, Address, boolean, number];
+    return {
+      stakeToken: summary[1],
+      boardSize: Number(summary[2]),
+      maxPlayers: Number(summary[3]),
+      playerCount: Number(summary[4]),
+      status: Number(summary[7]),
+    };
+  }
+
+  public async startMatchEarly(matchId: bigint): Promise<Hex> {
+    const { publicClient, walletClient, account, addrs } = this.requireSdk();
+    const hash = await walletClient.writeContract({
+      account,
+      chain: walletClient.chain,
+      address: addrs.arenaAddress as Address,
+      abi: DOD_SNAKE_ARENA_ABI,
+      functionName: 'startMatch',
+      args: [matchId],
+    });
+    await publicClient.waitForTransactionReceipt({ hash });
+    this.pushLog({
+      kind: 'tx',
+      title: `Started Match #${matchId} Early`,
+      detail: 'Host activated lobby & spawned hidden Golden Warp shortcut.',
+      txHash: hash,
+    });
+    return hash;
   }
 
   public async plantSecretTrap(matchId: bigint, tileId: number, kind: number): Promise<Hex> {
@@ -718,7 +785,108 @@ export class FheArenaClient {
     return hash;
   }
 
-  public async rollVerifiableDice(
+  private extractRollEventFields(
+    logs: ReadonlyArray<{ data: Hex; topics: readonly Hex[] | [`0x${string}`, ...`0x${string}`[]] }>,
+    acc: {
+      fromPos: number;
+      landedPos: number;
+      finalPos: number;
+      trapTriggered: number;
+      shieldBlocked: boolean;
+      ladderTo: number;
+      snakeTo: number;
+    },
+  ): void {
+    for (const log of logs) {
+      if (log.topics.length === 0) continue;
+      try {
+        const decoded = decodeEventLog({
+          abi: DOD_SNAKE_ARENA_ABI,
+          data: log.data,
+          topics: log.topics as [`0x${string}`, ...`0x${string}`[]],
+        });
+        if (decoded.eventName === 'DiceMoved') {
+          const args = decoded.args as { fromPos?: number; toPos?: number };
+          acc.fromPos = Number(args.fromPos ?? acc.fromPos);
+          acc.landedPos = Number(args.toPos ?? acc.landedPos);
+          acc.finalPos = acc.landedPos;
+        } else if (decoded.eventName === 'TileResolved') {
+          const args = decoded.args as {
+            finalPos?: number;
+            trapKindTriggered?: number;
+            shieldBlockedSnake?: boolean;
+            ladderTo?: number;
+            snakeTo?: number;
+          };
+          acc.finalPos = Number(args.finalPos ?? acc.finalPos);
+          acc.trapTriggered = Number(args.trapKindTriggered ?? acc.trapTriggered);
+          acc.shieldBlocked = Boolean(args.shieldBlockedSnake ?? acc.shieldBlocked);
+          acc.ladderTo = Number(args.ladderTo ?? acc.ladderTo);
+          acc.snakeTo = Number(args.snakeTo ?? acc.snakeTo);
+        }
+      } catch {
+        // non-matching event
+      }
+    }
+  }
+
+  private async _finalizeTrapCheckFromPending(
+    matchId: bigint,
+    acc: {
+      fromPos: number;
+      landedPos: number;
+      finalPos: number;
+      trapTriggered: number;
+      shieldBlocked: boolean;
+      ladderTo: number;
+      snakeTo: number;
+    },
+    onStage?: (stage: 'requesting' | 'decrypting_dice' | 'verifying_dice' | 'decrypting_trap' | 'verifying_trap') => void,
+  ): Promise<Hex> {
+    const { sdk, publicClient, walletClient, account, addrs } = this.requireSdk();
+    const arenaAddr = addrs.arenaAddress as Address;
+    const pendingTrap = (await publicClient.readContract({
+      address: arenaAddr,
+      abi: DOD_SNAKE_ARENA_ABI,
+      functionName: 'getMatchPendingHandles',
+      args: [matchId],
+    })) as readonly [Hex, Hex, Hex, Hex, Hex, Address, number];
+    const trapHandle = pendingTrap[1];
+    const shieldHandle = pendingTrap[2];
+    if (acc.landedPos === 1 && Number(pendingTrap[6]) >= 2) {
+      acc.landedPos = Number(pendingTrap[6]);
+      acc.fromPos = acc.landedPos;
+      acc.finalPos = acc.landedPos;
+    }
+
+    onStage?.('decrypting_trap');
+    const trapDec = await sdk.decryption.decryptPublicValues([trapHandle, shieldHandle]);
+    acc.trapTriggered = Number(trapDec.clearValues[trapHandle] ?? 0);
+    const clearShield = Number(trapDec.clearValues[shieldHandle] ?? 0);
+    acc.shieldBlocked = clearShield === 1;
+
+    onStage?.('verifying_trap');
+    const latestTx = await walletClient.writeContract({
+      account,
+      chain: walletClient.chain,
+      address: arenaAddr,
+      abi: DOD_SNAKE_ARENA_ABI,
+      functionName: 'finalizeTileCheck',
+      args: [matchId, acc.trapTriggered, clearShield, trapDec.decryptionProof],
+    });
+    const trapReceipt = await publicClient.waitForTransactionReceipt({ hash: latestTx });
+    this.extractRollEventFields(trapReceipt.logs, acc);
+    this.pushLog({
+      kind: 'public_decrypt',
+      title: acc.trapTriggered > 0 ? `Trap Triggered (#${acc.trapTriggered})!` : 'Tile Safe (Trap Locations Secret)',
+      detail: acc.shieldBlocked ? 'Confidential Shield blocked Snake!' : 'FHE.checkSignatures verified.',
+      handle: trapHandle,
+      txHash: latestTx,
+    });
+    return latestTx;
+  }
+
+  private async _finalizeDiceFromPending(
     matchId: bigint,
     onStage?: (stage: 'requesting' | 'decrypting_dice' | 'verifying_dice' | 'decrypting_trap' | 'verifying_trap') => void,
   ): Promise<{
@@ -734,18 +902,6 @@ export class FheArenaClient {
   }> {
     const { sdk, publicClient, walletClient, account, addrs } = this.requireSdk();
     const arenaAddr = addrs.arenaAddress as Address;
-
-    onStage?.('requesting');
-    const reqHash = await walletClient.writeContract({
-      account,
-      chain: walletClient.chain,
-      address: arenaAddr,
-      abi: DOD_SNAKE_ARENA_ABI,
-      functionName: 'requestDiceRoll',
-      args: [matchId],
-    });
-    await publicClient.waitForTransactionReceipt({ hash: reqHash });
-
     const pending = (await publicClient.readContract({
       address: arenaAddr,
       abi: DOD_SNAKE_ARENA_ABI,
@@ -775,50 +931,18 @@ export class FheArenaClient {
     });
     const finReceipt = await publicClient.waitForTransactionReceipt({ hash: finHash });
 
-    let fromPos = 1;
-    let landedPos = 1;
-    let finalPos = 1;
-    let ladderTo = 0;
-    let snakeTo = 0;
-    let trapTriggered = 0;
-    let shieldBlocked = false;
-    let latestTx = finHash;
-
-    const parseRollLogs = (logs: typeof finReceipt.logs) => {
-      for (const log of logs) {
-        try {
-          const decoded = decodeEventLog({
-            abi: DOD_SNAKE_ARENA_ABI,
-            data: log.data,
-            topics: log.topics,
-          });
-          if (decoded.eventName === 'DiceMoved') {
-            const args = decoded.args as { fromPos?: number; toPos?: number };
-            fromPos = Number(args.fromPos ?? fromPos);
-            landedPos = Number(args.toPos ?? landedPos);
-            finalPos = landedPos;
-          } else if (decoded.eventName === 'TileResolved') {
-            const args = decoded.args as {
-              finalPos?: number;
-              trapKindTriggered?: number;
-              shieldBlockedSnake?: boolean;
-              ladderTo?: number;
-              snakeTo?: number;
-            };
-            finalPos = Number(args.finalPos ?? finalPos);
-            trapTriggered = Number(args.trapKindTriggered ?? trapTriggered);
-            shieldBlocked = Boolean(args.shieldBlockedSnake ?? shieldBlocked);
-            ladderTo = Number(args.ladderTo ?? ladderTo);
-            snakeTo = Number(args.snakeTo ?? snakeTo);
-          }
-        } catch {
-          // non-matching event
-        }
-      }
+    const acc = {
+      fromPos: 1,
+      landedPos: 1,
+      finalPos: 1,
+      trapTriggered: 0,
+      shieldBlocked: false,
+      ladderTo: 0,
+      snakeTo: 0,
     };
+    this.extractRollEventFields(finReceipt.logs, acc);
 
-    parseRollLogs(finReceipt.logs);
-
+    let latestTx = finHash;
     const summaryAfter = (await publicClient.readContract({
       address: arenaAddr,
       abi: DOD_SNAKE_ARENA_ABI,
@@ -827,39 +951,7 @@ export class FheArenaClient {
     })) as readonly unknown[];
 
     if (Number(summaryAfter[8]) === 2) {
-      const pendingTrap = (await publicClient.readContract({
-        address: arenaAddr,
-        abi: DOD_SNAKE_ARENA_ABI,
-        functionName: 'getMatchPendingHandles',
-        args: [matchId],
-      })) as readonly [Hex, Hex, Hex, Hex, Hex, Address, number];
-      const trapHandle = pendingTrap[1];
-      const shieldHandle = pendingTrap[2];
-
-      onStage?.('decrypting_trap');
-      const trapDec = await sdk.decryption.decryptPublicValues([trapHandle, shieldHandle]);
-      trapTriggered = Number(trapDec.clearValues[trapHandle] ?? 0);
-      const clearShield = Number(trapDec.clearValues[shieldHandle] ?? 0);
-      shieldBlocked = clearShield === 1;
-
-      onStage?.('verifying_trap');
-      latestTx = await walletClient.writeContract({
-        account,
-        chain: walletClient.chain,
-        address: arenaAddr,
-        abi: DOD_SNAKE_ARENA_ABI,
-        functionName: 'finalizeTileCheck',
-        args: [matchId, trapTriggered, clearShield, trapDec.decryptionProof],
-      });
-      const trapReceipt = await publicClient.waitForTransactionReceipt({ hash: latestTx });
-      parseRollLogs(trapReceipt.logs);
-      this.pushLog({
-        kind: 'public_decrypt',
-        title: trapTriggered > 0 ? `Trap Triggered (#${trapTriggered})!` : 'Tile Safe (Trap Locations Secret)',
-        detail: shieldBlocked ? 'Confidential Shield blocked Snake!' : 'FHE.checkSignatures verified.',
-        handle: trapHandle,
-        txHash: latestTx,
-      });
+      latestTx = await this._finalizeTrapCheckFromPending(matchId, acc, onStage);
     } else {
       this.pushLog({
         kind: 'tx',
@@ -871,15 +963,110 @@ export class FheArenaClient {
 
     return {
       dieValue: clearDie,
-      fromPos,
-      landedPos,
-      finalPos,
-      trapTriggered,
-      shieldBlocked,
-      ladderTo,
-      snakeTo,
+      fromPos: acc.fromPos,
+      landedPos: acc.landedPos,
+      finalPos: acc.finalPos,
+      trapTriggered: acc.trapTriggered,
+      shieldBlocked: acc.shieldBlocked,
+      ladderTo: acc.ladderTo,
+      snakeTo: acc.snakeTo,
       txHash: latestTx,
     };
+  }
+
+  private async _finalizeDuelFromPending(matchId: bigint): Promise<{ outcome: number; txHash: Hex }> {
+    const { sdk, publicClient, walletClient, account, addrs } = this.requireSdk();
+    const arenaAddr = addrs.arenaAddress as Address;
+    const pending = (await publicClient.readContract({
+      address: arenaAddr,
+      abi: DOD_SNAKE_ARENA_ABI,
+      functionName: 'getMatchPendingHandles',
+      args: [matchId],
+    })) as readonly [Hex, Hex, Hex, Hex, Hex, Address, number];
+    const duelHandle = pending[3];
+    const dec = await sdk.decryption.decryptPublicValues([duelHandle]);
+    const outcome = Number(dec.clearValues[duelHandle] ?? 0);
+
+    const finHash = await walletClient.writeContract({
+      account,
+      chain: walletClient.chain,
+      address: arenaAddr,
+      abi: DOD_SNAKE_ARENA_ABI,
+      functionName: 'finalizeBlindDuel',
+      args: [matchId, outcome, dec.decryptionProof],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: finHash });
+    this.pushLog({
+      kind: 'public_decrypt',
+      title: outcome === 1 ? 'Blind Duel Won!' : outcome === 2 ? 'Blind Duel Lost' : 'Blind Duel Tie!',
+      detail: 'Raw player choices remained confidential.',
+      handle: duelHandle,
+      txHash: finHash,
+    });
+    return { outcome, txHash: finHash };
+  }
+
+  private async _finalizeMissionFromPending(matchId: bigint): Promise<{ passed: boolean; txHash: Hex }> {
+    const { sdk, publicClient, walletClient, account, addrs } = this.requireSdk();
+    const arenaAddr = addrs.arenaAddress as Address;
+    const pending = (await publicClient.readContract({
+      address: arenaAddr,
+      abi: DOD_SNAKE_ARENA_ABI,
+      functionName: 'getMatchPendingHandles',
+      args: [matchId],
+    })) as readonly [Hex, Hex, Hex, Hex, Hex, Address, number];
+    const mHandle = pending[4];
+
+    const dec = await sdk.decryption.decryptPublicValues([mHandle]);
+    const passedNum = Number(dec.clearValues[mHandle] ?? 0);
+
+    const finHash = await walletClient.writeContract({
+      account,
+      chain: walletClient.chain,
+      address: arenaAddr,
+      abi: DOD_SNAKE_ARENA_ABI,
+      functionName: 'finalizeMissionCheck',
+      args: [matchId, passedNum, dec.decryptionProof],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: finHash });
+    this.pushLog({
+      kind: 'public_decrypt',
+      title: passedNum === 1 ? 'Secret Mission Verified (+3 ★ +1 Shield)!' : 'Secret Mission Not Yet Complete',
+      detail: 'Evaluated homomorphically without revealing mission ID.',
+      handle: mHandle,
+      txHash: finHash,
+    });
+    return { passed: passedNum === 1, txHash: finHash };
+  }
+
+  public async rollVerifiableDice(
+    matchId: bigint,
+    onStage?: (stage: 'requesting' | 'decrypting_dice' | 'verifying_dice' | 'decrypting_trap' | 'verifying_trap') => void,
+  ): Promise<{
+    dieValue: number;
+    fromPos: number;
+    landedPos: number;
+    finalPos: number;
+    trapTriggered: number;
+    shieldBlocked: boolean;
+    ladderTo: number;
+    snakeTo: number;
+    txHash: Hex;
+  }> {
+    const { publicClient, walletClient, account, addrs } = this.requireSdk();
+    const arenaAddr = addrs.arenaAddress as Address;
+
+    onStage?.('requesting');
+    const reqHash = await walletClient.writeContract({
+      account,
+      chain: walletClient.chain,
+      address: arenaAddr,
+      abi: DOD_SNAKE_ARENA_ABI,
+      functionName: 'requestDiceRoll',
+      args: [matchId],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: reqHash });
+    return this._finalizeDiceFromPending(matchId, onStage);
   }
 
   public async playBlindDuel(
@@ -890,16 +1077,24 @@ export class FheArenaClient {
     const { sdk, publicClient, walletClient, account, addrs } = this.requireSdk();
     const arenaAddr = addrs.arenaAddress as Address;
 
-    // Start duel if none active yet
-    const startHash = await walletClient.writeContract({
-      account,
-      chain: walletClient.chain,
+    const existingDuel = (await publicClient.readContract({
       address: arenaAddr,
       abi: DOD_SNAKE_ARENA_ABI,
-      functionName: 'startBlindDuel',
-      args: [matchId, opponent],
-    });
-    await publicClient.waitForTransactionReceipt({ hash: startHash });
+      functionName: 'getBlindDuelState',
+      args: [matchId],
+    })) as readonly [boolean, Address, Address, boolean, boolean, Hex];
+
+    if (!existingDuel[0]) {
+      const startHash = await walletClient.writeContract({
+        account,
+        chain: walletClient.chain,
+        address: arenaAddr,
+        abi: DOD_SNAKE_ARENA_ABI,
+        functionName: 'startBlindDuel',
+        args: [matchId, opponent],
+      });
+      await publicClient.waitForTransactionReceipt({ hash: startHash });
+    }
 
     const encMove = await sdk.encrypt({
       values: [{ type: 'euint8', value: BigInt(rpsChoice) }],
@@ -931,40 +1126,14 @@ export class FheArenaClient {
     })) as readonly unknown[];
 
     if (Number(summary[8]) === 3) {
-      const pending = (await publicClient.readContract({
-        address: arenaAddr,
-        abi: DOD_SNAKE_ARENA_ABI,
-        functionName: 'getMatchPendingHandles',
-        args: [matchId],
-      })) as readonly [Hex, Hex, Hex, Hex, Hex, Address, number];
-      const duelHandle = pending[3];
-      const dec = await sdk.decryption.decryptPublicValues([duelHandle]);
-      const outcome = Number(dec.clearValues[duelHandle] ?? 0);
-
-      const finHash = await walletClient.writeContract({
-        account,
-        chain: walletClient.chain,
-        address: arenaAddr,
-        abi: DOD_SNAKE_ARENA_ABI,
-        functionName: 'finalizeBlindDuel',
-        args: [matchId, outcome, dec.decryptionProof],
-      });
-      await publicClient.waitForTransactionReceipt({ hash: finHash });
-      this.pushLog({
-        kind: 'public_decrypt',
-        title: outcome === 1 ? 'Blind Duel Won!' : outcome === 2 ? 'Blind Duel Lost' : 'Blind Duel Tie!',
-        detail: 'Raw player choices remained confidential.',
-        handle: duelHandle,
-        txHash: finHash,
-      });
-      return { outcome, txHash: finHash };
+      return this._finalizeDuelFromPending(matchId);
     }
 
     return { outcome: null, txHash: moveHash };
   }
 
   public async verifySecretMission(matchId: bigint): Promise<{ passed: boolean; txHash: Hex }> {
-    const { sdk, publicClient, walletClient, account, addrs } = this.requireSdk();
+    const { publicClient, walletClient, account, addrs } = this.requireSdk();
     const arenaAddr = addrs.arenaAddress as Address;
 
     const reqHash = await walletClient.writeContract({
@@ -976,35 +1145,58 @@ export class FheArenaClient {
       args: [matchId],
     });
     await publicClient.waitForTransactionReceipt({ hash: reqHash });
+    return this._finalizeMissionFromPending(matchId);
+  }
 
-    const pending = (await publicClient.readContract({
-      address: arenaAddr,
+  public async resumePendingAction(
+    matchId: bigint,
+    onStage?: (stage: 'requesting' | 'decrypting_dice' | 'verifying_dice' | 'decrypting_trap' | 'verifying_trap') => void,
+  ): Promise<{
+    actionKind: number;
+    roll?: Awaited<ReturnType<FheArenaClient['rollVerifiableDice']>>;
+    duelOutcome?: number;
+    missionPassed?: boolean;
+    txHash: Hex;
+  }> {
+    const { publicClient, addrs } = this.requireSdk();
+    const summary = (await publicClient.readContract({
+      address: addrs.arenaAddress as Address,
       abi: DOD_SNAKE_ARENA_ABI,
-      functionName: 'getMatchPendingHandles',
+      functionName: 'getMatchSummary',
       args: [matchId],
-    })) as readonly [Hex, Hex, Hex, Hex, Hex, Address, number];
-    const mHandle = pending[4];
+    })) as readonly unknown[];
 
-    const dec = await sdk.decryption.decryptPublicValues([mHandle]);
-    const passedNum = Number(dec.clearValues[mHandle] ?? 0);
-
-    const finHash = await walletClient.writeContract({
-      account,
-      chain: walletClient.chain,
-      address: arenaAddr,
-      abi: DOD_SNAKE_ARENA_ABI,
-      functionName: 'finalizeMissionCheck',
-      args: [matchId, passedNum, dec.decryptionProof],
-    });
-    await publicClient.waitForTransactionReceipt({ hash: finHash });
-    this.pushLog({
-      kind: 'public_decrypt',
-      title: passedNum === 1 ? 'Secret Mission Verified (+3 ★ +1 Shield)!' : 'Secret Mission Not Yet Complete',
-      detail: 'Evaluated homomorphically without revealing mission ID.',
-      handle: mHandle,
-      txHash: finHash,
-    });
-    return { passed: passedNum === 1, txHash: finHash };
+    const pendingAction = Number(summary[8]);
+    if (pendingAction === 1) {
+      const roll = await this._finalizeDiceFromPending(matchId, onStage);
+      return { actionKind: 1, roll, txHash: roll.txHash };
+    }
+    if (pendingAction === 2) {
+      const acc = {
+        fromPos: 1,
+        landedPos: 1,
+        finalPos: 1,
+        trapTriggered: 0,
+        shieldBlocked: false,
+        ladderTo: 0,
+        snakeTo: 0,
+      };
+      const txHash = await this._finalizeTrapCheckFromPending(matchId, acc, onStage);
+      return {
+        actionKind: 2,
+        roll: { dieValue: 0, ...acc, txHash },
+        txHash,
+      };
+    }
+    if (pendingAction === 3) {
+      const res = await this._finalizeDuelFromPending(matchId);
+      return { actionKind: 3, duelOutcome: res.outcome, txHash: res.txHash };
+    }
+    if (pendingAction === 4) {
+      const res = await this._finalizeMissionFromPending(matchId);
+      return { actionKind: 4, missionPassed: res.passed, txHash: res.txHash };
+    }
+    throw new Error('No pending onchain KMS proof to resume.');
   }
 
   public async claimMatchPayout(matchId: bigint): Promise<Hex> {
