@@ -757,11 +757,7 @@ export type UiKey =
   | 'spectatingChallenge'
   | 'spectatingDuel'
   | 'missionLabel'
-  | 'botPlaying'
-  | 'supportBtn'
-  | 'supportTitle'
-  | 'supportDesc'
-  | 'supportNote';
+  | 'botPlaying';
 
 const ID_STRINGS: Record<UiKey, string> = {
   langLabel: 'ID',
@@ -846,7 +842,7 @@ const ID_STRINGS: Record<UiKey, string> = {
   largeTextLabel: 'Teks Besar',
   reducedMotionLabel: 'Kurangi Gerakan (Reduced Motion)',
   languageSettingLabel: 'Bahasa / Language',
-  howtoTitle: 'Cara Main DodSnake',
+  howtoTitle: 'Cara Main DodSnakes',
   howtoTurnTitle: '1. Lempar Dadu & Kemampuan Karakter',
   howtoTurnDesc: 'Setiap giliran lempar dadu (angka 6 dapat bonus lempar lagi!). Tiap karakter punya perk pasif unik.',
   howtoTileTitle: '2. Kotak Tantangan & Kotak 100',
@@ -883,10 +879,6 @@ const ID_STRINGS: Record<UiKey, string> = {
   spectatingDuel: 'Duel 1v1: {a} vs {b} (Kt.{tile})',
   missionLabel: 'Misi',
   botPlaying: 'Bot sedang memainkan tantangan secara otomatis...',
-  supportBtn: 'Dukung',
-  supportTitle: 'Dukung DodSnake (Saweria)',
-  supportDesc: 'Suka bermain DodSnake? Pindai QR Saweria di bawah dengan kamera HP, QRIS, e-wallet, atau m-banking!',
-  supportNote: 'Terima kasih banyak! Dukunganmu membantu biaya server online & pembaruan game.',
 };
 
 const EN_STRINGS: Record<UiKey, string> = {
@@ -972,7 +964,7 @@ const EN_STRINGS: Record<UiKey, string> = {
   largeTextLabel: 'Large Text',
   reducedMotionLabel: 'Reduced Motion',
   languageSettingLabel: 'Language / Bahasa',
-  howtoTitle: 'How to Play DodSnake',
+  howtoTitle: 'How to Play DodSnakes',
   howtoTurnTitle: '1. Roll Dice & Unique Perks',
   howtoTurnDesc: 'Roll on your turn (rolling a 6 grants an extra roll!). Every doodle character brings a passive perk.',
   howtoTileTitle: '2. Challenge Tiles & Tile 100',
@@ -1009,10 +1001,6 @@ const EN_STRINGS: Record<UiKey, string> = {
   spectatingDuel: '1v1 Duel: {a} vs {b} (Tile {tile})',
   missionLabel: 'Mission',
   botPlaying: 'Bot is playing this challenge automatically...',
-  supportBtn: 'Donate',
-  supportTitle: 'Support DodSnake (Saweria)',
-  supportDesc: 'Enjoying DodSnake? Scan this Saweria QR code with your phone camera, QRIS e-wallet, or banking app!',
-  supportNote: 'Thank you! Your support helps cover online servers & new game updates.',
 };
 
 export function tr(lang: AppLanguage, key: UiKey, vars?: Record<string, string | number>): string {
