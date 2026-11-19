@@ -2502,46 +2502,6 @@ body.colorblind-mode .lobby-ready-pill.is-wait {
   white-space: nowrap;
 }
 
-.support-modal-body {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  text-align: center;
-}
-
-.support-qr-frame {
-  background: #FFFFFF;
-  border: 3.5px solid var(--ink);
-  border-radius: 18px;
-  padding: 10px;
-  box-shadow: 0 4px 0 var(--ink);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.support-qr-img {
-  display: block;
-  width: min(210px, 54vw);
-  height: min(210px, 54vw);
-  object-fit: contain;
-}
-
-.support-desc {
-  margin: 0;
-  font-size: 0.92rem;
-  line-height: 1.35;
-  color: var(--ink);
-}
-
-.support-note {
-  margin: 0;
-  font-size: 0.82rem;
-  line-height: 1.3;
-  opacity: 0.82;
-}
-
 .legend-zone-pill {
   display: flex;
   align-items: center;
@@ -3039,7 +2999,7 @@ body.colorblind-mode .lobby-ready-pill.is-wait {
 
 .arena-vault-card,
 .arena-proof-card {
-  width: min(310px, 46vw);
+  width: min(305px, 34vw);
   max-height: 62vh;
   overflow: auto;
   padding: 10px 12px;
@@ -3262,15 +3222,62 @@ body.colorblind-mode .lobby-ready-pill.is-wait {
   font-size: 0.74rem;
 }
 
+.arena-sprint-guide {
+  font-size: 0.7rem;
+  font-weight: 700;
+  margin-top: 4px;
+  padding: 3px 6px;
+  border-radius: 8px;
+  background: #f5f2ff;
+  border: 1.5px dashed rgba(36, 34, 45, 0.35);
+}
+
 @media (max-width: 760px) {
+  .arena-shell {
+    padding: 5px;
+    gap: 4px;
+  }
+  .arena-topbar {
+    padding: 4px 6px;
+    gap: 3px;
+  }
+  .arena-topbar .doodle-btn {
+    min-height: 26px !important;
+    padding: 2px 6px !important;
+    font-size: 0.68rem !important;
+  }
   .arena-hud-layout {
     flex-direction: column;
     overflow: auto;
+    gap: 4px;
   }
-  .arena-vault-card,
+  .arena-vault-card {
+    width: 100%;
+    padding: 6px 8px;
+    max-height: 150px;
+    font-size: 0.78rem;
+  }
   .arena-proof-card {
     width: 100%;
-    max-height: 220px;
+    padding: 5px 8px;
+    max-height: 92px;
+    font-size: 0.76rem;
+  }
+  .arena-action-bar,
+  .arena-win-banner {
+    padding: 5px 7px;
+    gap: 4px;
+  }
+  .arena-action-bar .doodle-btn,
+  .arena-action-bar .doodle-input {
+    min-height: 32px !important;
+    padding: 3px 8px !important;
+    font-size: 0.76rem !important;
+  }
+  .arena-disclaimer-bar {
+    font-size: 0.63rem;
+    padding: 2px 7px;
+    border-radius: 10px;
   }
 }
 
