@@ -22,7 +22,7 @@ import {
 
 export interface TilePreviewMarker {
   tileId: number;
-  kind: 'normal' | 'ladder' | 'snake' | 'boss' | 'bounced' | 'special' | 'trap';
+  kind: 'normal' | 'ladder' | 'snake' | 'boss' | 'bounced' | 'special' | 'trap' | 'aim';
 }
 
 export interface BoardVisuals {
@@ -66,12 +66,13 @@ function createRoundedSlabGeometry(width: number, height: number, depth: number,
   return geo;
 }
 
-function archetypeBadgeSymbol(tile: Tile): string {
+function archetypeBadgeSymbol(tile: Tile, isSprint = false): string {
+  if (isSprint && tile.id === 30) return 'GOAL';
   switch (tile.archetype) {
     case 'start':
-      return 'MULAI';
+      return 'START';
     case 'boss_doodle':
-      return 'BOS';
+      return isSprint ? '' : 'BOSS';
     case 'tap_timing':
       return '◎';
     case 'quick_quiz':
@@ -125,7 +126,7 @@ function archetypeBadgeSymbol(tile: Tile): string {
   }
 }
 
-function createTileAtlasTexture(): THREE.CanvasTexture {
+function createTileAtlasTexture(isSprint = false): THREE.CanvasTexture {
   const size = 2048;
   const cell = size / 10;
   const canvas = document.createElement('canvas');
@@ -134,8 +135,9 @@ function createTileAtlasTexture(): THREE.CanvasTexture {
   const ctx = canvas.getContext('2d')!;
   ctx.clearRect(0, 0, size, size);
 
-  const ladderStarts = new Set(BOARD_LAYOUT.ladders.map((l) => l.from));
-  const snakeHeads = new Set(BOARD_LAYOUT.snakes.map((s) => s.from));
+  const ladderStarts = new Set(isSprint ? [3, 8, 15] : BOARD_LAYOUT.ladders.map((l) => l.from));
+  const snakeHeads = new Set(isSprint ? [14, 21, 27] : BOARD_LAYOUT.snakes.map((s) => s.from));
+  const goalTileId = isSprint ? 30 : 100;
 
   for (let i = 0; i < 100; i++) {
     const tile = TILES[i];
@@ -153,7 +155,7 @@ function createTileAtlasTexture(): THREE.CanvasTexture {
     ctx.roundRect(x + 12, y + 12, cell - 24, cell - 24, 30);
     ctx.stroke();
 
-    // Special badge for start, boss, ladder, snake & zone gate milestones
+    // Special badge for start, goal/boss, ladder, snake & zone gate milestones
     if (tile.id === 1) {
       ctx.fillStyle = DOODLE_PALETTE.mint;
       ctx.beginPath();
@@ -162,7 +164,7 @@ function createTileAtlasTexture(): THREE.CanvasTexture {
       ctx.strokeStyle = DOODLE_PALETTE.ink;
       ctx.lineWidth = 5;
       ctx.stroke();
-    } else if (tile.id === 100) {
+    } else if (tile.id === goalTileId) {
       ctx.fillStyle = DOODLE_PALETTE.yellow;
       ctx.beginPath();
       ctx.arc(cx, cy + 6, 72, 0, Math.PI * 2);
@@ -170,7 +172,7 @@ function createTileAtlasTexture(): THREE.CanvasTexture {
       ctx.strokeStyle = DOODLE_PALETTE.ink;
       ctx.lineWidth = 6;
       ctx.stroke();
-    } else if (tile.id === 26 || tile.id === 51 || tile.id === 76) {
+    } else if (!isSprint && (tile.id === 26 || tile.id === 51 || tile.id === 76)) {
       ctx.strokeStyle = 'rgba(43, 40, 56, 0.28)';
       ctx.lineWidth = 4;
       ctx.setLineDash([10, 7]);
@@ -218,7 +220,7 @@ function createTileAtlasTexture(): THREE.CanvasTexture {
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-    } else {
+    } else if (!isSprint) {
       const special = getBoardSpecialTile(tile.id);
       if (special) {
         const ringColor =
@@ -264,8 +266,8 @@ function createTileAtlasTexture(): THREE.CanvasTexture {
       }
     }
 
-    // Mode tag dot (duel / all_play)
-    if (tile.mode === 'duel') {
+    // Mode tag dot (duel / all_play) — classic party mode only
+    if (!isSprint && tile.mode === 'duel') {
       ctx.fillStyle = DOODLE_PALETTE.orange;
       ctx.beginPath();
       ctx.arc(x + 42, y + 42, 15, 0, Math.PI * 2);
@@ -273,7 +275,7 @@ function createTileAtlasTexture(): THREE.CanvasTexture {
       ctx.strokeStyle = DOODLE_PALETTE.ink;
       ctx.lineWidth = 3;
       ctx.stroke();
-    } else if (tile.mode === 'all_play') {
+    } else if (!isSprint && tile.mode === 'all_play') {
       ctx.fillStyle = DOODLE_PALETTE.blue;
       ctx.beginPath();
       ctx.arc(x + 42, y + 42, 15, 0, Math.PI * 2);
@@ -284,11 +286,14 @@ function createTileAtlasTexture(): THREE.CanvasTexture {
     }
 
     // Small archetype icon in top-right corner
-    ctx.fillStyle = DOODLE_PALETTE.ink;
-    ctx.font = 'bold 34px "Patrick Hand", "Comic Sans MS", sans-serif';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'top';
-    ctx.fillText(archetypeBadgeSymbol(tile), x + cell - 24, y + 22);
+    const badgeSym = isSprint && tile.id !== 1 && tile.id !== 30 ? '' : archetypeBadgeSymbol(tile, isSprint);
+    if (badgeSym) {
+      ctx.fillStyle = DOODLE_PALETTE.ink;
+      ctx.font = 'bold 34px "Patrick Hand", "Comic Sans MS", sans-serif';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'top';
+      ctx.fillText(badgeSym, x + cell - 24, y + 22);
+    }
 
     // Big bold tile number in center with thick cream halo
     ctx.textAlign = 'center';
@@ -656,7 +661,8 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
   );
 
   // 3. Instanced 100 Tile Top Caps with custom ShaderMaterial atlas (1 draw call!)
-  const atlasTex = createTileAtlasTexture();
+  const classicAtlasTex = createTileAtlasTexture(false);
+  const sprintAtlasTex = createTileAtlasTexture(true);
   const topGeo = new THREE.PlaneGeometry(TILE_SPACING * 0.78, TILE_SPACING * 0.78);
   topGeo.rotateX(-Math.PI / 2);
   const cellOffsets = new Float32Array(100 * 2);
@@ -674,7 +680,7 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
     transparent: true,
     depthWrite: false,
     uniforms: {
-      uAtlas: { value: atlasTex },
+      uAtlas: { value: classicAtlasTex },
     },
     vertexShader: `
       attribute vec2 aCellOffset;
@@ -710,7 +716,7 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
   const tmpColor = new THREE.Color();
   const mutedOutOfZoneColor = new THREE.Color('#D5CEC2');
   let activeZoneLimit = 100;
-  let currentLanguage: 'id' | 'en' = 'id';
+  let currentLanguage: 'id' | 'en' = 'en';
 
   const writeTileMatrix = (tileId: number) => {
     const idx = tileId - 1;
@@ -785,7 +791,7 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
     ['', '', 'cloud', 6.8, 2.0, 10.7],
   ];
   scribbleConfigs.forEach(([idTxt, enTxt, kind, x, y, z], idx) => {
-    const sp = createScribbleSprite(idTxt, kind);
+    const sp = createScribbleSprite(enTxt, kind);
     sp.position.set(x, y, z);
     scribbles.push({ sprite: sp, baseY: y, phase: idx * 0.9 });
     if (kind === 'note') {
@@ -794,21 +800,33 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
     group.add(sp);
   });
 
-  // 6. Active Tile Beacon Ring + Pre-Pooled Landing Preview Rings + Landmarks (Kt.1 Start Flag & Kt.100 Bos Gate)
+  // 6. Active Tile Beacon Ring + Soft Golden Aura Pillar + Landing Preview Rings + 3D FHE Padlock Beacons
   const beaconGeo = new THREE.RingGeometry(0.56, 0.74, 24);
   beaconGeo.rotateX(-Math.PI / 2);
   const beaconMat = new THREE.MeshBasicMaterial({
     color: DOODLE_PALETTE.yellow,
     transparent: true,
-    opacity: 0.88,
+    opacity: 0.9,
     side: THREE.DoubleSide,
   });
   const beaconRing = new THREE.Mesh(beaconGeo, beaconMat);
   beaconRing.visible = false;
   group.add(beaconRing);
+
+  const pillarGeo = new THREE.CylinderGeometry(0.56, 0.68, 0.72, 18, 1, true);
+  const pillarMat = new THREE.MeshBasicMaterial({
+    color: DOODLE_PALETTE.yellow,
+    transparent: true,
+    opacity: 0.17,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const beaconPillar = new THREE.Mesh(pillarGeo, pillarMat);
+  beaconPillar.visible = false;
+  group.add(beaconPillar);
   let activeBeaconTileId: number | null = 1;
 
-  // Pooled 6 landing-preview halos (used pre-roll & for Golden Dice targets)
+  // Pooled 14 landing-preview halos
   const previewGeo = new THREE.RingGeometry(0.58, 0.79, 24);
   previewGeo.rotateX(-Math.PI / 2);
   const previewKindColorsDefault: Record<TilePreviewMarker['kind'], string> = {
@@ -819,6 +837,7 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
     bounced: DOODLE_PALETTE.coral,
     special: DOODLE_PALETTE.purple,
     trap: '#FF2E63',
+    aim: DOODLE_PALETTE.blue,
   };
   const previewKindColorsCb: Record<TilePreviewMarker['kind'], string> = {
     normal: '#E69F00',
@@ -828,6 +847,7 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
     bounced: '#0072B2',
     special: '#56B4E9',
     trap: '#F0E442',
+    aim: '#56B4E9',
   };
   let colorblindMode = false;
   let latestPreviews: TilePreviewMarker[] = [];
@@ -846,6 +866,84 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
     group.add(ring);
     return ring;
   });
+
+  // Pooled 4 hovering 3D FHE Padlock Beacons (rendered ONLY above local player's own planted Secret Traps!)
+  const lockBodyGeo = new THREE.BoxGeometry(0.36, 0.3, 0.18);
+  const lockShackleGeo = new THREE.TorusGeometry(0.11, 0.036, 6, 12, Math.PI);
+  const lockCoreGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.2, 8);
+  lockCoreGeo.rotateX(Math.PI / 2);
+  const lockBodyMat = createDoodleToonMaterial({ color: '#FF3D77' });
+  const lockShackleMat = createDoodleToonMaterial({ color: DOODLE_PALETTE.yellow });
+  const lockCoreMat = new THREE.MeshBasicMaterial({ color: DOODLE_PALETTE.ink });
+  const trapBeacons = Array.from({ length: 4 }, () => {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(lockBodyGeo, lockBodyMat);
+    addOutlineMesh(body, outlineCtrl.material);
+    const shackle = new THREE.Mesh(lockShackleGeo, lockShackleMat);
+    shackle.position.y = 0.14;
+    addOutlineMesh(shackle, outlineCtrl.material);
+    const keyhole = new THREE.Mesh(lockCoreGeo, lockCoreMat);
+    keyhole.position.set(0, -0.02, 0.01);
+    g.add(body, shackle, keyhole);
+    g.visible = false;
+    group.add(g);
+    return g;
+  });
+
+  // Floating 3D Aiming Target Pin (highlights selected tile when aiming a Secret Trap)
+  const aimPinGroup = new THREE.Group();
+  const aimCone = new THREE.Mesh(
+    new THREE.ConeGeometry(0.18, 0.42, 6),
+    createDoodleToonMaterial({ color: DOODLE_PALETTE.blue }),
+  );
+  aimCone.rotation.x = Math.PI;
+  addOutlineMesh(aimCone, outlineCtrl.material);
+  const aimCap = new THREE.Mesh(
+    new THREE.OctahedronGeometry(0.15, 0),
+    createDoodleToonMaterial({ color: DOODLE_PALETTE.yellow }),
+  );
+  aimCap.position.y = 0.24;
+  addOutlineMesh(aimCap, outlineCtrl.material);
+  aimPinGroup.add(aimCone, aimCap);
+  aimPinGroup.visible = false;
+  group.add(aimPinGroup);
+
+  // Ambient pastel sketchbook sparkle dust drifting above tabletop (1 single Points draw call!)
+  const sparkleCount = 40;
+  const sparklePos = new Float32Array(sparkleCount * 3);
+  const sparkleBaseY = new Float32Array(sparkleCount);
+  const sparklePhases = new Float32Array(sparkleCount);
+  for (let i = 0; i < sparkleCount; i++) {
+    sparklePos[i * 3] = (Math.random() - 0.5) * 22;
+    const by = 1.4 + Math.random() * 4.4;
+    sparklePos[i * 3 + 1] = by;
+    sparklePos[i * 3 + 2] = (Math.random() - 0.5) * 22;
+    sparkleBaseY[i] = by;
+    sparklePhases[i] = Math.random() * Math.PI * 2;
+  }
+  const sparkleGeo = new THREE.BufferGeometry();
+  sparkleGeo.setAttribute('position', new THREE.BufferAttribute(sparklePos, 3));
+  const spCanvas = document.createElement('canvas');
+  spCanvas.width = 32;
+  spCanvas.height = 32;
+  const spCtx = spCanvas.getContext('2d')!;
+  const spGrad = spCtx.createRadialGradient(16, 16, 1, 16, 16, 15);
+  spGrad.addColorStop(0, 'rgba(255, 245, 195, 1)');
+  spGrad.addColorStop(0.45, 'rgba(255, 224, 130, 0.75)');
+  spGrad.addColorStop(1, 'rgba(255, 224, 130, 0)');
+  spCtx.fillStyle = spGrad;
+  spCtx.fillRect(0, 0, 32, 32);
+  const spTex = new THREE.CanvasTexture(spCanvas);
+  const sparkleMat = new THREE.PointsMaterial({
+    map: spTex,
+    size: 0.36,
+    transparent: true,
+    opacity: 0.72,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const ambientSparkles = new THREE.Points(sparkleGeo, sparkleMat);
+  group.add(ambientSparkles);
 
   // Tile 1 Start Flagpole landmark on outer corner so pawns have full room
   const c1 = getTileGridCoord(1);
@@ -867,7 +965,7 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
   flagGroup.position.set(c1.x - 0.76, (tileTopY[1] ?? 0.45) - 0.05, c1.z + 0.76);
   group.add(flagGroup);
 
-  // Tile 100 Crown Pedestal + Twin Boss Gate Turrets framing finish line
+  // Finish Crown Pedestal + Orbiting Mini Stars + Twin Goal Turrets
   const crownGroup = new THREE.Group();
   const c100 = getTileGridCoord(100);
   const crownMat = createDoodleToonMaterial({ color: DOODLE_PALETTE.yellow });
@@ -881,12 +979,25 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
     addOutlineMesh(spike, outlineCtrl.material);
     crownGroup.add(spike);
   }
-  crownGroup.position.set(c100.x - 0.62, (tileTopY[100] ?? 0.5) + 0.45, c100.z - 0.62);
+  const crownOrbitGroup = new THREE.Group();
+  for (let s = 0; s < 3; s++) {
+    const a = (s / 3) * Math.PI * 2;
+    const star = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.085, 0),
+      createDoodleToonMaterial({ color: s === 1 ? DOODLE_PALETTE.mint : DOODLE_PALETTE.yellow }),
+    );
+    star.position.set(Math.cos(a) * 0.52, 0.28 + (s % 2) * 0.1, Math.sin(a) * 0.52);
+    addOutlineMesh(star, outlineCtrl.material);
+    crownOrbitGroup.add(star);
+  }
+  crownGroup.add(crownOrbitGroup);
+  crownGroup.position.set(c100.x - 0.62, (tileTopY[100] ?? 0.5) + 0.48, c100.z - 0.62);
   group.add(crownGroup);
 
   const turretMat = createDoodleToonMaterial({ color: DOODLE_PALETTE.purple });
   const turretRoofMat = createDoodleToonMaterial({ color: DOODLE_PALETTE.coral });
   const turretFinialMat = createDoodleToonMaterial({ color: DOODLE_PALETTE.yellow });
+  const finishTurrets: THREE.Mesh[] = [];
   [-0.78, 0.78].forEach((ox) => {
     const tBase = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.9, 6), turretMat);
     tBase.position.set(c100.x + ox, (tileTopY[100] ?? 0.5) + 0.35, c100.z - 0.88);
@@ -899,8 +1010,11 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
     addOutlineMesh(tStar, outlineCtrl.material);
     tCap.add(tStar);
     tBase.add(tCap);
+    finishTurrets.push(tBase);
     group.add(tBase);
   });
+
+  const goldGoalColor = new THREE.Color(DOODLE_PALETTE.yellow);
 
   return {
     group,
@@ -918,14 +1032,20 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
       activeBeaconTileId = tileId;
       if (tileId === null || tileId < 1 || tileId > 100) {
         beaconRing.visible = false;
+        beaconPillar.visible = false;
       } else {
         const coord = getTileGridCoord(tileId);
+        const topY = tileTopY[tileId] ?? 0.45;
         beaconRing.visible = true;
-        beaconRing.position.set(coord.x, (tileTopY[tileId] ?? 0.45) + 0.03, coord.z);
+        beaconRing.position.set(coord.x, topY + 0.03, coord.z);
+        beaconPillar.visible = true;
+        beaconPillar.position.set(coord.x, topY + 0.38, coord.z);
       }
     },
     setPreviewTiles: (previews: TilePreviewMarker[]) => {
       latestPreviews = previews;
+      let trapIdx = 0;
+      let aimTileId = 0;
       for (let i = 0; i < previewRings.length; i++) {
         const ring = previewRings[i];
         const marker = previews[i];
@@ -935,10 +1055,32 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
           continue;
         }
         const coord = getTileGridCoord(marker.tileId);
+        const topY = tileTopY[marker.tileId] ?? 0.45;
         ring.visible = true;
         ring.userData.kind = marker.kind;
-        ring.position.set(coord.x, (tileTopY[marker.tileId] ?? 0.45) + 0.036, coord.z);
+        ring.position.set(coord.x, topY + 0.036, coord.z);
         (ring.material as THREE.MeshBasicMaterial).color.set(getPreviewColor(marker.kind));
+
+        if (marker.kind === 'trap' && trapIdx < trapBeacons.length) {
+          const beacon = trapBeacons[trapIdx++];
+          beacon.visible = true;
+          beacon.position.set(coord.x, topY + 0.62, coord.z);
+          beacon.userData.baseY = topY + 0.62;
+        } else if (marker.kind === 'aim' && aimTileId === 0) {
+          aimTileId = marker.tileId;
+        }
+      }
+      for (let t = trapIdx; t < trapBeacons.length; t++) {
+        trapBeacons[t].visible = false;
+      }
+      if (aimTileId > 0) {
+        const coord = getTileGridCoord(aimTileId);
+        const topY = tileTopY[aimTileId] ?? 0.45;
+        aimPinGroup.visible = true;
+        aimPinGroup.position.set(coord.x, topY + 0.78, coord.z);
+        aimPinGroup.userData.baseY = topY + 0.78;
+      } else {
+        aimPinGroup.visible = false;
       }
     },
     setColorblindMode: (enabled: boolean) => {
@@ -968,16 +1110,29 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
       const clamped = finishTile > 0 && finishTile < 100 ? finishTile : 100;
       if (clamped === activeZoneLimit) return;
       activeZoneLimit = clamped;
+      const isSprint = clamped === 30;
+      topMat.uniforms.uAtlas.value = isSprint ? sprintAtlasTex : classicAtlasTex;
       for (let tileId = 1; tileId <= 100; tileId++) {
-        if (tileId <= clamped) {
+        if (isSprint && tileId === 30) {
+          tmpColor.copy(goldGoalColor);
+        } else if (tileId <= clamped) {
           tmpColor.copy(tileBaseColors[tileId]);
         } else {
-          tmpColor.copy(tileBaseColors[tileId]).lerp(mutedOutOfZoneColor, 0.72);
+          tmpColor.copy(tileBaseColors[tileId]).lerp(mutedOutOfZoneColor, 0.74);
         }
         instancedSlabs.setColorAt(tileId - 1, tmpColor);
       }
       if (instancedSlabs.instanceColor) {
         instancedSlabs.instanceColor.needsUpdate = true;
+      }
+      const cGoal = getTileGridCoord(clamped);
+      const goalTopY = tileTopY[clamped] ?? 0.5;
+      const xOff = isSprint ? 0.62 : -0.62;
+      crownGroup.position.set(cGoal.x + xOff, goalTopY + 0.48, cGoal.z - 0.62);
+      if (finishTurrets.length >= 2) {
+        const zOff = isSprint ? -0.78 : -0.88;
+        finishTurrets[0].position.set(cGoal.x - 0.78, goalTopY + 0.35, cGoal.z + zOff);
+        finishTurrets[1].position.set(cGoal.x + 0.78, goalTopY + 0.35, cGoal.z + zOff);
       }
     },
     updateIdle: (elapsedSec: number, reducedMotion: boolean) => {
@@ -999,6 +1154,8 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
         const pulse = 1 + Math.sin(elapsedSec * 5.2) * 0.1 * amp;
         beaconRing.scale.set(pulse, pulse, 1);
         beaconRing.rotation.z = elapsedSec * 0.9 * amp;
+        beaconPillar.scale.set(0.95 + Math.sin(elapsedSec * 3.8) * 0.07 * amp, 1, 0.95 + Math.sin(elapsedSec * 3.8) * 0.07 * amp);
+        pillarMat.opacity = 0.13 + Math.sin(elapsedSec * 3.2) * 0.05 * amp;
       }
       for (let i = 0; i < previewRings.length; i++) {
         const ring = previewRings[i];
@@ -1009,9 +1166,29 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
         const pulse = baseScale + Math.sin(elapsedSec * speed + i * 0.7) * 0.08 * amp;
         ring.scale.set(pulse, pulse, 1);
       }
+      for (let t = 0; t < trapBeacons.length; t++) {
+        const tb = trapBeacons[t];
+        if (!tb.visible) continue;
+        const by = (tb.userData.baseY as number) || 1.0;
+        tb.position.y = by + Math.sin(elapsedSec * 3.2 + t * 1.4) * 0.12 * amp;
+        tb.rotation.y = elapsedSec * 1.6 * amp + t;
+      }
+      if (aimPinGroup.visible) {
+        const by = (aimPinGroup.userData.baseY as number) || 1.15;
+        aimPinGroup.position.y = by + Math.abs(Math.sin(elapsedSec * 4.0)) * 0.18 * amp;
+        aimPinGroup.rotation.y = elapsedSec * 2.2 * amp;
+      }
+      if (!reducedMotion) {
+        const posAttr = sparkleGeo.getAttribute('position') as THREE.BufferAttribute;
+        for (let i = 0; i < sparkleCount; i++) {
+          posAttr.setY(i, sparkleBaseY[i] + Math.sin(elapsedSec * 0.9 + sparklePhases[i]) * 0.35);
+        }
+        posAttr.needsUpdate = true;
+      }
       flagGroup.rotation.y = Math.sin(elapsedSec * 2.2) * 0.18 * amp;
       crownGroup.rotation.y = elapsedSec * 0.8 * amp;
-      crownGroup.position.y = (tileTopY[100] ?? 0.5) + 0.45 + Math.sin(elapsedSec * 2.4) * 0.08 * amp;
+      crownOrbitGroup.rotation.y = -elapsedSec * 1.9 * amp;
+      crownGroup.position.y = (tileTopY[activeZoneLimit] ?? 0.5) + 0.48 + Math.sin(elapsedSec * 2.4) * 0.08 * amp;
     },
     getTileWorldTop: (tileId: number) => {
       const coord = getTileGridCoord(tileId);
