@@ -364,6 +364,22 @@ export class DoodleSceneManager {
     this.board.setPreviewTiles(markers);
   }
 
+  public setArenaOverlayMarkers(plantedTrapTiles: number[], finishTile = 30): void {
+    const markers: TilePreviewMarker[] = [];
+    const seen = new Set<number>();
+    if (finishTile >= 2 && finishTile <= 100) {
+      markers.push({ tileId: finishTile, kind: 'boss' });
+      seen.add(finishTile);
+    }
+    for (const tileId of plantedTrapTiles) {
+      if (tileId >= 2 && tileId <= 100 && !seen.has(tileId)) {
+        markers.push({ tileId, kind: 'trap' });
+        seen.add(tileId);
+      }
+    }
+    this.board.setPreviewTiles(markers);
+  }
+
   public syncPlayersFromState(state: GameState): void {
     this.latestGameState = state;
     this.latestPlayers = state.players;
