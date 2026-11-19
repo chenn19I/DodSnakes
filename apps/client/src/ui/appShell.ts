@@ -150,7 +150,6 @@ export class DoodleAppShell {
   private gameState: GameState | null = null;
   private showHowToPlay = false;
   private showSettings = false;
-  private showSupportModal = false;
   private emoteTrayOpen = false;
   private feedOpen = typeof window === 'undefined' ? true : window.innerWidth >= 880;
   private hudCompact = false;
@@ -661,8 +660,7 @@ export class DoodleAppShell {
   }
 
   private readonly handleGlobalKeyDown = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape' && (this.showSupportModal || this.showHowToPlay || this.showSettings || this.showLegendPopover)) {
-      this.showSupportModal = false;
+    if (e.key === 'Escape' && (this.showHowToPlay || this.showSettings || this.showLegendPopover)) {
       this.showHowToPlay = false;
       this.showSettings = false;
       this.showLegendPopover = false;
@@ -694,7 +692,6 @@ export class DoodleAppShell {
       this.activeChallengeModal ||
       this.showHowToPlay ||
       this.showSettings ||
-      this.showSupportModal ||
       !this.gameState
     ) {
       return;
@@ -907,7 +904,6 @@ export class DoodleAppShell {
       this.gameState?.phase === 'GAME_OVER' ? `podium:${this.gameState.winnerId}` : 'no-pod',
       this.showHowToPlay ? 'howto' : '',
       this.showSettings ? `set:${this.settings.muted}:${this.settings.musicEnabled}:${Math.round(this.settings.volume * 100)}:${this.settings.colorblindMode}:${this.settings.largeText}:${this.settings.reducedMotion}` : '',
-      this.showSupportModal ? 'support' : '',
       this.arenaPanel.isFaucetsModalOpen() ? 'faucets' : '',
     ].join('|');
     if (key === this.renderedModalKey) return;
@@ -923,7 +919,6 @@ export class DoodleAppShell {
       ${!this.studioContext && this.gameState?.phase === 'GAME_OVER' ? this.renderPodiumModal() : ''}
       ${this.showHowToPlay ? this.renderHowToPlayModal() : ''}
       ${this.showSettings ? this.renderSettingsModal() : ''}
-      ${this.showSupportModal ? this.renderSupportModal() : ''}
       ${this.arenaPanel.isFaucetsModalOpen() ? this.arenaPanel.renderFaucetsModalHtml(this.lang) : ''}
     `;
     this.bindModalEvents();
@@ -1107,7 +1102,6 @@ export class DoodleAppShell {
           this.screen !== 'game' ||
           this.showSettings ||
           this.showHowToPlay ||
-          this.showSupportModal ||
           this.studioContext ||
           this.activeChallengeModal
         ) {
@@ -1320,7 +1314,7 @@ export class DoodleAppShell {
         <div class="doodle-card sketchbook-panel menu-box stagger-item">
           ${this.renderLangToggleBtnHtml()}
           <div class="showcase-badge">${renderUiIconSvg('dice', 18)} ${en ? '3D Sketchbook Snakes & Ladders' : 'Ular Tangga Sketchbook 3D'}</div>
-          <h1 class="game-logo">DodSnake</h1>
+          <h1 class="game-logo">DodSnakes</h1>
           <p class="subtitle">${this.t('tagline')}</p>
           <button class="doodle-btn doodle-btn-primary stagger-item stagger-1" id="btn-splash-play">
             ${renderUiIconSvg('dice', 22)} ${en ? 'Play Now!' : 'Ayo Main!'}
@@ -1346,7 +1340,7 @@ export class DoodleAppShell {
         <div class="doodle-card sketchbook-panel menu-box">
           ${this.renderLangToggleBtnHtml()}
           <div class="showcase-badge">${renderUiIconSvg('trophy', 15)} ${en ? 'Adventure Mode' : 'Mode Petualangan'}</div>
-          <h1 class="game-logo">DodSnake</h1>
+          <h1 class="game-logo">DodSnakes</h1>
           <p class="subtitle">${en ? 'Pick your favorite way to play!' : 'Pilih mode bermain favoritmu!'}</p>
           <button class="doodle-btn menu-profile-card stagger-item" id="btn-menu-studio" title="${this.t('studioTitle')}">
             <span class="menu-profile-avatar">${pawnSvg(this.draftPawn, this.draftColor, 38, this.draftAccessory)}</span>
@@ -1384,7 +1378,6 @@ export class DoodleAppShell {
             <button class="doodle-btn" id="btn-menu-howto">${renderUiIconSvg('help', 15)} ${this.t('howToPlay')}</button>
             <button class="doodle-btn" id="btn-menu-faucets">🚰 ${en ? 'Faucets' : 'Faucet'}</button>
             <button class="doodle-btn" id="btn-menu-settings">${renderUiIconSvg('settings', 15)} ${this.t('settings')}</button>
-            <button class="doodle-btn doodle-btn-pink" id="btn-menu-support">${renderUiIconSvg('heart', 15)} ${this.t('supportBtn')}</button>
           </div>
           <div class="showcase-hint">${en ? 'Drag the 3D board to orbit the diorama' : 'Tarik papan 3D untuk mengintip diorama'}</div>
           <div class="protocol-disclaimer">${escapeHtml(PROTOCOL_DISCLAIMER)}</div>
@@ -2102,7 +2095,6 @@ export class DoodleAppShell {
           <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">
             ${isHost ? `<button class="doodle-btn doodle-btn-primary" style="flex:1" id="btn-podium-rematch">${renderUiIconSvg('reset', 16)} ${this.t('playAgain')}</button>` : ''}
             <button class="doodle-btn" style="flex:1" id="btn-podium-menu">${renderUiIconSvg('home', 16)} ${this.t('mainMenu')}</button>
-            <button class="doodle-btn doodle-btn-pink" id="btn-podium-support">${renderUiIconSvg('heart', 16)} ${this.t('supportBtn')}</button>
           </div>
         </div>
       </div>
@@ -2430,24 +2422,6 @@ export class DoodleAppShell {
     `;
   }
 
-  private renderSupportModal(): string {
-    return `
-      <div class="challenge-backdrop" id="support-modal-backdrop">
-        <div class="doodle-card menu-box setup-card-compact stagger-item">
-          <h2 class="modal-heading">${renderUiIconSvg('heart', 20)} <span>${this.t('supportTitle')}</span></h2>
-          <div class="support-modal-body">
-            <p class="support-desc">${escapeHtml(this.t('supportDesc'))}</p>
-            <div class="support-qr-frame">
-              <img class="support-qr-img" src="/saweria-qr.png" alt="Saweria QR DodSnake" />
-            </div>
-            <p class="support-note">${escapeHtml(this.t('supportNote'))}</p>
-          </div>
-          <button class="doodle-btn doodle-btn-primary" id="btn-close-support">${this.t('close')}</button>
-        </div>
-      </div>
-    `;
-  }
-
   private renderDebugPanel(): string {
     return `
       <div class="debug-panel">
@@ -2556,11 +2530,6 @@ export class DoodleAppShell {
     q('#btn-menu-settings')?.addEventListener('click', () => {
       this.sound.playUiClick();
       this.showSettings = true;
-      this.renderModalsLayer();
-    });
-    q('#btn-menu-support')?.addEventListener('click', () => {
-      this.sound.playUiClick();
-      this.showSupportModal = true;
       this.renderModalsLayer();
     });
     q('#btn-back-menu')?.addEventListener('click', () => {
@@ -2864,8 +2833,8 @@ export class DoodleAppShell {
       } else if (typeof navigator.share === 'function') {
         void navigator
           .share({
-            title: this.lang === 'en' ? 'DodSnake: Join Room!' : 'DodSnake: Gabung Room!',
-            text: this.lang === 'en' ? `Play DodSnake together! Room code: ${roomCode}` : `Main DodSnake bareng yuk! Kode room: ${roomCode}`,
+            title: this.lang === 'en' ? 'DodSnakes: Join Room!' : 'DodSnakes: Gabung Room!',
+            text: this.lang === 'en' ? `Play DodSnakes together! Room code: ${roomCode}` : `Main DodSnakes bareng yuk! Kode room: ${roomCode}`,
             url,
           })
           .catch(() => this.showToast(this.lang === 'en' ? `Room code: ${roomCode}` : `Kode room: ${roomCode}`));
@@ -3113,11 +3082,6 @@ export class DoodleAppShell {
       this.sound.playUiClick();
       this.controller?.leave();
     });
-    q('#btn-podium-support')?.addEventListener('click', () => {
-      this.sound.playUiClick();
-      this.showSupportModal = true;
-      this.renderModalsLayer();
-    });
     q('#btn-close-howto')?.addEventListener('click', () => {
       this.sound.playUiClick();
       this.showHowToPlay = false;
@@ -3128,18 +3092,6 @@ export class DoodleAppShell {
       this.showSettings = false;
       this.renderModalsLayer();
       this.renderMainLayer();
-    });
-    q('#btn-close-support')?.addEventListener('click', () => {
-      this.sound.playUiClick();
-      this.showSupportModal = false;
-      this.renderModalsLayer();
-    });
-    q('#support-modal-backdrop')?.addEventListener('click', (e) => {
-      if (e.target === e.currentTarget) {
-        this.sound.playUiClick();
-        this.showSupportModal = false;
-        this.renderModalsLayer();
-      }
     });
     q<HTMLSelectElement>('#set-lang')?.addEventListener('change', (e) => {
       const val = (e.target as HTMLSelectElement).value;

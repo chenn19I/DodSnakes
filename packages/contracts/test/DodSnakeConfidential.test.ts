@@ -4,7 +4,7 @@ import { FhevmType } from "@fhevm/hardhat-plugin";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
 import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 
-describe("DodSnake Confidential FHEVM & ERC-7984 Suite", function () {
+describe("DodSnakes Confidential FHEVM & ERC-7984 Suite", function () {
   let signers: HardhatEthersSigner[];
   let deployer: HardhatEthersSigner;
   let alice: HardhatEthersSigner;

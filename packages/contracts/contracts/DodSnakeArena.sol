@@ -17,7 +17,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 
 /**
  * @title DodSnakeArena
- * @notice Onchain FHEVM Confidential Snakes & Ladders engine for DodSnake.
+ * @notice Onchain FHEVM Confidential Snakes & Ladders engine for DodSnakes.
  *
  *         Confidential mechanics impossible on a transparent blockchain:
  *         1. Secret Board Traps (euint8 tile & kind): planted encrypted onchain; non-matching
@@ -241,7 +241,7 @@ contract DodSnakeArena is ZamaEthereumConfig, ReentrancyGuard {
     }
 
     /**
-     * @notice Creates a new confidential DodSnake match.
+     * @notice Creates a new confidential DodSnakes match.
      * @param boardMode 0 = Classic (100 tiles), 1 = Sprint (30 tiles, fast Sepolia demo).
      * @param maxPlayers 1 = Solo vs FHE House Traps, 2..4 = Multiplayer.
      * @param stakeToken address(0) for free-play, or cDOD / Sepolia cUSDT ERC-7984 token.

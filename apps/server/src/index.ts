@@ -59,7 +59,7 @@ app.use((_req, res, next) => {
 });
 app.use(cors({ origin: corsOriginOption }));
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', game: 'DodSnake' });
+  res.json({ status: 'ok', game: 'DodSnakes' });
 });
 
 // Serve built client static files in production if present
@@ -283,5 +283,5 @@ io.on('connection', (socket) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Server DodSnake aktif di http://localhost:${PORT}`);
+  console.log(`Server DodSnakes aktif di http://localhost:${PORT}`);
 });

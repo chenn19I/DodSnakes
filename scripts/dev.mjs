@@ -16,7 +16,7 @@ function launch(label, args) {
   return child;
 }
 
-console.log('Menyalakan server dan client DodSnake...');
+console.log('Menyalakan server dan client DodSnakes...');
 const server = launch('server', ['run', 'dev', '--workspace=@doodle-dash/server']);
 const client = launch('client', ['run', 'dev', '--workspace=@doodle-dash/client']);
 

@@ -8,7 +8,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title DodChipERC7984
- * @notice Confidential ERC-7984 fungible game chip (cDOD) for DodSnake Confidential Arena.
+ * @notice Confidential ERC-7984 fungible game chip (cDOD) for DodSnakes Confidential Arena.
  *         All balances and transfer amounts remain encrypted onchain as FHE euint64 ciphertexts.
  *         Includes a built-in Sepolia testnet faucet so players can mint encrypted chips to play.
  */
@@ -25,7 +25,7 @@ contract DodChipERC7984 is ZamaEthereumConfig, ERC7984, Ownable {
     error InvalidBatchInput();
 
     constructor()
-        ERC7984("DodChip", "cDOD", "https://dodsnake.vercel.app/dodchip.json")
+        ERC7984("DodChip", "cDOD", "https://dodsnakes.vercel.app/dodchip.json")
         Ownable(msg.sender)
     {
         _mint(msg.sender, FHE.asEuint64(INITIAL_TREASURY));

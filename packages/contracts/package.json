@@ -2,7 +2,7 @@
   "name": "@doodle-dash/contracts",
   "version": "1.0.0",
   "private": true,
-  "description": "Confidential FHEVM smart contracts and Sepolia testnet suite for DodSnake",
+  "description": "Confidential FHEVM smart contracts and Sepolia testnet suite for DodSnakes",
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",
