@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import gsap from 'gsap';
 import {
   BOARD_LAYOUT,
+  TILE_SPACING,
   getTileGridCoord,
   previewDiceLanding,
   type GameEvent,
@@ -77,7 +78,7 @@ function createSafeWebGLRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer
       // Try next safer WebGL configuration before entering 2D fallback mode
     }
   }
-  console.warn('[DodSnake] WebGL context unavailable; falling back to 2D sketchbook mode.');
+  console.warn('[DodSnakes] WebGL context unavailable; falling back to 2D sketchbook mode.');
   return null;
 }
 
@@ -119,6 +120,13 @@ export class DoodleSceneManager {
   private latestPlayers: Player[] = [];
   private latestGameState: GameState | null = null;
   private fpsSamples: number[] = [];
+  private arenaModeActive = false;
+  private pinnedArenaMarkers: TilePreviewMarker[] = [];
+  private readonly raycaster = new THREE.Raycaster();
+  private readonly pickPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.45);
+  private readonly pickTmpHit = new THREE.Vector3();
+  private readonly pickNdc = new THREE.Vector2();
+  private onTileClick?: (tileId: number) => void;
   private onStatsUpdate?: (stats: SceneDebugStats) => void;
   private onSpeedChange?: (enabled: boolean) => void;
 
@@ -200,6 +208,43 @@ export class DoodleSceneManager {
     this.onSpeedChange = cb;
   }
 
+  public setTileClickCallback(cb?: (tileId: number) => void): void {
+    this.onTileClick = cb;
+  }
+
+  public pickTileFromClientXY(clientX: number, clientY: number): number | null {
+    const rect = this.canvasEl.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    this.pickNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    this.pickNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.pickNdc, this.cameraRig.camera);
+    if (!this.raycaster.ray.intersectPlane(this.pickPlane, this.pickTmpHit)) {
+      return null;
+    }
+    const halfBoard = 4.5 * TILE_SPACING;
+    const col = Math.round((this.pickTmpHit.x + halfBoard) / TILE_SPACING);
+    const row = 9 - Math.round((this.pickTmpHit.z + halfBoard) / TILE_SPACING);
+    if (col < 0 || col > 9 || row < 0 || row > 9) return null;
+    const offset = row % 2 === 0 ? col : 9 - col;
+    const tileId = row * 10 + offset + 1;
+    const center = getTileGridCoord(tileId);
+    if (
+      Math.abs(this.pickTmpHit.x - center.x) > TILE_SPACING * 0.54 ||
+      Math.abs(this.pickTmpHit.z - center.z) > TILE_SPACING * 0.54
+    ) {
+      return null;
+    }
+    return tileId;
+  }
+
+  public handleCanvasTap(clientX: number, clientY: number): void {
+    if (!this.onTileClick) return;
+    const tileId = this.pickTileFromClientXY(clientX, clientY);
+    if (tileId !== null) {
+      this.onTileClick(tileId);
+    }
+  }
+
   public isSpeedUp(): boolean {
     return this.speedMultiplier > 1;
   }
@@ -237,7 +282,7 @@ export class DoodleSceneManager {
     this.showcaseMode = enabled;
     if (enabled) {
       this.cameraRig.setMode('showcase');
-      this.board.setPreviewTiles([]);
+      this.board.setPreviewTiles(this.arenaModeActive ? this.pinnedArenaMarkers : []);
       this.board.setActiveTile(null);
     } else {
       this.cameraRig.setMode(this.preferredCameraMode);
@@ -331,6 +376,10 @@ export class DoodleSceneManager {
   }
 
   public updateLandingPreview(player: Player | null, show: boolean): void {
+    if (this.arenaModeActive) {
+      this.board.setPreviewTiles(this.pinnedArenaMarkers);
+      return;
+    }
     if (!show || !player || this.isPlayingQueue || this.showcaseMode) {
       this.board.setPreviewTiles([]);
       return;
@@ -364,9 +413,22 @@ export class DoodleSceneManager {
     this.board.setPreviewTiles(markers);
   }
 
-  public setArenaOverlayMarkers(plantedTrapTiles: number[], finishTile = 30): void {
+  public setArenaOverlayMarkers(
+    plantedTrapTiles: number[],
+    finishTile = 30,
+    selectedTargetTile = 0,
+  ): void {
+    if (finishTile <= 0) {
+      this.arenaModeActive = false;
+      this.pinnedArenaMarkers = [];
+      this.board.setPreviewTiles([]);
+      return;
+    }
+
+    this.arenaModeActive = true;
     const markers: TilePreviewMarker[] = [];
     const seen = new Set<number>();
+
     if (finishTile >= 2 && finishTile <= 100) {
       markers.push({ tileId: finishTile, kind: 'boss' });
       seen.add(finishTile);
@@ -377,6 +439,26 @@ export class DoodleSceneManager {
         seen.add(tileId);
       }
     }
+    if (selectedTargetTile >= 2 && selectedTargetTile < finishTile && !seen.has(selectedTargetTile)) {
+      markers.push({ tileId: selectedTargetTile, kind: 'normal' });
+      seen.add(selectedTargetTile);
+    }
+    if (finishTile === 30) {
+      for (const ladderTile of [3, 8, 15]) {
+        if (!seen.has(ladderTile)) {
+          markers.push({ tileId: ladderTile, kind: 'ladder' });
+          seen.add(ladderTile);
+        }
+      }
+      for (const snakeTile of [14, 21, 27]) {
+        if (!seen.has(snakeTile)) {
+          markers.push({ tileId: snakeTile, kind: 'snake' });
+          seen.add(snakeTile);
+        }
+      }
+    }
+
+    this.pinnedArenaMarkers = markers;
     this.board.setPreviewTiles(markers);
   }
 
@@ -435,7 +517,7 @@ export class DoodleSceneManager {
         !active.isBot && (state.phase === 'TURN_BEGIN' || state.phase === 'ROLL'),
       );
     } else if (!this.isPlayingQueue) {
-      this.board.setPreviewTiles([]);
+      this.board.setPreviewTiles(this.arenaModeActive ? this.pinnedArenaMarkers : []);
     }
     if (this.renderer) {
       this.renderer.shadowMap.needsUpdate = true;
@@ -491,7 +573,7 @@ export class DoodleSceneManager {
       this.syncPlayersFromState(finalState);
       return Promise.resolve();
     }
-    this.board.setPreviewTiles([]);
+    this.board.setPreviewTiles(this.arenaModeActive ? this.pinnedArenaMarkers : []);
     return new Promise((resolve) => {
       let settled = false;
       let watchdogId: ReturnType<typeof setTimeout> | null = null;
