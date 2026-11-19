@@ -415,16 +415,21 @@ function buildSnake(
   addOutlineMesh(bodyMesh, outlineCtrl.material);
   group.add(bodyMesh);
 
-  // Head group at `headPos`
+  // Head group at `headPos` aligned cleanly out from the neck tangent and tilted gently up
   const headGroup = new THREE.Group();
   headGroup.position.copy(headPos);
-  const headForward = dir.clone().setY(0).normalize().negate();
+  const neckTan = curve.getTangent(0.02).setY(0).normalize();
+  const headForward = new THREE.Vector3(-neckTan.x, 0.22, -neckTan.z).normalize();
   headGroup.lookAt(headPos.clone().add(headForward));
+
+  // Nested tilt group preserves `headGroup.lookAt` orientation during idle wobble
+  const headTiltGroup = new THREE.Group();
+  headGroup.add(headTiltGroup);
 
   const headMesh = new THREE.Mesh(assets.headGeo, primaryMat);
   headMesh.castShadow = true;
   addOutlineMesh(headMesh, outlineCtrl.material);
-  headGroup.add(headMesh);
+  headTiltGroup.add(headMesh);
 
   // Big cute eyes, cheeks + personality eyelids
   const eyelids: THREE.Mesh[] = [];
@@ -432,7 +437,7 @@ function buildSnake(
     const eye = new THREE.Mesh(assets.eyeWhiteGeo, assets.whiteMat);
     eye.position.set(side * 0.16, 0.16, 0.18);
     addOutlineMesh(eye, outlineCtrl.material);
-    headGroup.add(eye);
+    headTiltGroup.add(eye);
 
     const pupil = new THREE.Mesh(assets.pupilGeo, assets.pupilMat);
     pupil.position.set(0, 0, 0.08);
@@ -442,31 +447,31 @@ function buildSnake(
     lid.position.copy(eye.position);
     lid.rotation.x = getBaseEyelidTilt(def.personality);
     eyelids.push(lid);
-    headGroup.add(lid);
+    headTiltGroup.add(lid);
 
     const blush = new THREE.Mesh(assets.blushGeo, assets.blushMat);
     blush.scale.set(1.2, 0.65, 0.65);
     blush.position.set(side * 0.25, -0.02, 0.22);
-    headGroup.add(blush);
+    headTiltGroup.add(blush);
   }
 
   // Cute snout bridge & mini crest tuft on top of head
   const snoutMesh = new THREE.Mesh(assets.blushGeo, primaryMat);
   snoutMesh.scale.set(2.2, 1.3, 1.8);
   snoutMesh.position.set(0, -0.02, 0.27);
-  headGroup.add(snoutMesh);
+  headTiltGroup.add(snoutMesh);
 
   const crestMat = idx % 2 === 0 ? assets.tongueMat : assets.blushMat;
   const crestMesh = new THREE.Mesh(assets.pupilGeo, crestMat);
   crestMesh.scale.set(1.4, 1.9, 1.2);
   crestMesh.position.set(0, 0.28, 0.02);
   addOutlineMesh(crestMesh, outlineCtrl.material);
-  headGroup.add(crestMesh);
+  headTiltGroup.add(crestMesh);
 
   // Cute forked tongue
   const tongue = new THREE.Mesh(assets.tongueGeo, assets.tongueMat);
   tongue.position.set(0, -0.055, 0.31);
-  headGroup.add(tongue);
+  headTiltGroup.add(tongue);
 
   // Swallow gulp bulge ("glek")
   const gulpBulge = new THREE.Mesh(assets.gulpGeo, primaryMat);
@@ -507,7 +512,7 @@ function buildSnake(
     updateIdle: (elapsedSec: number, reducedMotion: boolean) => {
       if (awake) return;
       const ampMul = reducedMotion ? 0.2 : 1;
-      headGroup.rotation.z = Math.sin(elapsedSec * 1.8 + idx) * 0.1 * ampMul;
+      headTiltGroup.rotation.z = Math.sin(elapsedSec * 1.8 + idx) * 0.1 * ampMul;
       headGroup.position.y = headPos.y + Math.sin(elapsedSec * 2.2 + idx) * 0.04 * ampMul;
 
       // Flick tongue periodically
