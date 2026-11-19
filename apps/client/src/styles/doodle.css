@@ -2879,3 +2879,375 @@ body.colorblind-mode .lobby-ready-pill.is-wait {
   color: #4a1212;
 }
 
+/* ─── Confidential Onchain Arena, Faucets & Disclaimer ─── */
+.protocol-disclaimer {
+  margin-top: 8px;
+  padding: 5px 10px;
+  border-radius: 10px;
+  border: 2px dashed rgba(36, 34, 45, 0.35);
+  background: rgba(255, 251, 240, 0.85);
+  font-size: 0.72rem;
+  line-height: 1.25;
+  text-align: center;
+  color: rgba(36, 34, 45, 0.82);
+}
+
+.doodle-btn-arena {
+  background: linear-gradient(135deg, #ffd15c 0%, #ffb5e8 50%, #9bf6ff 100%);
+  justify-content: space-between;
+  padding: 10px 14px;
+}
+
+.arena-new-pill {
+  font-size: 0.68rem;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 2px solid var(--ink);
+  background: #ffffff;
+}
+
+.arena-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 10px;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.arena-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 246, 229, 0.94);
+  border: 3px solid var(--ink);
+  border-radius: 18px;
+  box-shadow: 0 4px 0 var(--ink);
+  padding: 6px 10px;
+}
+
+.arena-topbar-left,
+.arena-topbar-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.arena-mode-switch {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.arena-chip-pill,
+.arena-addr-badge {
+  padding: 4px 10px;
+  border-radius: 12px;
+  border: 2px solid var(--ink);
+  background: #fffdf7;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.arena-busy-pill {
+  align-self: center;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 2.5px solid var(--ink);
+  background: var(--yellow);
+  box-shadow: 0 3px 0 var(--ink);
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+
+.arena-config-drawer {
+  align-self: flex-end;
+  width: min(440px, 100%);
+  padding: 12px;
+}
+
+.arena-warn-note {
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 2px solid #c96a00;
+  background: #fff1cc;
+  font-size: 0.78rem;
+  line-height: 1.3;
+  margin-bottom: 6px;
+}
+
+.arena-lobby-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  overflow: auto;
+}
+
+.arena-lobby-card {
+  width: min(560px, 100%);
+  max-height: 100%;
+  overflow: auto;
+}
+
+.arena-steps-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.arena-step-pill {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 2px solid var(--ink);
+  background: #ffffff;
+}
+
+.arena-step-pill.is-done {
+  background: var(--mint);
+}
+
+.arena-setup-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.arena-setup-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.arena-hud-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.arena-vault-card,
+.arena-proof-card {
+  width: min(310px, 46vw);
+  max-height: 62vh;
+  overflow: auto;
+  padding: 10px 12px;
+  background: rgba(255, 246, 229, 0.94);
+}
+
+.arena-turn-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 2px solid var(--ink);
+  background: #ffffff;
+}
+
+.arena-turn-badge.is-mine {
+  background: var(--mint);
+}
+
+.arena-stats-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.arena-secret-box {
+  margin-top: 6px;
+  padding: 7px 9px;
+  border-radius: 12px;
+  border: 2px solid var(--ink);
+  background: #fffdf7;
+}
+
+.arena-locked-cipher {
+  font-size: 0.74rem;
+  opacity: 0.78;
+  margin-top: 3px;
+  word-break: break-all;
+}
+
+.arena-revealed-secret {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 3px;
+  font-size: 0.8rem;
+}
+
+.arena-proof-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.arena-proof-item {
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 2px solid rgba(36, 34, 45, 0.25);
+  background: #ffffff;
+  font-size: 0.74rem;
+}
+
+.arena-proof-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.arena-kind-tag {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 6px;
+  border: 1.5px solid var(--ink);
+  background: var(--yellow);
+}
+
+.arena-kind-tag.is-encrypt {
+  background: var(--purple);
+}
+
+.arena-kind-tag.is-user_decrypt {
+  background: var(--mint);
+}
+
+.arena-kind-tag.is-public_decrypt {
+  background: var(--blue);
+}
+
+.arena-proof-detail {
+  opacity: 0.84;
+  margin-top: 2px;
+}
+
+.arena-proof-hash {
+  font-size: 0.7rem;
+  opacity: 0.75;
+}
+
+.arena-tx-link {
+  color: #1558d6;
+  font-weight: 700;
+  text-decoration: underline;
+  font-size: 0.72rem;
+}
+
+.arena-bottom-deck {
+  display: flex;
+  justify-content: center;
+}
+
+.arena-action-bar,
+.arena-win-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(255, 246, 229, 0.96);
+}
+
+.arena-trap-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.arena-disclaimer-bar,
+.arena-disclaimer-inline {
+  align-self: center;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 2px solid var(--ink);
+  background: rgba(255, 246, 229, 0.94);
+  font-size: 0.73rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.arena-disclaimer-inline {
+  margin-top: 8px;
+}
+
+.faucets-grid,
+.privacy-matrix-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.faucet-card {
+  padding: 8px 10px;
+  border-radius: 14px;
+  border: 2.5px solid var(--ink);
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.82rem;
+}
+
+.faucet-token-badge {
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1.5px solid var(--ink);
+  background: var(--yellow);
+  white-space: nowrap;
+}
+
+.faucet-wallets-box {
+  padding: 8px 10px;
+  border-radius: 14px;
+  border: 2.5px solid var(--ink);
+  background: #fffdf7;
+  margin-top: 4px;
+}
+
+.testnet-addr-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.testnet-copy-btn {
+  min-height: 28px;
+  padding: 2px 6px;
+  font-size: 0.74rem;
+}
+
+@media (max-width: 760px) {
+  .arena-hud-layout {
+    flex-direction: column;
+    overflow: auto;
+  }
+  .arena-vault-card,
+  .arena-proof-card {
+    width: 100%;
+    max-height: 220px;
+  }
+}
+
+
