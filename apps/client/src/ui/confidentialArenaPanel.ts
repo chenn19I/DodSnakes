@@ -76,6 +76,7 @@ export class ConfidentialArenaPanel {
   private trapTileInput = 12;
   private trapKindInput = 1;
   private brakeSeatInput = 0;
+  private showVaultDrawer = true;
   private showProofDrawer = true;
   private showContractConfig = false;
   private showBlindDuelModal = false;
@@ -124,6 +125,37 @@ export class ConfidentialArenaPanel {
       this.pollTimerId = null;
     }
     this.pollInFlight = false;
+    this.scene.setTileClickCallback(undefined);
+  }
+
+  private bindBoardTilePicker(en: boolean, root: HTMLElement): void {
+    if (!this.snapshot || this.snapshot.status !== 1) {
+      this.scene.setTileClickCallback(undefined);
+      return;
+    }
+    this.scene.setTileClickCallback((tileId: number) => {
+      if (!this.snapshot || this.snapshot.status !== 1 || this.isAnimatingRoll || this.busyLabel) {
+        return;
+      }
+      if (tileId < 2 || tileId >= this.snapshot.boardSize) {
+        this.onToast(
+          en
+            ? `Pick tiles 2–${this.snapshot.boardSize - 1} for Secret Traps.`
+            : `Pilih kotak 2–${this.snapshot.boardSize - 1} untuk Jebakan Rahasia.`,
+        );
+        return;
+      }
+      this.trapTileInput = tileId;
+      const inp = root.querySelector<HTMLInputElement>('#inp-trap-tile');
+      if (inp) inp.value = String(tileId);
+      this.scene.setArenaOverlayMarkers(
+        this.snapshot.myPlantedTrapTiles,
+        this.snapshot.boardSize,
+        this.trapTileInput,
+      );
+      this.sound.playUiClick();
+      this.onToast(en ? `🎯 Trap Target: Tile #${tileId}` : `🎯 Target Jebakan: Kotak #${tileId}`);
+    });
   }
 
   private ensureSepoliaPoller(en: boolean, draft: ArenaPlayerDraft): void {
@@ -315,7 +347,11 @@ export class ConfidentialArenaPanel {
     this.scene.setShowcaseMode(false);
     const fakeState = this.buildSceneGameState(this.snapshot, draft);
     this.scene.syncPlayersFromState(fakeState);
-    this.scene.setArenaOverlayMarkers(this.snapshot.myPlantedTrapTiles, this.snapshot.boardSize);
+    this.scene.setArenaOverlayMarkers(
+      this.snapshot.myPlantedTrapTiles,
+      this.snapshot.boardSize,
+      this.snapshot.status === 1 ? this.trapTileInput : 0,
+    );
     const activePlayer = fakeState.players[fakeState.currentTurnIndex] ?? fakeState.players[0];
     if (activePlayer) {
       this.scene.focusTile(activePlayer.position);
@@ -445,7 +481,11 @@ export class ConfidentialArenaPanel {
       }
 
       await this.scene.enqueueEvents(events, nextState);
-      this.scene.setArenaOverlayMarkers(snapAfter.myPlantedTrapTiles, snapAfter.boardSize);
+      this.scene.setArenaOverlayMarkers(
+        snapAfter.myPlantedTrapTiles,
+        snapAfter.boardSize,
+        snapAfter.status === 1 ? this.trapTileInput : 0,
+      );
     } finally {
       this.isAnimatingRoll = false;
     }
@@ -509,6 +549,13 @@ export class ConfidentialArenaPanel {
             <button class="doodle-btn" id="btn-arena-privacy-modal" style="min-height:34px;padding:3px 10px;font-size:0.82rem">
               🛡️ ${en ? 'Why FHE?' : 'Kenapa FHE?'}
             </button>
+            ${
+              isMatchActive
+                ? `<button class="doodle-btn" id="btn-arena-cam-toggle" style="min-height:34px;padding:3px 10px;font-size:0.82rem" title="${en ? 'Toggle full-board overview vs follow camera' : 'Ganti kamera keseluruhan papan / ikuti bidak'}">
+                     🎥 ${this.scene.getPreferredCameraMode() === 'overview' ? (en ? 'Follow' : 'Ikuti') : (en ? 'Overview' : 'Semua Kotak')}
+                   </button>`
+                : ''
+            }
           </div>
 
           <div class="arena-topbar-right">
@@ -680,7 +727,7 @@ export class ConfidentialArenaPanel {
             </button>
           </div>
           <h2 style="margin:6px 0 4px;font-family:var(--font-display)">
-            ${en ? 'DodSnake Confidential Arena' : 'Arena Rahasia DodSnake'}
+            ${en ? 'DodSnakes Confidential Arena' : 'Arena Rahasia DodSnakes'}
           </h2>
           <p style="margin:0 0 10px;font-size:0.86rem;opacity:0.85">
             ${
@@ -819,21 +866,26 @@ export class ConfidentialArenaPanel {
         <div class="doodle-card arena-vault-card ui-interactive">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
             <b>🔐 ${en ? `Match #${snap.matchId}` : `Laga #${snap.matchId}`}</b>
-            <span class="arena-turn-badge ${isMyTurn ? 'is-mine' : ''}">
-              ${
-                snap.status === 2
-                  ? en
-                    ? 'Finished'
-                    : 'Selesai'
-                  : isMyTurn
+            <div style="display:flex;align-items:center;gap:4px">
+              <span class="arena-turn-badge ${isMyTurn ? 'is-mine' : ''}">
+                ${
+                  snap.status === 2
                     ? en
-                      ? 'Your Turn'
-                      : 'Giliranmu'
-                    : en
-                      ? 'Waiting Rival'
-                      : 'Menunggu Lawan'
-              }
-            </span>
+                      ? 'Finished'
+                      : 'Selesai'
+                    : isMyTurn
+                      ? en
+                        ? 'Your Turn'
+                        : 'Giliranmu'
+                      : en
+                        ? 'Waiting Rival'
+                        : 'Menunggu Lawan'
+                }
+              </span>
+              <button class="doodle-btn" id="btn-toggle-vault" style="min-height:24px;padding:1px 7px;font-size:0.72rem">
+                ${this.showVaultDrawer ? '−' : '+'}
+              </button>
+            </div>
           </div>
 
           <div class="arena-stats-row">
@@ -842,7 +894,9 @@ export class ConfidentialArenaPanel {
             <span>🪜 ${me?.laddersClimbed ?? 0}</span>
             <span>⚔️ ${me?.duelWins ?? 0}</span>
           </div>
-
+          ${
+            this.showVaultDrawer
+              ? `
           ${
             snap.players.length > 1
               ? `<div class="arena-players-strip">
@@ -884,6 +938,16 @@ export class ConfidentialArenaPanel {
               ⚡ ${en ? '1 Hidden FHE Golden Warp (+3 steps +1★) active on board!' : '1 Golden Warp FHE tersembunyi (+3 langkah +1★) aktif di papan!'}
             </div>
             ${
+              snap.boardSize === 30
+                ? `<div class="arena-sprint-guide">
+                     🪜 3→11 • 8→19 • 15→24 &nbsp;|&nbsp; 🐍 14↘5 • 21↘10 • 27↘18
+                   </div>`
+                : ''
+            }
+            <div style="font-size:0.69rem;margin-top:3px;opacity:0.78">
+              🎯 ${en ? 'Tip: Click any 3D board tile to aim a trap.' : 'Tips: Klik petak di papan 3D untuk bidik jebakan.'}
+            </div>
+            ${
               snap.myPlantedTrapTiles.length > 0
                 ? `<div style="font-size:0.75rem;margin-top:4px;color:#b21f66">
                      ${en ? 'Your hidden traps' : 'Jebakan tersembunyimu'}: <b>${snap.myPlantedTrapTiles.map((t) => `#${t}`).join(', ')}</b>
@@ -899,7 +963,9 @@ export class ConfidentialArenaPanel {
             <button class="doodle-btn" id="btn-arena-new-match" style="min-height:32px;padding:2px 8px;font-size:0.78rem">
               ${en ? 'New' : 'Baru'}
             </button>
-          </div>
+          </div>`
+              : ''
+          }
         </div>
 
         <div class="doodle-card arena-proof-card ui-interactive">
@@ -948,9 +1014,18 @@ export class ConfidentialArenaPanel {
                  <b>🏆 ${isWinner ? (en ? 'Victory! You reached the goal!' : 'Menang! Kamu mencapai finis!') : `${shortAddr(snap.winner)} Won!`}</b>
                  ${
                    !snap.payoutClaimed
-                     ? `<button class="doodle-btn doodle-btn-primary" id="btn-arena-claim-pot">💰 ${en ? 'Claim Encrypted ERC-7984 Pot' : 'Klaim Pot ERC-7984 Terenkripsi'}</button>`
+                     ? `<button class="doodle-btn doodle-btn-primary" id="btn-arena-claim-pot">💰 ${
+                         isWinner
+                           ? en
+                             ? 'Claim Encrypted ERC-7984 Pot'
+                             : 'Klaim Pot ERC-7984 Terenkripsi'
+                           : en
+                             ? 'Settle Pot to Winner'
+                             : 'Kirim Pot ke Pemenang'
+                       }</button>`
                      : `<span>✓ ${en ? 'Encrypted Pot Paid Out' : 'Pot Terenkripsi Dibayarkan'}</span>`
                  }
+                 <button class="doodle-btn doodle-btn-mint" id="btn-arena-win-new">🎲 ${en ? 'Play Again' : 'Main Lagi'}</button>
                </div>`;
           }
 
@@ -1167,8 +1242,8 @@ export class ConfidentialArenaPanel {
           <p style="margin:6px 0 10px;font-size:0.84rem;opacity:0.85">
             ${
               en
-                ? 'On a transparent blockchain, storage slots & mempool transactions leak every hidden trap, bluff, inventory shield, and secret mission. DodSnake uses FHEVM so the game stays fair yet truly hidden:'
-                : 'Di blockchain transparan, slot storage & mempool membocorkan posisi jebakan, pilihan duel, dan jumlah perisai. DodSnake memakai FHEVM agar semuanya tetap adil sekaligus rahasia:'
+                ? 'On a transparent blockchain, storage slots & mempool transactions leak every hidden trap, bluff, inventory shield, and secret mission. DodSnakes uses FHEVM so the game stays fair yet truly hidden:'
+                : 'Di blockchain transparan, slot storage & mempool membocorkan posisi jebakan, pilihan duel, dan jumlah perisai. DodSnakes memakai FHEVM agar semuanya tetap adil sekaligus rahasia:'
             }
           </p>
           <div class="privacy-matrix-grid">
@@ -1383,10 +1458,26 @@ export class ConfidentialArenaPanel {
     });
     q('#btn-arena-join-match')?.addEventListener('click', () => void this.handleJoinMatch(en, draft));
 
+    this.bindBoardTilePicker(en, root);
+
+    q('#btn-arena-cam-toggle')?.addEventListener('click', () => {
+      this.sound.playUiClick();
+      const nextMode = this.scene.getPreferredCameraMode() === 'overview' ? 'follow' : 'overview';
+      this.scene.setPreferredCameraMode(nextMode);
+      this.onRequestRender();
+    });
+
     q('#btn-arena-unlock-secrets')?.addEventListener('click', () => void this.handleUnlockSecrets(en, draft));
     q('#btn-arena-roll')?.addEventListener('click', () => void this.handleRollDice(en, draft));
     q<HTMLInputElement>('#inp-trap-tile')?.addEventListener('input', (e) => {
       this.trapTileInput = Number((e.target as HTMLInputElement).value || 2);
+      if (this.snapshot && this.snapshot.status === 1) {
+        this.scene.setArenaOverlayMarkers(
+          this.snapshot.myPlantedTrapTiles,
+          this.snapshot.boardSize,
+          this.trapTileInput,
+        );
+      }
     });
     q<HTMLSelectElement>('#sel-trap-kind')?.addEventListener('change', (e) => {
       this.trapKindInput = Number((e.target as HTMLSelectElement).value || 1);
@@ -1428,12 +1519,19 @@ export class ConfidentialArenaPanel {
     q('#btn-refresh-lobby')?.addEventListener('click', () => void this.handleRefreshMatch(en, draft));
     q('#btn-arena-start-early')?.addEventListener('click', () => void this.handleStartEarly(en, draft));
     q('#btn-arena-resume-pending')?.addEventListener('click', () => void this.handleResumePending(en, draft));
-    q('#btn-arena-new-match')?.addEventListener('click', () => {
+    const resetToSetup = () => {
       this.sound.playUiClick();
       this.stopPolling();
       this.snapshot = null;
       this.activeMatchId = null;
       this.syncSceneWithArena(draft);
+      this.onRequestRender();
+    };
+    q('#btn-arena-new-match')?.addEventListener('click', resetToSetup);
+    q('#btn-arena-win-new')?.addEventListener('click', resetToSetup);
+    q('#btn-toggle-vault')?.addEventListener('click', () => {
+      this.sound.playUiClick();
+      this.showVaultDrawer = !this.showVaultDrawer;
       this.onRequestRender();
     });
     q('#btn-toggle-proofs')?.addEventListener('click', () => {
@@ -1908,21 +2006,23 @@ export class ConfidentialArenaPanel {
     this.sound.playUiClick();
     this.showBlindDuelModal = false;
     if (this.mode === 'preview') {
+      const icons = ['🪨', '📄', '✂️'];
       const res = this.sim.playBlindDuel(choice);
+      const matchup = `${icons[choice] ?? '🪨'} vs ${icons[res.houseChoice] ?? '✂️'}`;
       this.snapshot = this.sim.getSnapshot();
       this.syncSceneWithArena(draft);
       this.onToast(
         res.outcome === 1
           ? en
-            ? '✅ Blind Duel Won (+2 ★)!'
-            : '✅ Menang Duel Buta (+2 ★)!'
+            ? `✅ ${matchup} — Blind Duel Won (+2 ★)!`
+            : `✅ ${matchup} — Menang Duel Buta (+2 ★)!`
           : res.outcome === 0
             ? en
-              ? '🤝 Blind Duel Tie (+1 ★)!'
-              : '🤝 Seri Duel Buta (+1 ★)!'
+              ? `🤝 ${matchup} — Blind Duel Tie (+1 ★)!`
+              : `🤝 ${matchup} — Seri Duel Buta (+1 ★)!`
             : en
-              ? '❌ House Won the Blind Duel!'
-              : '❌ Rumah FHE Menang Duel!',
+              ? `❌ ${matchup} — Rival Won (-1 ★)!`
+              : `❌ ${matchup} — Lawan Menang (-1 ★)!`,
       );
       this.onRequestRender();
       return;
