@@ -40,6 +40,7 @@ export interface LaddersAndSnakesVisuals {
   group: THREE.Group;
   ladders: Map<string, LadderVisual>;
   snakes: Map<string, SnakeVisual>;
+  setSprintMode: (enabled: boolean) => void;
   updateIdle: (elapsedSec: number, reducedMotion: boolean) => void;
 }
 
@@ -536,31 +537,64 @@ function getBaseEyelidTilt(personality: SnakePersonality): number {
   }
 }
 
+const SPRINT_LADDERS_DEFS: LadderDef[] = [
+  { id: 'SL1', from: 3, to: 17 },
+  { id: 'SL2', from: 8, to: 12 },
+  { id: 'SL3', from: 15, to: 25 },
+];
+
+const SPRINT_SNAKES_DEFS: SnakeDef[] = [
+  { id: 'SS1', from: 14, to: 6, personality: 'usil' },
+  { id: 'SS2', from: 21, to: 19, personality: 'kaget' },
+  { id: 'SS3', from: 27, to: 13, personality: 'ngantuk' },
+];
+
 export function buildLaddersAndSnakes(
   board: BoardVisuals,
   outlineCtrl: DoodleOutlineController,
 ): LaddersAndSnakesVisuals {
   const group = new THREE.Group();
+  const classicGroup = new THREE.Group();
+  const sprintGroup = new THREE.Group();
+  sprintGroup.visible = false;
+  group.add(classicGroup, sprintGroup);
+
   const ladders = new Map<string, LadderVisual>();
   const snakes = new Map<string, SnakeVisual>();
 
   BOARD_LAYOUT.ladders.forEach((def, idx) => {
     const lv = buildLadder(def, board, outlineCtrl, idx);
     ladders.set(def.id, lv);
-    group.add(lv.group);
+    classicGroup.add(lv.group);
   });
 
   const sharedSnakeAssets = createSharedSnakeAssets();
   BOARD_LAYOUT.snakes.forEach((def, idx) => {
     const sv = buildSnake(def, board, outlineCtrl, sharedSnakeAssets, idx);
     snakes.set(def.id, sv);
-    group.add(sv.group);
+    classicGroup.add(sv.group);
+  });
+
+  SPRINT_LADDERS_DEFS.forEach((def, idx) => {
+    const lv = buildLadder(def, board, outlineCtrl, idx);
+    ladders.set(def.id, lv);
+    sprintGroup.add(lv.group);
+  });
+
+  SPRINT_SNAKES_DEFS.forEach((def, idx) => {
+    const sv = buildSnake(def, board, outlineCtrl, sharedSnakeAssets, idx);
+    snakes.set(def.id, sv);
+    sprintGroup.add(sv.group);
   });
 
   return {
     group,
     ladders,
     snakes,
+    setSprintMode: (enabled: boolean) => {
+      classicGroup.visible = !enabled;
+      sprintGroup.visible = enabled;
+    },
     updateIdle: (elapsedSec: number, reducedMotion: boolean) => {
       for (const snake of snakes.values()) {
         snake.updateIdle(elapsedSec, reducedMotion);
