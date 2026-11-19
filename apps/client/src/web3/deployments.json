@@ -1,0 +1,13 @@
+{
+  "11155111": {
+    "network": "sepolia",
+    "chainId": 11155111,
+    "deployedAt": null,
+    "deployer": "0xb2e53D52d38bc87Aaf7E3C81d121dfBD845E9B7D",
+    "dodChipAddress": "",
+    "dodSnakeArenaAddress": "",
+    "sepoliaCUsdt": "0xAe0207C757Aa2B4019Ad96edD0092ddc63EF0c50",
+    "sepoliaCUsdc": "0xe978F22157048E5DB8E5d07971376e86671672B2",
+    "wrappersRegistry": "0x2f0750Bbb0A246059d80e94c454586a7F27a128e"
+  }
+}
