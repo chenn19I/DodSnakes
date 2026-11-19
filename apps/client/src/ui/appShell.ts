@@ -62,7 +62,10 @@ import {
   type UiKey,
 } from '../i18n/translations.js';
 
-type ScreenKind = 'splash' | 'menu' | 'online_setup' | 'local_setup' | 'bot_setup' | 'lobby' | 'game';
+import { ConfidentialArenaPanel } from './confidentialArenaPanel.js';
+import { PROTOCOL_DISCLAIMER } from '../web3/faucets.js';
+
+type ScreenKind = 'splash' | 'menu' | 'online_setup' | 'local_setup' | 'bot_setup' | 'lobby' | 'game' | 'arena';
 
 interface AccessibilitySettings {
   muted: boolean;
@@ -216,6 +219,7 @@ export class DoodleAppShell {
   private displayedStars = new Map<string, number>();
   private starTickerId: number | null = null;
   private readonly colorShapes = COLORBLIND_SHAPES;
+  private readonly arenaPanel: ConfidentialArenaPanel;
 
   private get lang(): AppLanguage {
     return this.settings.language;
@@ -241,6 +245,18 @@ export class DoodleAppShell {
     this.settings = this.loadSettings();
     this.career = this.loadCareer();
     this.applyAccessibilitySettings();
+
+    this.arenaPanel = new ConfidentialArenaPanel({
+      scene: this.scene,
+      sound: this.sound,
+      onRequestRender: () => this.render(),
+      onToast: (msg) => this.showToast(msg),
+      onBackToMenu: () => {
+        this.screen = 'menu';
+        this.scene.setArenaOverlayMarkers([], 0);
+        this.render();
+      },
+    });
 
     // Persistent 4-layer DOM prevents background updates from wiping active mini-games
     this.root.innerHTML = `
@@ -823,7 +839,16 @@ export class DoodleAppShell {
   }
 
   public render(): void {
-    this.scene.setShowcaseMode(this.screen !== 'game');
+    if (this.screen === 'arena') {
+      this.arenaPanel.syncSceneWithArena({
+        name: this.draftName,
+        pawn: this.draftPawn,
+        color: this.draftColor,
+        accessory: this.draftAccessory,
+      });
+    } else {
+      this.scene.setShowcaseMode(this.screen !== 'game');
+    }
     this.renderMainLayer();
     this.renderOverlaysOnly();
     this.renderChallengeLayerIfNeeded();
@@ -844,6 +869,14 @@ export class DoodleAppShell {
     else if (this.screen === 'bot_setup') mainHtml = this.renderBotSetup();
     else if (this.screen === 'lobby') mainHtml = this.renderLobby();
     else if (this.screen === 'game') mainHtml = this.renderGameHud();
+    else if (this.screen === 'arena') {
+      mainHtml = this.arenaPanel.renderScreenHtml(this.lang, {
+        name: this.draftName,
+        pawn: this.draftPawn,
+        color: this.draftColor,
+        accessory: this.draftAccessory,
+      });
+    }
 
     this.mainLayer.innerHTML = `
       ${mainHtml}
@@ -869,6 +902,7 @@ export class DoodleAppShell {
       this.showHowToPlay ? 'howto' : '',
       this.showSettings ? `set:${this.settings.muted}:${this.settings.musicEnabled}:${Math.round(this.settings.volume * 100)}:${this.settings.colorblindMode}:${this.settings.largeText}:${this.settings.reducedMotion}` : '',
       this.showSupportModal ? 'support' : '',
+      this.arenaPanel.isFaucetsModalOpen() ? 'faucets' : '',
     ].join('|');
     if (key === this.renderedModalKey) return;
     this.renderedModalKey = key;
@@ -884,6 +918,7 @@ export class DoodleAppShell {
       ${this.showHowToPlay ? this.renderHowToPlayModal() : ''}
       ${this.showSettings ? this.renderSettingsModal() : ''}
       ${this.showSupportModal ? this.renderSupportModal() : ''}
+      ${this.arenaPanel.isFaucetsModalOpen() ? this.arenaPanel.renderFaucetsModalHtml(this.lang) : ''}
     `;
     this.bindModalEvents();
   }
@@ -1290,6 +1325,7 @@ export class DoodleAppShell {
               : ''
           }
           <div class="showcase-hint">${en ? 'Drag the 3D board to orbit • Scroll to zoom' : 'Tarik papan 3D untuk mengintip sudut lain • Scroll untuk zoom'}</div>
+          <div class="protocol-disclaimer">${escapeHtml(PROTOCOL_DISCLAIMER)}</div>
         </div>
       </div>
     `;
@@ -1325,6 +1361,10 @@ export class DoodleAppShell {
                  </div>`
               : ''
           }
+          <button class="doodle-btn doodle-btn-arena stagger-item stagger-1" id="btn-menu-arena">
+            <span>🔐 ${en ? 'Confidential Onchain Arena' : 'Arena Onchain Rahasia'}</span>
+            <span class="arena-new-pill">FHEVM • ERC-7984</span>
+          </button>
           <button class="doodle-btn doodle-btn-primary stagger-item stagger-1" id="btn-menu-online">
             ${renderUiIconSvg('globe', 18)} ${this.t('playOnline')} (2-6)
           </button>
@@ -1336,10 +1376,12 @@ export class DoodleAppShell {
           </button>
           <div class="menu-util-row stagger-item stagger-4">
             <button class="doodle-btn" id="btn-menu-howto">${renderUiIconSvg('help', 15)} ${this.t('howToPlay')}</button>
+            <button class="doodle-btn" id="btn-menu-faucets">🚰 ${en ? 'Faucets' : 'Faucet'}</button>
             <button class="doodle-btn" id="btn-menu-settings">${renderUiIconSvg('settings', 15)} ${this.t('settings')}</button>
             <button class="doodle-btn doodle-btn-pink" id="btn-menu-support">${renderUiIconSvg('heart', 15)} ${this.t('supportBtn')}</button>
           </div>
           <div class="showcase-hint">${en ? 'Drag the 3D board to orbit the diorama' : 'Tarik papan 3D untuk mengintip diorama'}</div>
+          <div class="protocol-disclaimer">${escapeHtml(PROTOCOL_DISCLAIMER)}</div>
         </div>
       </div>
     `;
@@ -2376,6 +2418,7 @@ export class DoodleAppShell {
             <button class="doodle-btn" id="btn-reset-local-data" style="flex:1;font-size:0.82rem" title="${this.lang === 'en' ? 'Clear saved career stats and active session token' : 'Hapus statistik karir dan token sesi tersimpan'}">${renderUiIconSvg('reset', 14)} ${this.lang === 'en' ? 'Reset Local Data' : 'Reset Data Lokal'}</button>
             <button class="doodle-btn doodle-btn-primary" id="btn-close-settings" style="flex:1">${this.t('save')}</button>
           </div>
+          <div class="protocol-disclaimer" style="margin-top:8px">${escapeHtml(PROTOCOL_DISCLAIMER)}</div>
         </div>
       </div>
     `;
@@ -2467,6 +2510,23 @@ export class DoodleAppShell {
       this.sound.playUiClick();
       this.openCharacterStudio('profile');
     });
+    q('#btn-menu-arena')?.addEventListener('click', () => {
+      this.sound.playUiClick();
+      this.screen = 'arena';
+      this.render();
+    });
+    q('#btn-menu-faucets')?.addEventListener('click', () => {
+      this.sound.playUiClick();
+      this.arenaPanel.openFaucetsModal();
+    });
+    if (this.screen === 'arena') {
+      this.arenaPanel.bindScreenEvents(this.mainLayer, this.lang, {
+        name: this.draftName,
+        pawn: this.draftPawn,
+        color: this.draftColor,
+        accessory: this.draftAccessory,
+      });
+    }
     q('#btn-menu-online')?.addEventListener('click', () => {
       this.sound.playUiClick();
       this.screen = 'online_setup';
@@ -2953,6 +3013,10 @@ export class DoodleAppShell {
 
   private bindModalEvents(): void {
     const q = <T extends HTMLElement>(sel: string) => this.modalLayer.querySelector<T>(sel);
+
+    if (this.arenaPanel.isFaucetsModalOpen()) {
+      this.arenaPanel.bindModalEvents(this.modalLayer, this.lang);
+    }
 
     if (this.studioContext) {
       const stageEl = q<HTMLElement>('#studio-preview-stage');
