@@ -558,4 +558,68 @@ describe("DodSnake Confidential FHEVM & ERC-7984 Suite", function () {
     }
     expect(aliceBlocked).to.equal(true);
   });
+
+  it("17. Enforces encrypted Trap Charge exhaustion homomorphically without leaking inventory count", async function () {
+    const encZero = await encryptStake(alice, 0n);
+    await arena.connect(alice).createMatch(1, 2, ethers.ZeroAddress, encZero.handles[0], encZero.inputProof);
+    await arena.connect(bob).joinMatch(1n, encZero.handles[0], encZero.inputProof);
+
+    // Spend both starter trap charges on valid tiles 5 and 6
+    const t1 = await encryptTrap(alice, 5, 1);
+    await arena.connect(alice).plantSecretTrap(1n, t1.handles[0], t1.handles[1], t1.inputProof);
+    const t2 = await encryptTrap(alice, 6, 2);
+    await arena.connect(alice).plantSecretTrap(1n, t2.handles[0], t2.handles[1], t2.inputProof);
+
+    const encStateAfter = await arena.getPlayerEncryptedState(1n, alice.address);
+    const chargesLeft = await fhevm.userDecryptEuint(
+      FhevmType.euint8,
+      encStateAfter.encryptedTrapCharges,
+      arenaAddr,
+      alice
+    );
+    expect(chargesLeft).to.equal(0n);
+
+    // Attempting a 3rd trap with 0 charges stores encryptedTile = 0 (homomorphically disarmed)
+    const t3 = await encryptTrap(alice, 7, 3);
+    await arena.connect(alice).plantSecretTrap(1n, t3.handles[0], t3.handles[1], t3.inputProof);
+    const summary17 = await arena.getMatchSummary(1n);
+    const extraTrap = await arena.getSecretTrap(1n, Number(summary17.trapCount) - 1);
+    const disarmedTile = await fhevm.userDecryptEuint(
+      FhevmType.euint8,
+      extraTrap.encryptedTile,
+      arenaAddr,
+      alice
+    );
+    expect(disarmedTile).to.equal(0n);
+  });
+
+  it("18. Supports host early startMatch on 4P lobby and exposes getBlindDuelState progress", async function () {
+    const encZero = await encryptStake(alice, 0n);
+    await arena.connect(alice).createMatch(1, 4, ethers.ZeroAddress, encZero.handles[0], encZero.inputProof);
+    await arena.connect(bob).joinMatch(1n, encZero.handles[0], encZero.inputProof);
+
+    expect((await arena.getMatchSummary(1n)).status).to.equal(0); // Lobby
+    await expect(arena.connect(bob).startMatch(1n)).to.be.revertedWithCustomError(arena, "NotHost");
+    await expect(arena.connect(alice).startMatch(1n)).to.emit(arena, "MatchStarted").withArgs(1n, 2);
+
+    await arena.connect(alice).startBlindDuel(1n, bob.address);
+    const duel0 = await arena.getBlindDuelState(1n);
+    expect(duel0.active).to.equal(true);
+    expect(duel0.challenger).to.equal(alice.address);
+    expect(duel0.opponent).to.equal(bob.address);
+    expect(duel0.challengerCommitted).to.equal(false);
+    expect(duel0.opponentCommitted).to.equal(false);
+
+    const moveA = await encryptDuelMove(alice, 0);
+    await arena.connect(alice).submitBlindDuelMove(1n, moveA.handles[0], moveA.inputProof);
+    const duel1 = await arena.getBlindDuelState(1n);
+    expect(duel1.challengerCommitted).to.equal(true);
+    expect(duel1.opponentCommitted).to.equal(false);
+
+    const moveB = await encryptDuelMove(bob, 1);
+    await arena.connect(bob).submitBlindDuelMove(1n, moveB.handles[0], moveB.inputProof);
+    const duel2 = await arena.getBlindDuelState(1n);
+    expect(duel2.opponentCommitted).to.equal(true);
+    expect(duel2.pendingResultHandle).to.not.equal(ethers.ZeroHash);
+  });
 });
