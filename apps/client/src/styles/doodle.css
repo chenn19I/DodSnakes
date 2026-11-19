@@ -2964,12 +2964,24 @@ body.colorblind-mode .lobby-ready-pill.is-wait {
 }
 
 .arena-step-pill {
+  font-family: var(--font-body);
   font-size: 0.75rem;
   font-weight: 700;
   padding: 3px 9px;
   border-radius: 999px;
   border: 2px solid var(--ink);
   background: #ffffff;
+  color: var(--ink);
+}
+
+button.arena-step-pill {
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+button.arena-step-pill:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 0 var(--ink);
 }
 
 .arena-step-pill.is-done {

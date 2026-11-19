@@ -32,6 +32,8 @@ export interface BoardVisuals {
   setActiveTile: (tileId: number | null) => void;
   setPreviewTiles: (previews: TilePreviewMarker[]) => void;
   setColorblindMode: (enabled: boolean) => void;
+  setLanguage: (lang: 'id' | 'en') => void;
+  setActiveZoneLimit: (finishTile: number) => void;
   updateIdle: (elapsedSec: number, reducedMotion: boolean) => void;
   getTileWorldTop: (tileId: number) => THREE.Vector3;
 }
@@ -308,11 +310,11 @@ function createTileAtlasTexture(): THREE.CanvasTexture {
   return tex;
 }
 
-function createScribbleSprite(text: string, kind: 'star' | 'cloud' | 'note' | 'arrow'): THREE.Sprite {
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 128;
-  const ctx = canvas.getContext('2d')!;
+function drawScribbleCanvas(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  kind: 'star' | 'cloud' | 'note' | 'arrow',
+): void {
   ctx.clearRect(0, 0, 256, 128);
   ctx.strokeStyle = DOODLE_PALETTE.ink;
   ctx.lineCap = 'round';
@@ -362,7 +364,7 @@ function createScribbleSprite(text: string, kind: 'star' | 'cloud' | 'note' | 'a
     ctx.save();
     ctx.translate(128, 64);
     ctx.rotate(-0.06);
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
     ctx.strokeStyle = DOODLE_PALETTE.ink;
     ctx.lineWidth = 5;
     ctx.beginPath();
@@ -376,6 +378,14 @@ function createScribbleSprite(text: string, kind: 'star' | 'cloud' | 'note' | 'a
     ctx.fillText(text, 0, 2);
     ctx.restore();
   }
+}
+
+function createScribbleSprite(text: string, kind: 'star' | 'cloud' | 'note' | 'arrow'): THREE.Sprite {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+  drawScribbleCanvas(ctx, text, kind);
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -695,8 +705,12 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
   const tileBaseScaleY: number[] = new Array(101).fill(1);
   const tileBoingY: number[] = new Array(101).fill(0);
   const tileBoingScaleXZ: number[] = new Array(101).fill(1);
+  const tileBaseColors: THREE.Color[] = Array.from({ length: 101 }, () => new THREE.Color('#FFFFFF'));
   const dummy = new THREE.Object3D();
   const tmpColor = new THREE.Color();
+  const mutedOutOfZoneColor = new THREE.Color('#D5CEC2');
+  let activeZoneLimit = 100;
+  let currentLanguage: 'id' | 'en' = 'id';
 
   const writeTileMatrix = (tileId: number) => {
     const idx = tileId - 1;
@@ -742,6 +756,7 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
     } else {
       tmpColor.set(isAlt ? theme.slabBase : theme.slabAlt);
     }
+    tileBaseColors[tileId].copy(tmpColor);
     instancedSlabs.setColorAt(tileId - 1, tmpColor);
     writeTileMatrix(tileId);
   }
@@ -758,20 +773,24 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
 
   // 5. 2D Scribble sprites neatly framing outside board edges (zero tile occlusion)
   const scribbles: Array<{ sprite: THREE.Sprite; baseY: number; phase: number }> = [];
-  const scribbleConfigs: Array<[string, 'star' | 'cloud' | 'note' | 'arrow', number, number, number]> = [
-    ['Mulai!', 'note', -8.8, 0.85, 10.65],
-    ['Awas Ular!', 'note', 10.6, 1.05, 2.2],
-    ['Menuju Bos!', 'note', -8.4, 1.2, -10.8],
-    ['', 'star', -11.0, 1.6, 8.6],
-    ['', 'star', 10.8, 1.75, -8.8],
-    ['', 'star', 0.2, 1.4, 10.8],
-    ['', 'arrow', -5.4, 0.65, 10.6],
-    ['', 'cloud', 6.8, 2.0, 10.7],
+  const noteScribbles: Array<{ sprite: THREE.Sprite; idText: string; enText: string }> = [];
+  const scribbleConfigs: Array<[string, string, 'star' | 'cloud' | 'note' | 'arrow', number, number, number]> = [
+    ['Mulai!', 'Start!', 'note', -8.8, 0.85, 10.65],
+    ['Awas Ular!', 'Watch Snakes!', 'note', 10.6, 1.05, 2.2],
+    ['Menuju Bos!', 'To Boss!', 'note', -8.4, 1.2, -10.8],
+    ['', '', 'star', -11.0, 1.6, 8.6],
+    ['', '', 'star', 10.8, 1.75, -8.8],
+    ['', '', 'star', 0.2, 1.4, 10.8],
+    ['', '', 'arrow', -5.4, 0.65, 10.6],
+    ['', '', 'cloud', 6.8, 2.0, 10.7],
   ];
-  scribbleConfigs.forEach(([txt, kind, x, y, z], idx) => {
-    const sp = createScribbleSprite(txt, kind);
+  scribbleConfigs.forEach(([idTxt, enTxt, kind, x, y, z], idx) => {
+    const sp = createScribbleSprite(idTxt, kind);
     sp.position.set(x, y, z);
     scribbles.push({ sprite: sp, baseY: y, phase: idx * 0.9 });
+    if (kind === 'note') {
+      noteScribbles.push({ sprite: sp, idText: idTxt, enText: enTxt });
+    }
     group.add(sp);
   });
 
@@ -929,6 +948,36 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
         const marker = latestPreviews[i];
         if (!ring.visible || !marker) continue;
         (ring.material as THREE.MeshBasicMaterial).color.set(getPreviewColor(marker.kind));
+      }
+    },
+    setLanguage: (lang: 'id' | 'en') => {
+      if (currentLanguage === lang) return;
+      currentLanguage = lang;
+      for (const note of noteScribbles) {
+        const mat = note.sprite.material as THREE.SpriteMaterial;
+        const tex = mat.map as THREE.CanvasTexture | null;
+        const canvas = tex?.image as HTMLCanvasElement | undefined;
+        const ctx = canvas?.getContext('2d');
+        if (tex && ctx) {
+          drawScribbleCanvas(ctx, lang === 'en' ? note.enText : note.idText, 'note');
+          tex.needsUpdate = true;
+        }
+      }
+    },
+    setActiveZoneLimit: (finishTile: number) => {
+      const clamped = finishTile > 0 && finishTile < 100 ? finishTile : 100;
+      if (clamped === activeZoneLimit) return;
+      activeZoneLimit = clamped;
+      for (let tileId = 1; tileId <= 100; tileId++) {
+        if (tileId <= clamped) {
+          tmpColor.copy(tileBaseColors[tileId]);
+        } else {
+          tmpColor.copy(tileBaseColors[tileId]).lerp(mutedOutOfZoneColor, 0.72);
+        }
+        instancedSlabs.setColorAt(tileId - 1, tmpColor);
+      }
+      if (instancedSlabs.instanceColor) {
+        instancedSlabs.instanceColor.needsUpdate = true;
       }
     },
     updateIdle: (elapsedSec: number, reducedMotion: boolean) => {

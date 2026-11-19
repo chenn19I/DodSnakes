@@ -65,7 +65,7 @@ import {
 import { ConfidentialArenaPanel } from './confidentialArenaPanel.js';
 import { PROTOCOL_DISCLAIMER } from '../web3/faucets.js';
 
-type ScreenKind = 'splash' | 'menu' | 'online_setup' | 'local_setup' | 'bot_setup' | 'lobby' | 'game' | 'arena';
+type ScreenKind = 'menu' | 'online_setup' | 'local_setup' | 'bot_setup' | 'lobby' | 'game' | 'arena';
 
 interface AccessibilitySettings {
   muted: boolean;
@@ -143,7 +143,7 @@ export class DoodleAppShell {
   private challengeLayer!: HTMLElement;
   private modalLayer!: HTMLElement;
 
-  private screen: ScreenKind = 'splash';
+  private screen: ScreenKind = 'menu';
   private controller: GameSessionController | null = null;
   private onlineController: OnlineGameController | null = null;
   private roomState: RoomStatePayload | null = null;
@@ -252,6 +252,12 @@ export class DoodleAppShell {
       sound: this.sound,
       onRequestRender: () => this.render(),
       onToast: (msg) => this.showToast(msg),
+      isMuted: () => this.settings.muted,
+      onToggleMute: () => {
+        this.settings.muted = !this.settings.muted;
+        this.applyAccessibilitySettings();
+        return this.settings.muted;
+      },
       onBackToMenu: () => {
         this.screen = 'menu';
         this.scene.setArenaOverlayMarkers([], 0);
@@ -865,8 +871,7 @@ export class DoodleAppShell {
     }
 
     let mainHtml = '';
-    if (this.screen === 'splash') mainHtml = this.renderSplash();
-    else if (this.screen === 'menu') mainHtml = this.renderMenu();
+    if (this.screen === 'menu') mainHtml = this.renderMenu();
     else if (this.screen === 'online_setup') mainHtml = this.renderOnlineSetup();
     else if (this.screen === 'local_setup') mainHtml = this.renderLocalSetup();
     else if (this.screen === 'bot_setup') mainHtml = this.renderBotSetup();
@@ -1306,32 +1311,8 @@ export class DoodleAppShell {
     return `<button class="lang-toggle-btn" id="btn-toggle-lang" title="${this.t('languageSettingLabel')}">${renderUiIconSvg('globe', 13)}<span>${this.settings.language === 'en' ? 'EN' : 'ID'}</span></button>`;
   }
 
-  private renderSplash(): string {
-    const saved = OnlineGameController.getSavedSession();
-    const en = this.lang === 'en';
-    return `
-      <div class="screen-showcase">
-        <div class="doodle-card sketchbook-panel menu-box stagger-item">
-          ${this.renderLangToggleBtnHtml()}
-          <div class="showcase-badge">${renderUiIconSvg('dice', 18)} ${en ? '3D Sketchbook Snakes & Ladders' : 'Ular Tangga Sketchbook 3D'}</div>
-          <h1 class="game-logo">DodSnakes</h1>
-          <p class="subtitle">${this.t('tagline')}</p>
-          <button class="doodle-btn doodle-btn-primary stagger-item stagger-1" id="btn-splash-play">
-            ${renderUiIconSvg('dice', 22)} ${en ? 'Play Now!' : 'Ayo Main!'}
-          </button>
-          ${
-            saved
-              ? `<button class="doodle-btn doodle-btn-mint stagger-item stagger-2" id="btn-splash-reconnect">${this.t('rejoinRoom')} (${escapeHtml(saved.roomCode)})</button>`
-              : ''
-          }
-          <div class="showcase-hint">${en ? 'Drag the 3D board to orbit • Scroll to zoom' : 'Tarik papan 3D untuk mengintip sudut lain • Scroll untuk zoom'}</div>
-          <div class="protocol-disclaimer">${escapeHtml(PROTOCOL_DISCLAIMER)}</div>
-        </div>
-      </div>
-    `;
-  }
-
   private renderMenu(): string {
+    const saved = OnlineGameController.getSavedSession();
     const activeMeta = getPawnMeta(this.draftPawn, this.lang);
     const accMeta = getAccessoryMeta(this.draftAccessory, this.lang);
     const en = this.lang === 'en';
@@ -1339,9 +1320,9 @@ export class DoodleAppShell {
       <div class="screen-showcase">
         <div class="doodle-card sketchbook-panel menu-box">
           ${this.renderLangToggleBtnHtml()}
-          <div class="showcase-badge">${renderUiIconSvg('trophy', 15)} ${en ? 'Adventure Mode' : 'Mode Petualangan'}</div>
+          <div class="showcase-badge">${renderUiIconSvg('dice', 15)} ${en ? '3D Sketchbook Snakes & Ladders' : 'Ular Tangga Sketchbook 3D'}</div>
           <h1 class="game-logo">DodSnakes</h1>
-          <p class="subtitle">${en ? 'Pick your favorite way to play!' : 'Pilih mode bermain favoritmu!'}</p>
+          <p class="subtitle">${this.t('tagline')}</p>
           <button class="doodle-btn menu-profile-card stagger-item" id="btn-menu-studio" title="${this.t('studioTitle')}">
             <span class="menu-profile-avatar">${pawnSvg(this.draftPawn, this.draftColor, 38, this.draftAccessory)}</span>
             <span class="menu-profile-meta">
@@ -1350,6 +1331,11 @@ export class DoodleAppShell {
             </span>
             <span class="menu-profile-cta">${en ? 'Customize' : 'Ganti Gaya'}</span>
           </button>
+          ${
+            saved
+              ? `<button class="doodle-btn doodle-btn-mint stagger-item" id="btn-menu-reconnect">${this.t('rejoinRoom')} (${escapeHtml(saved.roomCode)})</button>`
+              : ''
+          }
           ${
             this.career.matches > 0
               ? `<div class="career-banner tabular-num">
@@ -2459,13 +2445,7 @@ export class DoodleAppShell {
       this.render();
     });
 
-    q('#btn-splash-play')?.addEventListener('click', () => {
-      this.sound.playUiClick();
-      this.screen = 'menu';
-      this.render();
-    });
-
-    q('#btn-splash-reconnect')?.addEventListener('click', () => {
+    q('#btn-menu-reconnect')?.addEventListener('click', () => {
       const saved = OnlineGameController.getSavedSession();
       if (!saved) return;
       this.sound.playUiClick();

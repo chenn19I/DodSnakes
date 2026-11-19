@@ -56,6 +56,8 @@ export class ConfidentialArenaPanel {
   private readonly onRequestRender: () => void;
   private readonly onToast: (msg: string) => void;
   private readonly onBackToMenu: () => void;
+  private readonly checkMuted: () => boolean;
+  private readonly toggleMute?: () => boolean;
 
   private readonly fheClient = new FheArenaClient();
   private readonly sim = new ArenaPreviewSimulator();
@@ -83,7 +85,11 @@ export class ConfidentialArenaPanel {
   private showPrivacyModal = false;
   private showFaucetsModal = false;
   private isAnimatingRoll = false;
+  private userTouchedCameraMode = false;
   private busyLabel: string | null = null;
+  private deployerSepoliaEth: string | null = null;
+  private walletSepoliaEth: string | null = null;
+  private checkingSepoliaEth = false;
   private customChipInput = '';
   private customArenaInput = '';
   private duelOpponentInput = '0x0000000000000000000000000000000000000000';
@@ -98,12 +104,16 @@ export class ConfidentialArenaPanel {
     onRequestRender: () => void;
     onToast: (msg: string) => void;
     onBackToMenu: () => void;
+    isMuted?: () => boolean;
+    onToggleMute?: () => boolean;
   }) {
     this.scene = opts.scene;
     this.sound = opts.sound;
     this.onRequestRender = opts.onRequestRender;
     this.onToast = opts.onToast;
     this.onBackToMenu = opts.onBackToMenu;
+    this.checkMuted = opts.isMuted ?? (() => false);
+    this.toggleMute = opts.onToggleMute;
 
     const addrs = resolveConfiguredAddresses();
     this.customChipInput = addrs.chipAddress;
@@ -245,11 +255,46 @@ export class ConfidentialArenaPanel {
   public openFaucetsModal(): void {
     this.showFaucetsModal = true;
     this.onRequestRender();
+    void this.refreshSepoliaBalances();
   }
 
   public closeFaucetsModal(): void {
     this.showFaucetsModal = false;
     this.onRequestRender();
+  }
+
+  private async fetchSepoliaEthFormatted(addr: string): Promise<string> {
+    const res = await fetch('https://ethereum-sepolia-rpc.publicnode.com', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'eth_getBalance',
+        params: [addr, 'latest'],
+        id: 1,
+      }),
+    });
+    const data = (await res.json()) as { result?: string };
+    const wei = BigInt(data?.result || '0x0');
+    const whole = Number(wei) / 1e18;
+    return whole === 0 ? '0.0000' : whole < 0.0001 ? '<0.0001' : whole.toFixed(4);
+  }
+
+  private async refreshSepoliaBalances(): Promise<void> {
+    if (this.checkingSepoliaEth) return;
+    this.checkingSepoliaEth = true;
+    this.onRequestRender();
+    try {
+      this.deployerSepoliaEth = await this.fetchSepoliaEthFormatted(TESTNET_DIRECTORY.deployerAddress);
+      if (this.walletInfo?.address) {
+        this.walletSepoliaEth = await this.fetchSepoliaEthFormatted(this.walletInfo.address);
+      }
+    } catch {
+      if (!this.deployerSepoliaEth) this.deployerSepoliaEth = 'RPC Offline';
+    } finally {
+      this.checkingSepoliaEth = false;
+      this.onRequestRender();
+    }
   }
 
   public hasActiveMatch(): boolean {
@@ -345,6 +390,13 @@ export class ConfidentialArenaPanel {
     }
 
     this.scene.setShowcaseMode(false);
+    if (
+      this.snapshot.boardSize === 30 &&
+      !this.userTouchedCameraMode &&
+      this.scene.getPreferredCameraMode() !== 'overview'
+    ) {
+      this.scene.setPreferredCameraMode('overview');
+    }
     const fakeState = this.buildSceneGameState(this.snapshot, draft);
     this.scene.syncPlayersFromState(fakeState);
     this.scene.setArenaOverlayMarkers(
@@ -508,14 +560,20 @@ export class ConfidentialArenaPanel {
             : 'Belum Terhubung'
         : `${shortAddr(this.sim.getAddress())} (Preview)`;
 
-    const cDodLabel =
+    const activeHandle = this.mode === 'preview' ? simBal.handle : this.chipHandle;
+    const isUnlockedBal =
+      this.mode === 'preview' ? simBal.clearMicro !== null : this.chipClearMicro !== null;
+    const clearTokens =
       this.mode === 'preview'
         ? simBal.clearMicro !== null
-          ? `${(Number(simBal.clearMicro) / 1e6).toFixed(1)} ${tokenCfg.symbol}`
-          : `🔒 ${simBal.handle.slice(0, 10)}...`
+          ? (Number(simBal.clearMicro) / 1e6).toFixed(1)
+          : null
         : this.chipClearMicro !== null
-          ? `${(Number(this.chipClearMicro) / 1e6).toFixed(1)} ${tokenCfg.symbol}`
-          : `🔒 ${this.chipHandle.slice(0, 10)}...`;
+          ? (Number(this.chipClearMicro) / 1e6).toFixed(1)
+          : null;
+    const balanceBtnLabel = isUnlockedBal
+      ? `🔓 ${clearTokens} ${tokenCfg.symbol}`
+      : `🔒 ${tokenCfg.symbol}`;
 
     const logs: FheProofLogEntry[] =
       this.mode === 'preview' ? this.sim.getLogs() : this.fheClient.getLogs();
@@ -559,12 +617,18 @@ export class ConfidentialArenaPanel {
           </div>
 
           <div class="arena-topbar-right">
-            <span class="arena-chip-pill" title="ERC-7984 Confidential Token Balance">${esc(cDodLabel)}</span>
-            <button class="doodle-btn" id="btn-arena-decrypt-bal" style="min-height:34px;padding:3px 9px;font-size:0.8rem">
-              🔓 ${en ? `Decrypt ${tokenCfg.symbol}` : `Dekripsi ${tokenCfg.symbol}`}
+            <button class="doodle-btn ${isUnlockedBal ? 'doodle-btn-mint' : ''}" id="btn-arena-decrypt-bal" style="min-height:34px;padding:3px 9px;font-size:0.8rem" title="${esc(
+              en
+                ? `Decrypt ERC-7984 balance (handle: ${activeHandle})`
+                : `Dekripsi saldo ERC-7984 (handle: ${activeHandle})`,
+            )}">
+              ${esc(balanceBtnLabel)}
             </button>
             <button class="doodle-btn doodle-btn-mint" id="btn-arena-faucet-claim" style="min-height:34px;padding:3px 9px;font-size:0.8rem">
               +100 cDOD
+            </button>
+            <button class="doodle-btn" id="btn-arena-mute" style="min-height:34px;padding:3px 8px;font-size:0.82rem" title="${en ? 'Toggle Sound' : 'Suara / Bisu'}">
+              ${this.checkMuted() ? '🔇' : '🔊'}
             </button>
             ${
               this.mode === 'sepolia'
@@ -721,10 +785,7 @@ export class ConfidentialArenaPanel {
       <div class="arena-lobby-wrap">
         <div class="doodle-card sketchbook-panel arena-lobby-card ui-interactive stagger-item">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-            <div class="showcase-badge">🔐 FHEVM + ERC-7984 • ${en ? 'Confidential Mode' : 'Mode Rahasia'}</div>
-            <button class="doodle-btn" id="btn-lobby-privacy" style="min-height:28px;padding:2px 9px;font-size:0.75rem">
-              🛡️ ${en ? 'Privacy Matrix' : 'Matriks Privasi'}
-            </button>
+            <div class="showcase-badge">🔐 FHEVM + ERC-7984 • ${this.mode === 'preview' ? (en ? 'Instant Preview' : 'Preview Instan') : en ? 'Sepolia Onchain' : 'Sepolia Onchain'}</div>
           </div>
           <h2 style="margin:6px 0 4px;font-family:var(--font-display)">
             ${en ? 'DodSnakes Confidential Arena' : 'Arena Rahasia DodSnakes'}
@@ -737,20 +798,24 @@ export class ConfidentialArenaPanel {
             }
           </p>
 
-          <div class="arena-steps-strip">
-            <span class="arena-step-pill ${step1Done ? 'is-done' : ''}">
-              ${step1Done ? '✓' : '1.'} ${en ? 'Wallet / Mode' : 'Wallet / Mode'}
-            </span>
-            <span class="arena-step-pill ${step2Done ? 'is-done' : ''}">
-              ${step2Done ? '✓' : '2.'} ${en ? 'Faucet & Decrypt' : 'Faucet & Dekripsi'}
-            </span>
-            <span class="arena-step-pill ${step3Done ? 'is-done' : ''}">
-              ${step3Done ? '✓' : '3.'} ${en ? 'Approve Operator' : 'Izinkan Operator'}
-            </span>
-            <span class="arena-step-pill">
-              4. ${en ? 'Play Onchain' : 'Main Onchain'}
-            </span>
-          </div>
+          ${
+            this.mode === 'sepolia'
+              ? `<div class="arena-steps-strip">
+                   <button type="button" class="arena-step-pill ${step1Done ? 'is-done' : ''}" id="btn-step-connect">
+                     ${step1Done ? '✓' : '1.'} ${en ? 'Connect Wallet' : 'Hubungkan Wallet'}
+                   </button>
+                   <button type="button" class="arena-step-pill ${step2Done ? 'is-done' : ''}" id="btn-step-faucet">
+                     ${step2Done ? '✓' : '2.'} ${en ? 'Faucet & Decrypt' : 'Faucet & Dekripsi'}
+                   </button>
+                   <button type="button" class="arena-step-pill ${step3Done ? 'is-done' : ''}" id="btn-step-approve">
+                     ${step3Done ? '✓' : '3.'} ${en ? 'Approve Operator' : 'Izinkan Operator'}
+                   </button>
+                   <span class="arena-step-pill">
+                     4. ${en ? 'Play Onchain' : 'Main Onchain'}
+                   </span>
+                 </div>`
+              : ''
+          }
 
           ${
             this.mode === 'sepolia' && !hasSepoliaDeployed
@@ -1283,6 +1348,49 @@ export class ConfidentialArenaPanel {
             }
           </p>
 
+          <div class="faucet-wallets-box" style="margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap">
+              <b>🧪 ${en ? 'Sepolia Protocol, Deployer & 10 Testnet Accounts' : 'Protokol Sepolia, Deployer & 10 Akun Testnet'}</b>
+              <div style="display:flex;gap:5px;flex-wrap:wrap">
+                <button class="doodle-btn" id="btn-refresh-sepolia-eth" style="min-height:26px;padding:1px 8px;font-size:0.74rem" ${this.checkingSepoliaEth ? 'disabled' : ''}>
+                  ${this.checkingSepoliaEth ? '⏳...' : `🔄 ${en ? 'Check Sepolia ETH' : 'Cek ETH Sepolia'}`}
+                </button>
+                <button class="doodle-btn doodle-btn-mint" data-copy-addr="${TESTNET_DIRECTORY.deployerAddress}" style="min-height:26px;padding:1px 8px;font-size:0.74rem">
+                  📋 ${en ? 'Copy Deployer' : 'Salin Deployer'}
+                </button>
+              </div>
+            </div>
+            <div style="font-size:0.76rem;margin-top:4px;line-height:1.45">
+              Chain ID: <b>11155111</b> • Relayer: <code>${PROTOCOL_SEPOLIA_ADDRESSES.relayerUrl}</code><br/>
+              cUSDT Wrapper: <code>${PROTOCOL_SEPOLIA_ADDRESSES.cUsdtWrapper}</code><br/>
+              Deployer: <code>${TESTNET_DIRECTORY.deployerAddress}</code>
+              ${
+                this.deployerSepoliaEth !== null
+                  ? ` <span class="faucet-token-badge" style="${
+                      this.deployerSepoliaEth === '0.0000'
+                        ? 'background:#ffd5d5;'
+                        : 'background:var(--mint);'
+                    }">${this.deployerSepoliaEth} Sepolia ETH</span>`
+                  : ''
+              }
+              ${
+                this.walletInfo && this.walletSepoliaEth !== null
+                  ? `<br/>Connected Wallet (${shortAddr(this.walletInfo.address)}): <span class="faucet-token-badge">${this.walletSepoliaEth} Sepolia ETH</span>`
+                  : ''
+              }
+            </div>
+            <div class="testnet-addr-grid">
+              ${TESTNET_DIRECTORY.testAccounts
+                .map(
+                  (addr, i) => `
+                <button class="doodle-btn testnet-copy-btn" data-copy-addr="${addr}" title="Copy ${addr}">
+                  <span>#${i + 1}: ${shortAddr(addr)}</span>
+                </button>`,
+                )
+                .join('')}
+            </div>
+          </div>
+
           <div class="faucets-grid">
             ${SEPOLIA_FAUCETS.map(
               (f, idx) => `
@@ -1302,25 +1410,6 @@ export class ConfidentialArenaPanel {
                 </div>
               </div>`,
             ).join('')}
-          </div>
-
-          <div class="faucet-wallets-box">
-            <b>🧪 ${en ? 'Sepolia Protocol & 10 Testnet Accounts' : 'Alamat Protokol Sepolia & 10 Akun Testnet'}</b>
-            <div style="font-size:0.76rem;margin-top:4px">
-              Chain ID: <b>11155111</b> • Relayer: <code>${PROTOCOL_SEPOLIA_ADDRESSES.relayerUrl}</code><br/>
-              cUSDT Wrapper: <code>${PROTOCOL_SEPOLIA_ADDRESSES.cUsdtWrapper}</code><br/>
-              Deployer: <code>${TESTNET_DIRECTORY.deployerAddress}</code>
-            </div>
-            <div class="testnet-addr-grid">
-              ${TESTNET_DIRECTORY.testAccounts
-                .map(
-                  (addr, i) => `
-                <button class="doodle-btn testnet-copy-btn" data-copy-addr="${addr}" title="Copy ${addr}">
-                  <span>#${i + 1}: ${shortAddr(addr)}</span>
-                </button>`,
-                )
-                .join('')}
-            </div>
           </div>
 
           <div class="arena-disclaimer-inline">⚠️ ${esc(PROTOCOL_DISCLAIMER)}</div>
@@ -1368,7 +1457,6 @@ export class ConfidentialArenaPanel {
       this.onRequestRender();
     };
     q('#btn-arena-privacy-modal')?.addEventListener('click', openPrivacy);
-    q('#btn-lobby-privacy')?.addEventListener('click', openPrivacy);
     q('#btn-close-privacy-modal')?.addEventListener('click', () => {
       this.sound.playUiClick();
       this.showPrivacyModal = false;
@@ -1422,9 +1510,17 @@ export class ConfidentialArenaPanel {
     });
 
     q('#btn-arena-connect')?.addEventListener('click', () => void this.handleConnect(en));
+    q('#btn-step-connect')?.addEventListener('click', () => void this.handleConnect(en));
     q('#btn-arena-faucet-claim')?.addEventListener('click', () => void this.handleClaimFaucet(en));
+    q('#btn-step-faucet')?.addEventListener('click', () => void this.handleDecryptBalance(en));
     q('#btn-arena-decrypt-bal')?.addEventListener('click', () => void this.handleDecryptBalance(en));
     q('#btn-arena-approve-op')?.addEventListener('click', () => void this.handleApproveOperator(en));
+    q('#btn-step-approve')?.addEventListener('click', () => void this.handleApproveOperator(en));
+    q('#btn-arena-mute')?.addEventListener('click', () => {
+      const muted = this.toggleMute?.() ?? false;
+      if (!muted) this.sound.playUiClick();
+      this.onRequestRender();
+    });
 
     q('#btn-board-sprint')?.addEventListener('click', () => {
       this.sound.playUiClick();
@@ -1462,6 +1558,7 @@ export class ConfidentialArenaPanel {
 
     q('#btn-arena-cam-toggle')?.addEventListener('click', () => {
       this.sound.playUiClick();
+      this.userTouchedCameraMode = true;
       const nextMode = this.scene.getPreferredCameraMode() === 'overview' ? 'follow' : 'overview';
       this.scene.setPreferredCameraMode(nextMode);
       this.onRequestRender();
@@ -1524,6 +1621,7 @@ export class ConfidentialArenaPanel {
       this.stopPolling();
       this.snapshot = null;
       this.activeMatchId = null;
+      this.userTouchedCameraMode = false;
       this.syncSceneWithArena(draft);
       this.onRequestRender();
     };
@@ -1549,6 +1647,10 @@ export class ConfidentialArenaPanel {
     });
     modalRoot.querySelector('#btn-modal-claim-cdod')?.addEventListener('click', () => {
       void this.handleClaimFaucet(en);
+    });
+    modalRoot.querySelector('#btn-refresh-sepolia-eth')?.addEventListener('click', () => {
+      this.sound.playUiClick();
+      void this.refreshSepoliaBalances();
     });
     modalRoot.querySelectorAll<HTMLElement>('[data-copy-addr]').forEach((btn) => {
       btn.onclick = () => {

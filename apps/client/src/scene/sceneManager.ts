@@ -265,6 +265,7 @@ export class DoodleSceneManager {
 
   public setLanguage(lang: AppLanguage): void {
     this.language = lang;
+    this.board.setLanguage(lang);
   }
 
   public setPreferredCameraMode(mode: 'overview' | 'follow'): void {
@@ -283,6 +284,9 @@ export class DoodleSceneManager {
     if (enabled) {
       this.cameraRig.setMode('showcase');
       this.board.setPreviewTiles(this.arenaModeActive ? this.pinnedArenaMarkers : []);
+      if (!this.arenaModeActive) {
+        this.board.setActiveZoneLimit(100);
+      }
       this.board.setActiveTile(null);
     } else {
       this.cameraRig.setMode(this.preferredCameraMode);
@@ -422,10 +426,12 @@ export class DoodleSceneManager {
       this.arenaModeActive = false;
       this.pinnedArenaMarkers = [];
       this.board.setPreviewTiles([]);
+      this.board.setActiveZoneLimit(100);
       return;
     }
 
     this.arenaModeActive = true;
+    this.board.setActiveZoneLimit(finishTile);
     const markers: TilePreviewMarker[] = [];
     const seen = new Set<number>();
 
@@ -476,6 +482,9 @@ export class DoodleSceneManager {
     }
 
     const activeId = state.turnOrder[state.currentTurnIndex];
+    if (!this.arenaModeActive) {
+      this.board.setActiveZoneLimit(100);
+    }
 
     state.players.forEach((player, idx) => {
       const acc = player.accessory ?? 'none';
