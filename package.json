@@ -1,8 +1,8 @@
 {
-  "name": "dodsnake",
+  "name": "dodsnakes",
   "version": "1.0.0",
   "private": true,
-  "description": "DodSnake - Game web multiplayer 3D semi-doodle ular tangga dengan 100 kotak tantangan",
+  "description": "DodSnakes - 3D semi-doodle multiplayer Snakes & Ladders with Confidential FHEVM Arena and ERC-7984 chips",
   "workspaces": [
     "packages/*",
     "apps/*"
