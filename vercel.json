@@ -4,6 +4,21 @@
   "installCommand": "npm install",
   "buildCommand": "npm run build --workspace=@doodle-dash/shared && npm run build --workspace=@doodle-dash/client",
   "outputDirectory": "apps/client/dist",
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin"
+        },
+        {
+          "key": "Cross-Origin-Embedder-Policy",
+          "value": "credentialless"
+        }
+      ]
+    }
+  ],
   "rewrites": [
     {
       "source": "/(.*)",
