@@ -1,105 +1,239 @@
 # DodSnake
 
-A **Semi-Doodle** 3D multiplayer tabletop Snakes & Ladders board game set on a textured sketchbook desk: **100 tiles** featuring unique challenges on every space (mini-games across tiles `2-99` and the final **Bos Doodle** boss fight on tile `100`), interactive **Character & Accessory Studio**, cute 3D animations, procedural tabletop audio, Online Multiplayer, Local Hot-Seat Mode, and Smart Bots.
+> **Disclaimer:** This project is not audited, endorsed or operated by Zama. Use at your own risk.
 
-## Monorepo Architecture
+**DodSnake** is a semi-doodle 3D multiplayer tabletop Snakes & Ladders board game set on a sketchbook wooden desk, powered by a **Confidential Onchain Arena** built with Fully Homomorphic Encryption (**FHEVM**) and **ERC-7984** confidential tokens on Ethereum Sepolia.
 
-- `packages/shared` (`@doodle-dash/shared`): Pure deterministic game engine (no DOM dependency), seeded PRNG, turn state machine, challenge archetype registry, `data/tiles.json` generator, Zod multiplayer protocol schemas, 1,000-match bot simulator, and Vitest unit tests.
-- `apps/server` (`@doodle-dash/server`): Authoritative Node.js + TypeScript + Socket.IO + Express server (4-letter room codes, anti-cheat challenge validation, 60-second reconnect window with automatic bot takeover, configurable `CORS_ORIGIN`, live emotes, and spectators).
-- `apps/client` (`@doodle-dash/client`): Vite + TypeScript + Three.js + GSAP web client with 8-band smooth cel shading, gentle doodle outlines, 4-zone pastel 3D diorama board, interactive 3D Character & Accessory Studio, procedural Web Audio SFX + 32-bar tabletop BGM, and responsive portrait-first UI.
-- `data/board.json` & `data/tiles.json`: Board configuration (snakes, ladders, zones) and 100 deterministic tile challenge definitions.
+Players roll verifiable onchain FHE dice, hide secret board traps, cast encrypted rival curses, discover zero-ACL Golden Warp shortcuts, protect themselves with hidden Anti-Snake Shields, compete in blind encrypted 1v1 Rock-Paper-Scissors duels, verify secret match objectives, and wager encrypted `ERC-7984` pots (`cDOD` or Sepolia `cUSDT`) alongside 3D character customization, 24 interactive mini-games across tiles `2-99`, Online Multiplayer, Local Hot-Seat Mode, and Smart Bots.
 
-## Public Deployment on Vercel (`dodsnake.vercel.app`)
+---
 
-`vercel.json` is pre-configured to build `@doodle-dash/shared` and `@doodle-dash/client` (`apps/client/dist`) with SPA URL rewrites:
+## Visual Game Showcase
 
-1. **Deploy Frontend to Vercel**:
-   - Import `https://github.com/chenn19I/DodSnake` into [Vercel](https://vercel.com/) and name the project **`dodsnake`** (so it publishes at **`https://dodsnake.vercel.app`**).
-   - If `dodsnake.vercel.app` is already claimed globally on Vercel, recommended clean alternatives are `dodsnake-game.vercel.app`, `dodsnake-play.vercel.app`, `dodsnake-id.vercel.app`, `play-dodsnake.vercel.app`, or `dodsnake-3d.vercel.app`.
-   - Or deploy from CLI inside the repository root:
-     ```bash
-     npx vercel --prod --name dodsnake
-     ```
-2. **Offline vs. Online Multiplayer on Vercel**:
-   - **Local Hot-Seat Mode** and **Smart Bots (*Lawan Bot*)** run 100% client-side in the browser on Vercel without needing a backend server.
-   - Because Vercel static hosting does not run stateful Socket.IO WebSockets, deploy `apps/server` to a Node host (a one-click `render.yaml` blueprint is included at the repository root) and configure:
-     - Backend (`@doodle-dash/server`): `CORS_ORIGIN=https://dodsnake.vercel.app`
-     - Frontend (Vercel Environment Variable): `VITE_SERVER_URL=https://<your-backend-host>`
+### 3D Sketchbook Diorama & Main Menu
+![DodSnake 3D Main Menu and Diorama](docs/screenshots/01-main-menu-3d.png)
 
-## Getting Started
+### Confidential Onchain Arena — Lobby & Live Match Gameplay
+
+| Confidential Arena Setup (`cDOD` & `cUSDT` ERC-7984 Flow) | Live FHE Match HUD, 3D Trap Aura & Proof Inspector |
+| :---: | :---: |
+| ![Confidential Arena Lobby](docs/screenshots/03-confidential-arena-lobby.png) | ![Confidential Arena Gameplay](docs/screenshots/04-confidential-arena-gameplay.png) |
+
+| 3D Character & Gear Studio | In-App Privacy Matrix | 12 Faucets & 10 Testnet Accounts |
+| :---: | :---: | :---: |
+| ![Character Studio](docs/screenshots/02-character-studio.png) | ![FHE Confidentiality Matrix](docs/screenshots/05-fhe-privacy-matrix.png) | ![Faucets and Testnet Wallets](docs/screenshots/06-faucets-and-wallets.png) |
+
+---
+
+## Why This Game Requires FHE (Impossible on a Public Chain)
+
+On a transparent EVM chain, `eth_getStorageAt` and mempool inspection break strategy before a turn resolves. `DodSnake` uses encrypted FHEVM types (`euint8`, `euint32`, `euint64`, `ebool`) and OpenZeppelin `ERC-7984` so competitive secrets remain ciphertext onchain while still enforcing deterministic game rules:
+
+| Confidential Mechanic | Onchain Ciphertext & Primitives | Who Can Read Plaintext? | Why Transparent Blockchains Break |
+| --- | --- | --- | --- |
+| **Secret Board Traps** | `euint8` tile & kind + `FHE.eq` / `FHE.select` | Trap planter only (`FHE.allow`) | Rivals would read trap storage slots and avoid every planted square |
+| **Hidden Golden Warp Shortcut** | `FHE.randEuint8` spawned in `_activateMatch` | **Nobody** until stepped on (`kind = 4`) | Even the match creator/deployer could peek and rush the `+3 steps +1 ★` boost |
+| **Secret Rival Brake Curse** | `castSecretBrake` (`externalEuint8` seat + `ebool`) | **Nobody** (applied inside `requestDiceRoll`) | Publicly revealing who was cursed lets rivals burn items or alter timing |
+| **Confidential Shields & Trap Charges** | `euint8` bag counters (`buyEncryptedMysteryItem`) | Owner only via EIP-712 `userDecrypt` | Opponents would know whether a snake bite or ambush is blocked beforehand |
+| **Blind 1v1 RPS Duels** | `externalEuint8` moves + FHE boolean truth table | Only outcome (`0=Tie, 1=Win, 2=Lose`) revealed | Mempool listeners would front-run second submissions to guarantee wins |
+| **Secret Match Missions** | `FHE.randEuint8(4)` objective per player | Owner only; homomorphic claim verification | Reveals tactical win conditions to opponents early |
+| **ERC-7984 Wagers & Pots** | `euint64` pot (`DodChipERC7984` / Sepolia `cUSDT`) | Encrypted balance owner via ACL | Wallet spying exposes bankroll size and exact wager amounts |
+
+---
+
+## System Architecture & FHE Protocol Flows
+
+### High-Level Architecture
+
+```mermaid
+flowchart TB
+    UI["3D Sketchbook Web Client (Three.js + GSAP + Vite)"]
+    SDK["@zama-fhe/sdk Web Transport + Offload Web Worker"]
+    Sim["Instant FHE Preview Simulator (Offline / Pre-Deploy Mode)"]
+    Relayer["Sepolia Relayer & KMS Gateway (Chain 10901)"]
+    Arena["DodSnakeArena.sol (Game State, Traps, Brake, Duels, Dice)"]
+    Tokens["ERC-7984 Tokens: DodChip (cDOD) or Sepolia cUSDT"]
+    Server["Socket.IO Room Server (Casual 2-6P Online Board Mode)"]
+
+    UI -->|"Instant Preview Mode"| Sim
+    UI -->|"Sepolia FHEVM Mode"| SDK
+    SDK -->|"ZKPoK Encrypted Inputs & EIP-712 userDecrypt"| Relayer
+    SDK -->|"viem Wallet Tx"| Arena
+    Relayer -->|"KMS publicDecrypt + Signatures"| SDK
+    Arena <-->|"FHE.allowTransient + confidentialTransferFrom / To"| Tokens
+    UI -.->|"Optional Real-Time Casual Lobby"| Server
+```
+
+### Verifiable FHE Dice, Rival Brake & Homomorphic Trap Flow
+
+```mermaid
+sequenceDiagram
+    actor Player
+    participant Client as "DodSnake Web Client"
+    participant Arena as "DodSnakeArena.sol"
+    participant KMS as "FHEVM KMS & Relayer"
+    participant Scene as "Three.js 3D Engine"
+
+    Player->>Client: "Click Roll FHE Dice"
+    Client->>Arena: "requestDiceRoll(matchId)"
+    Note over Arena: "Generates FHE.randEuint32() % 6 + 1, secretly capped 1..3 if encryptedBrake == true"
+    Arena-->>Client: "DiceRollRequested(matchId, rollHandle)"
+    Client->>KMS: "decryptPublicValues([rollHandle])"
+    KMS-->>Client: "clearDie + decryptionProof"
+    Client->>Arena: "finalizeDiceRoll(matchId, clearDie, decryptionProof)"
+    Arena->>Arena: "FHE.checkSignatures(...) + move pawn + scan hidden traps & shields"
+    alt "Enemy/House Traps or Snake Present"
+        Arena-->>Client: "ConfidentialTileCheckRequested(trapHandle, shieldHandle)"
+        Client->>KMS: "decryptPublicValues([trapHandle, shieldHandle])"
+        KMS-->>Client: "clearTrapKind (0..4), clearShieldUsed + proof"
+        Client->>Arena: "finalizeTileCheck(matchId, clearTrapKind, clearShieldUsed, proof)"
+    end
+    Arena-->>Client: "DiceMoved + TileResolved events"
+    Client->>Scene: "enqueueEvents(DiceRolled -> PawnMoved -> LadderClimbed/SnakeBitten)"
+```
+
+### Blind Encrypted Duel & Confidential ERC-7984 Settlement
+
+```mermaid
+sequenceDiagram
+    actor Challenger
+    actor Opponent as "Opponent / FHE House Bot"
+    participant Arena as "DodSnakeArena.sol"
+    participant Token as "ERC-7984 Token (cDOD / cUSDT)"
+
+    Challenger->>Token: "setOperator(arenaAddress, expiry)"
+    Challenger->>Arena: "createMatch(mode, stakeToken, encWager, inputProof)"
+    Arena->>Token: "FHE.allowTransient + confidentialTransferFrom(player -> arena)"
+    Challenger->>Arena: "startBlindDuel(matchId, opponent)"
+    Challenger->>Arena: "submitBlindDuelMove(matchId, encRockPaperScissors, proof)"
+    Opponent->>Arena: "submitBlindDuelMove(...) or FHE.randEuint8(4)%3"
+    Arena->>Arena: "Homomorphically evaluate winner; reveal outcome only via KMS"
+    Challenger->>Arena: "finalizeBlindDuel(matchId, outcome, decryptionProof)"
+    Challenger->>Arena: "claimMatchPayout(matchId)"
+    Arena->>Token: "confidentialTransfer(winner, encryptedPot)"
+```
+
+---
+
+## Monorepo Layout
+
+- [`packages/contracts`](packages/contracts) (`@doodle-dash/contracts`): Hardhat workspace with `@fhevm/solidity` (`0.11.1`) and `@openzeppelin/confidential-contracts` (`0.5.3`).
+  - [`DodChipERC7984.sol`](packages/contracts/contracts/DodChipERC7984.sol): ERC-7984 confidential chip token (`DodChip` / `cDOD`, 6 decimals) with `claimFaucet()` (`100 cDOD`, 1-hour cooldown) and batch testnet minting.
+  - [`DodSnakeArena.sol`](packages/contracts/contracts/DodSnakeArena.sol): Full FHEVM game contract supporting Sprint `30`-tile and Classic `100`-tile modes, hidden House/Player Traps, random zero-ACL Golden Warp, `castSecretBrake`, Encrypted Mystery Bag, Verifiable FHE Dice, Blind 1v1 RPS Duels, Secret Match Missions, and ERC-7984 pot escrow.
+  - [`DodSnakeConfidential.test.ts`](packages/contracts/test/DodSnakeConfidential.test.ts): **16 automated FHEVM + ERC-7984 tests** including ACL leak rejection, forged/replayed proof rejection, Secret Brake, Golden Warp, and 10-account multi-room gameplay.
+- [`packages/shared`](packages/shared) (`@doodle-dash/shared`): Pure deterministic game engine, seeded PRNG, tile generator, Zod multiplayer schemas, 1,000-match bot simulator, and Vitest suite.
+- [`apps/server`](apps/server) (`@doodle-dash/server`): Authoritative Express + Socket.IO real-time multiplayer server (`4`-letter invites, reconnect handling, anti-cheat challenge verification, spectator support).
+- [`apps/client`](apps/client) (`@doodle-dash/client`): Vite + TypeScript + Three.js + GSAP + `@zama-fhe/sdk` (`viem` + Web Worker WASM) frontend with dual **Instant FHE Preview** and **Sepolia FHEVM** modes.
+- [`data/board.json`](data/board.json) & [`data/tiles.json`](data/tiles.json): Board geometry (snakes, ladders, zones) and 100 tile challenge definitions.
+
+---
+
+## Sepolia Configuration, 10 Test Accounts & 12 Faucets
+
+### Network & Protocol Endpoints (Ethereum Sepolia `chainId: 11155111`)
+
+| Component | Address / Endpoint |
+| --- | --- |
+| Relayer URL | `https://relayer.testnet.zama.org` |
+| Gateway Chain ID | `10901` |
+| ACL Contract | `0xf0Ffdc93b7E186bC2f8CB3dAA75D86d1930A433D` |
+| FHEVM Executor | `0x92C920834Ec8941d2C77D188936E1f7A6f49c127` |
+| KMS Verifier | `0xbE0E383937d564D7FF0BC3b46c51f0bF8d5C311A` |
+| Confidential Token Wrappers Registry | `0x2f0750Bbb0A246059d80e94c454586a7F27a128e` |
+| Official Sepolia `cUSDT` Wrapper | `0xAe0207C757Aa2B4019Ad96edD0092ddc63EF0c50` |
+| Official Sepolia `cUSDC` Wrapper | `0xe978F22157048E5DB8E5d07971376e86671672B2` |
+
+### 12 Verified Sepolia ETH & Confidential Token Faucets
+
+1. **In-App `DodChip (cDOD)` ERC-7984 Faucet** — Built directly into `DodChipERC7984.sol` (`claimFaucet()` mints `100 cDOD` encrypted chips per 1h cooldown)
+2. **Google Cloud Web3 Sepolia Faucet** — `https://cloud.google.com/application/web3/faucet/ethereum/sepolia` (No mainnet ETH required)
+3. **pk910 Sepolia PoW Faucet** — `https://sepolia-faucet.pk910.de/` (Browser PoW mining, no login required)
+4. **Alchemy Sepolia Faucet** — `https://www.alchemy.com/faucets/ethereum-sepolia`
+5. **Chainlink Sepolia Faucet** — `https://faucets.chain.link/sepolia`
+6. **QuickNode Sepolia Faucet** — `https://faucet.quicknode.com/ethereum/sepolia`
+7. **Infura / MetaMask Sepolia Faucet** — `https://www.infura.io/faucet/sepolia`
+8. **Coinbase Developer Platform (CDP) Faucet** — `https://portal.cdp.coinbase.com/products/faucet`
+9. **Moralis Sepolia Faucet** — `https://moralis.com/faucets/`
+10. **Thirdweb Sepolia Faucet** — `https://thirdweb.com/sepolia`
+11. **Bitbond Token Tool Sepolia Faucet** — `https://tokentool.bitbond.com/faucet/ethereum-sepolia`
+12. **LearnWeb3 Sepolia Faucet** — `https://learnweb3.io/faucets/sepolia`
+
+### Deployer & 10 Deterministic Testnet Wallets
+
+Run `npm run wallets:gen` to generate local keys inside gitignored `.env.testnet.local` and `packages/contracts/testnet-wallets.local.json`. Public addresses are checked into [`packages/contracts/testnet-wallets.public.json`](packages/contracts/testnet-wallets.public.json):
+
+- **Deployer Address:** `0xb2e53D52d38bc87Aaf7E3C81d121dfBD845E9B7D`
+- **10 Testnet Player Accounts:** `0x3C22F1EefEf2ba6F5adb0e398188eE348390C503`, `0x6D6479fc7537ABd903700a94A1Afed7b04e78253`, `0xAd976fb078e1D175328567dBBd0a1cf1F4c38576`, `0x5527A70282A0139657457891263A39F4C847fB23`, `0xc5e96C6c75b3E8Fa59B0b215620a6912986882Fa`, `0x678397B0C3C6aA47646595D074871733e3EF6237`, `0x8050fA9F30c0Fe3664346D7d0266Fd15F99969fC`, `0x5c6f94510dd265208860ae3d7FB72Edec4A94bd2`, `0x6ac284E018DEa3876301be8C48588670fb12012e`, `0x49832Da05c17E4636A57DF068D88285ce7f96124`
+
+---
+
+## Development, Testing & Deployment
+
+### Local Development & Test Suite
 
 ```bash
 npm install
-npm run generate:tiles   # optional: deterministically regenerate data/tiles.json
-npm run dev              # start both backend server (:3001) and Vite client (:5173)
+npm run dev              # Starts Socket.IO server (:3001) + Vite dev client (:5173)
+npm run build            # Builds shared, server, compiles contracts, exports ABIs & client bundle
+npm test                 # Runs Vitest suites (shared + server) AND 16 Hardhat FHEVM tests
+npm run test:contracts   # Runs only the 16 FHEVM + ERC-7984 Hardhat tests
+npm run sim              # Runs 1,000-match bot-vs-bot determinism & deadlock simulation
+npm run generate:tiles   # Regenerates deterministic data/tiles.json
 ```
 
-## Testing & Debug Tools
+### Deploy Smart Contracts to Ethereum Sepolia
 
 ```bash
-npm test                 # run Vitest suites (@doodle-dash/shared and @doodle-dash/server)
-npm run sim              # run 1,000-match bot-vs-bot simulation for deadlock checks
-npm run build            # compile shared, server, and client for production
+# 1. Fund Deployer 0xb2e53D52d38bc87Aaf7E3C81d121dfBD845E9B7D with Sepolia ETH from any faucet above
+#    (or configure DEPLOYER_PRIVATE_KEY & SEPOLIA_RPC_URL in packages/contracts/.env)
+npm run deploy:sepolia
+
+# 2. Verify live Sepolia round-trip onchain (faucet claim, match creation, encrypted dice, payout):
+npm run verify:sepolia --workspace=@doodle-dash/contracts
 ```
 
-- **Debug Panel**: Open the client with `?debug=1` (e.g. `http://localhost:5173/?debug=1`) in Local/Bot mode to force dice values, jump directly to any tile (`1-100`), trigger any challenge archetype immediately, and inspect FPS & draw call metrics.
+### Publish Web Demo on Vercel
 
-## Playable Characters, Accessories & Passive Perks (*Bakat Unik*)
+[`vercel.json`](vercel.json) is configured to build `@doodle-dash/shared` + `@doodle-dash/client` with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless` headers required by the `@zama-fhe/sdk` Web Worker WASM runtime.
 
-Customize any pawn inside the **Studio Karakter & Aksesoris** with a draggable live 3D turntable, pastel swatches, and 7 accessories (`none`, `crown`, `glasses`, `scarf`, `headset`, `flower`, `backpack`). Each character features custom sculpted meshes, matching SVG portraits, floating 3D nameplates, and a signature passive perk:
+```bash
+npx vercel --prod --name dodsnake
+```
 
-1. **Mochi** (*Mochi si Kucing*, *Kaki Gesit*): Gains **+1 ★** bonus every time Mochi climbs a ladder.
-2. **Koko** (*Koko si Kodok*, *Lompatan Kodok*): Rolling a **1** automatically hops **+1** extra step forward.
-3. **Wekwek** (*Wekwek si Bebek*, *Semangat Pesta*): Gains **+1 ★** bonus when winning a `duel` or `all_play` challenge.
-4. **Boba** (*Boba si Panda*, *Santai Fokus*): Receives **+1.5s** extra timer duration on Boba's turn challenges.
-5. **Roro** (*Roro si Dino*, *Diskon Kantin*): Buys items at **Kantin Bintang** for **3 ★** instead of the standard **4 ★**.
-6. **Toady** (*Toady si Jamur*, *Aura Hoki*): Gains **+1 ★** luck bonus whenever dodging a snake or blocking a bite with a shield.
+- **Instant FHE Preview**, **Confidential Sepolia FHEVM Mode** (MetaMask + KMS Relayer), **Local Hot-Seat**, and **Vs Smart Bots** all work purely client-side from static Vercel hosting.
+- For optional casual 2-6 player Socket.IO rooms, deploy `apps/server` using [`render.yaml`](render.yaml) and set `VITE_SERVER_URL` on Vercel and `CORS_ORIGIN` on Render.
 
-## Gameplay Rules
+---
 
-1. **Movement & Dice**: Roll `1d6` (or press **Space**). Rolling a `6` grants a bonus roll (up to `2` consecutive extra rolls). Landing on tile `100` requires an exact roll; excess steps bounce backward from `100`.
-2. **Rule Presets**:
-   - **Klasik Seru**: Balanced standard 100-tile ruleset.
-   - **Mode Kilat**: Start with 1 item + 2 stars and faster forward challenge momentum.
-   - **Pesta Item**: Start with 1 item and greatly increased item drop chances.
-3. **Landing Resolution Order**:
-   - Trigger any **Special Board Tile** effect when landing on designated landmark spaces:
-     - **Air Mancur Bintang** (`star_fountain`, tiles `12, 60`): `+2 ★`.
-     - **Peti Item Spesial** (`supply_crate`, tiles `22, 69`): Free tactical item (or `+2 ★` if bag is full).
-     - **Altar Perisai** (`shield_shrine`, tiles `38, 84`): `+1` Snake Shield.
-     - **Angin Penolong** (`tailwind`, tiles `43, 88`): Auto-glides `+2` steps forward.
-   - Play one of **24 interactive randomized mini-game archetypes** on tiles `2-99` (`tap_timing`, `quick_quiz`, `memory_doodle`, `spam_tap`, `swipe_dodge`, `shadow_match`, `quick_math`, `word_scramble`, `trace_line`, `lucky_wheel`, `stroop_color`, `quick_duel`, `gift_trap`, `bubble_pop`, `rhythm_clap`, `color_count`, `balance_bar`, `pair_flip`, `number_order`, `odd_one_out`, `pattern_next`, `math_compare`, `target_sum`, `arrow_blitz`), excluding tile `1` (`start`).
-   - Only the active player who landed on a challenge plays it (including Ladder and Snake checks), **except** 1v1 Duel tiles (`quick_duel`), where the challenger picks 1 opponent before both duelists compete.
-   - Track your **Match Mission** (`Naik 2 Tangga`, `Menang 3 Tantangan`, `Kombo 2x`, or `Pakai 2 Item`) for an instant `+3 ★` plus an item (or shield if full) reward.
-   - Apply challenge rewards (stars `★`, `advance` / `shield` / `extra_dice`, comeback **Bonus Ngejar +1 ★** when trailing the leader by `>= 25` tiles) or penalties (`retreat` / `skip_turn`).
-   - Resolve ladders or snakes on the landed tile:
-     - **Ladder base**: Pawn climbs up to the ladder top.
-     - **Snake head**: Snake slides pawn down to the tail, **EXCEPT** when the player wins the tile challenge (snake dodge!) or activates/holds **Perisai Anti-Ular** (Anti-Snake Shield).
-   - **No infinite chains**: Destination tiles from ladders, snakes, or movement bonuses/penalties do not trigger another challenge or snake/ladder in the same turn.
-4. **Items (Max 2 in Inventory)** & **Kantin Bintang** (`4 ★`, or `3 ★` for **Roro**):
-   - **Perisai Anti-Ular** (`shield`): Blocks 1 snake bite automatically or when activated before rolling.
-   - **Dadu Emas** (`golden_dice`): Roll 2 golden 3D dice and choose your preferred roll.
-   - **Rem Mendadak** (`brake`): Caps the next dice roll to `1-3`.
-   - **Kotak Kejutan** (`surprise`): Triggers one of 4 playful deterministic random effects before moving.
-   - **Magnet Bintang** (`magnet_star`): Pulls 1 ★ from the current leader (or grants +1 ★ bonus).
-   - **Sepatu Turbo** (`swap_turbo`): Adds `+2` extra steps to the next dice roll.
-   - **Jimat Ganda** (`star_multiplier`): Doubles challenge star winnings (`2x`) on a challenge victory this turn.
-   - **Jebakan Rem** (`rival_brake`): Applies a `1-3` dice brake onto the leading rival for their next roll.
-5. **Anti-Frustration Safeguards**:
-   - Last-place players receive higher item drop odds upon winning challenges.
-   - At most 2 consecutive turn penalties; a 3rd consecutive penalty is automatically forgiven (*Kartu Kasihan*).
-6. **Victory**: The first player to land cleanly on tile `100` and clear the **Bos Doodle** finale wins! Total stars (`★`) break ties and determine podium rankings alongside superlative titles.
+## Gameplay Guide & Tabletop Features
 
-## Adding a New Challenge Archetype
+### Playable Characters & Signature Passive Perks
 
-1. Add the archetype identifier to the `ChallengeArchetype` union in `packages/shared/src/types.ts`.
-2. Register the specification in `ARCHETYPE_REGISTRY` inside `packages/shared/src/content/archetypes.ts` (`displayName`, `instruction`, `baseDurationMs`, `allowedModes`, `buildParams`, `validate`, `simulateBot`), and include its ID in `PLAYABLE_TILE_ARCHETYPES`.
-3. Add title templates in `ARCHETYPE_TITLE_TEMPLATES` inside `packages/shared/src/generator/generateTiles.ts` and run `npm run generate:tiles`.
-4. Implement the interactive mini-game renderer inside `apps/client/src/challenges/`.
+Customize any buddy inside **Character & Gear Studio** using the draggable 3D turntable, pastel palettes, and 7 gear accessories (`Classic`, `Crown`, `Glasses`, `Scarf`, `Headset`, `Flower`, `Pack`):
 
-## Design Assumptions
+1. **Mochi** (*Ladder Chaser*): Earns **+1 ★** bonus every time Mochi climbs a ladder.
+2. **Koko** (*Lily Jumper*): Rolling a **1** automatically bounces **+1** extra tile forward.
+3. **Wekwek** (*Party Star*): Gains **+1 ★** bonus upon winning a `duel` or `all_play` challenge.
+4. **Boba** (*Focus Master*): Receives **+1.5s** extra timer headroom during turn challenges.
+5. **Roro** (*Canteen VIP*): Buys tactical shop items for **3 ★** instead of **4 ★**.
+6. **Toady** (*Lucky Charm*): Gains **+1 ★** bonus whenever dodging a snake or blocking with a shield.
 
-- **Bos Doodle Failure (Tile 100)**: Failing Bos Doodle bounces the pawn back 3 spaces (to tile `97`) without Pity Card protection so players cannot camp permanently on tile `100`.
-- **Advance Bonus Cap**: `advance` rewards on tiles `2-99` stop at tile `99` so entering tile `100` for Bos Doodle still requires an exact dice roll.
-- **Local Hot-Seat `all_play`**: On a single shared device, `all_play` challenges run quickly for the active player alongside simulated bot scores to keep mobile one-hand play comfortable.
-- **Color-Blind Accessibility in Stroop**: High-contrast color buttons also render distinct shape icons so every player can play fairly.
+### Tabletop Rules & Mini-Games
+
+- **Classic Board (100 Tiles)** & **Sprint Board (30 Tiles)**: Exact roll required to finish (excess steps bounce backward cleanly).
+- **24 Interactive Mini-Games** across tiles `2-99` (`tap_timing`, `quick_quiz`, `memory_doodle`, `spam_tap`, `swipe_dodge`, `shadow_match`, `quick_math`, `word_scramble`, `trace_line`, `lucky_wheel`, `stroop_color`, `quick_duel`, `gift_trap`, `bubble_pop`, `rhythm_clap`, `color_count`, `balance_bar`, `pair_flip`, `number_order`, `odd_one_out`, `pattern_next`, `math_compare`, `target_sum`, `arrow_blitz`) plus **Bos Doodle** finale on tile `100`.
+- **Inspect Mode (`?debug=1`)**: Open `http://localhost:5173/?debug=1` in Local/Bot mode to test arbitrary rolls, tile jumps, challenges, and live FPS/draw calls.
+
+---
+
+## Season 5 Hackathon Submission Checklist
+
+- **Naming Policy:** Named `DodSnake` (zero protocol brand name in project, npm workspace, UI headers, or contract names).
+- **Required Disclaimer:** Shown prominently in Splash, Main Menu, Confidential Arena footer, Privacy Matrix, Faucets Modal, and this `README.md`.
+- **Single-Submission & Email Check:** Ensure you submit once using the exact email address tied to your Relayer API key request.
+- **3-Minute Real-Person Video Pitch Outline (No AI Video/Voice):**
+  1. `0:00–0:35` — Why public chains fail hidden-information tabletop games (`eth_getStorageAt` & mempool spying).
+  2. `0:35–1:45` — Live demo on Sepolia: Mint `cDOD` faucet, EIP-712 balance decrypt, Secret Trap placement, Verifiable FHE Dice + 3D hop, Secret Brake, and Blind Duel.
+  3. `1:45–2:35` — Code walkthrough of `DodSnakeArena.sol`, `DodChipERC7984.sol`, HCU optimization, and `@zama-fhe/sdk`.
+  4. `2:35–3:00` — Live Vercel deployment link and Sepolia Etherscan transaction verification.
+- **X (Twitter) Thread:** Share your live URL, 3-minute pitch video, Sepolia deployment addresses, and the confidentiality matrix screenshots above.
