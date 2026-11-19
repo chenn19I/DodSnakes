@@ -1,0 +1,81 @@
+{
+  "network": "sepolia",
+  "chainId": 11155111,
+  "generatedAt": "2026-11-19T04:57:36.345Z",
+  "deployerAddress": "0xb2e53D52d38bc87Aaf7E3C81d121dfBD845E9B7D",
+  "testAccounts": [
+    {
+      "index": 1,
+      "label": "Sepolia Testnet Player #1",
+      "path": "m/44'/60'/0'/0/1",
+      "address": "0x3C22F1EefEf2ba6F5adb0e398188eE348390C503"
+    },
+    {
+      "index": 2,
+      "label": "Sepolia Testnet Player #2",
+      "path": "m/44'/60'/0'/0/2",
+      "address": "0x6D6479fc7537ABd903700a94A1Afed7b04e78253"
+    },
+    {
+      "index": 3,
+      "label": "Sepolia Testnet Player #3",
+      "path": "m/44'/60'/0'/0/3",
+      "address": "0xAd976fb078e1D175328567dBBd0a1cf1F4c38576"
+    },
+    {
+      "index": 4,
+      "label": "Sepolia Testnet Player #4",
+      "path": "m/44'/60'/0'/0/4",
+      "address": "0x5527A70282A0139657457891263A39F4C847fB23"
+    },
+    {
+      "index": 5,
+      "label": "Sepolia Testnet Player #5",
+      "path": "m/44'/60'/0'/0/5",
+      "address": "0xc5e96C6c75b3E8Fa59B0b215620a6912986882Fa"
+    },
+    {
+      "index": 6,
+      "label": "Sepolia Testnet Player #6",
+      "path": "m/44'/60'/0'/0/6",
+      "address": "0x678397B0C3C6aA47646595D074871733e3EF6237"
+    },
+    {
+      "index": 7,
+      "label": "Sepolia Testnet Player #7",
+      "path": "m/44'/60'/0'/0/7",
+      "address": "0x8050fA9F30c0Fe3664346D7d0266Fd15F99969fC"
+    },
+    {
+      "index": 8,
+      "label": "Sepolia Testnet Player #8",
+      "path": "m/44'/60'/0'/0/8",
+      "address": "0x5c6f94510dd265208860ae3d7FB72Edec4A94bd2"
+    },
+    {
+      "index": 9,
+      "label": "Sepolia Testnet Player #9",
+      "path": "m/44'/60'/0'/0/9",
+      "address": "0x6ac284E018DEa3876301be8C48588670fb12012e"
+    },
+    {
+      "index": 10,
+      "label": "Sepolia Testnet Player #10",
+      "path": "m/44'/60'/0'/0/10",
+      "address": "0x49832Da05c17E4636A57DF068D88285ce7f96124"
+    }
+  ],
+  "faucets": [
+    "https://cloud.google.com/application/web3/faucet/ethereum/sepolia",
+    "https://sepolia-faucet.pk910.de/",
+    "https://www.alchemy.com/faucets/ethereum-sepolia",
+    "https://faucets.chain.link/sepolia",
+    "https://faucet.quicknode.com/ethereum/sepolia",
+    "https://www.infura.io/faucet/sepolia",
+    "https://portal.cdp.coinbase.com/products/faucet",
+    "https://moralis.com/faucets/",
+    "https://thirdweb.com/sepolia",
+    "https://tokentool.bitbond.com/faucet/ethereum-sepolia",
+    "https://learnweb3.io/faucets/sepolia"
+  ]
+}
