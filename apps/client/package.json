@@ -4,15 +4,21 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "node ../../scripts/copyFheWorker.mjs",
     "dev": "vite",
+    "prebuild": "node ../../scripts/copyFheWorker.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@doodle-dash/shared": "1.0.0",
+    "@tanstack/query-core": "^5.60.0",
+    "@zama-fhe/sdk": "^3.8.0",
+    "ethers": "^6.16.0",
     "gsap": "^3.12.5",
     "socket.io-client": "^4.8.1",
-    "three": "^0.170.0"
+    "three": "^0.170.0",
+    "viem": "^2.40.0"
   },
   "devDependencies": {
     "@types/three": "^0.170.0",
