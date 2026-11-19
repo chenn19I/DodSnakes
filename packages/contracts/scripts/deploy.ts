@@ -14,7 +14,7 @@ async function main() {
   const chain = await ethers.provider.getNetwork();
   const chainId = Number(chain.chainId);
   const bal = await ethers.provider.getBalance(deployer.address);
-  console.log(`Deploying DodSnake Confidential contracts to ${network.name} (chainId=${chainId})...`);
+  console.log(`Deploying DodSnakes Confidential contracts to ${network.name} (chainId=${chainId})...`);
   console.log(`Deployer: ${deployer.address} (balance: ${ethers.formatEther(bal)} ETH)`);
 
   if (chainId === 11155111 && bal === 0n) {
