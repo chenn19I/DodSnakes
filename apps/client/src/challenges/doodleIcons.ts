@@ -396,7 +396,15 @@ export type UiIconKind =
   | 'sticker'
   | 'heart'
   | 'mission'
-  | 'bolt';
+  | 'bolt'
+  | 'lock'
+  | 'unlock'
+  | 'shield'
+  | 'trap'
+  | 'sword'
+  | 'faucet'
+  | 'online'
+  | 'copy';
 
 export function renderUiIconSvg(kind: UiIconKind, size = 20): string {
   const s = size;
@@ -580,6 +588,49 @@ export function renderUiIconSvg(kind: UiIconKind, size = 20): string {
         <rect x="7" y="7" width="22" height="24" rx="4" fill="#FFFDF7" stroke="${INK}" stroke-width="2.6"/>
         <rect x="13" y="4" width="10" height="5" rx="2" fill="#FFD15C" stroke="${INK}" stroke-width="2.2"/>
         <path d="M12 18 L16 22 L25 13" fill="none" stroke="#34A87F" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>`;
+    case 'lock':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <path d="M12 16 V11 A6 6 0 0 1 24 11 V16" fill="none" stroke="${INK}" stroke-width="2.8" stroke-linecap="round"/>
+        <rect x="8" y="16" width="20" height="15" rx="4" fill="#FFD15C" stroke="${INK}" stroke-width="2.6"/>
+        <circle cx="18" cy="23" r="2.2" fill="${INK}"/>
+      </svg>`;
+    case 'unlock':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <path d="M12 16 V10 A6 6 0 0 1 24 9" fill="none" stroke="${INK}" stroke-width="2.8" stroke-linecap="round"/>
+        <rect x="8" y="16" width="20" height="15" rx="4" fill="#5EE2AD" stroke="${INK}" stroke-width="2.6"/>
+        <circle cx="18" cy="23" r="2.2" fill="${INK}"/>
+      </svg>`;
+    case 'shield':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <path d="M18 4 L29 9 V18 C29 25 24 30 18 32 C12 30 7 25 7 18 V9 Z" fill="#72C0FF" stroke="${INK}" stroke-width="2.6" stroke-linejoin="round"/>
+        <path d="M18 9 L24 12 V17.5 C24 22 21 25.5 18 27" fill="none" stroke="#FFFDF7" stroke-width="2.2" stroke-linecap="round"/>
+      </svg>`;
+    case 'trap':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <circle cx="17" cy="21" r="10" fill="#FF6B7B" stroke="${INK}" stroke-width="2.6"/>
+        <path d="M23 12 L27 8 M26 6 L30 10" stroke="#FFD15C" stroke-width="2.8" stroke-linecap="round"/>
+        <circle cx="14" cy="18" r="2.2" fill="#FFFDF7"/>
+      </svg>`;
+    case 'sword':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <path d="M8 28 L27 9 M11 21 L15 25 M28 28 L9 9 M21 25 L25 21" stroke="${INK}" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="18" cy="18" r="3.5" fill="#FFD15C" stroke="${INK}" stroke-width="2.2"/>
+      </svg>`;
+    case 'faucet':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <path d="M18 6 C18 6 28 17 28 23 A10 10 0 0 1 8 23 C8 17 18 6 18 6 Z" fill="#72C0FF" stroke="${INK}" stroke-width="2.6" stroke-linejoin="round"/>
+        <circle cx="15" cy="23" r="2.2" fill="#FFFDF7"/>
+      </svg>`;
+    case 'online':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <circle cx="18" cy="18" r="12" fill="#BDF2D5" stroke="${INK}" stroke-width="2.6"/>
+        <path d="M6 18 H30 M18 6 C13 11 13 25 18 30 M18 6 C23 11 23 25 18 30" fill="none" stroke="${INK}" stroke-width="2" stroke-linecap="round"/>
+      </svg>`;
+    case 'copy':
+      return `<svg viewBox="0 0 36 36" width="${s}" height="${s}" aria-hidden="true">
+        <rect x="12" y="11" width="16" height="19" rx="3" fill="#FFFDF7" stroke="${INK}" stroke-width="2.5"/>
+        <path d="M8 23 V9 A3 3 0 0 1 11 6 H22" fill="none" stroke="${INK}" stroke-width="2.5" stroke-linecap="round"/>
       </svg>`;
     case 'bolt':
     default:

@@ -106,7 +106,7 @@ export class DoodleSceneManager {
   private externalPaused = false;
   private reducedMotion = false;
   private colorblindMode = false;
-  private language: AppLanguage = 'id';
+  private language: AppLanguage = 'en';
   private speedMultiplier = 1;
   private preferredCameraMode: 'overview' | 'follow' = 'follow';
   private showcaseMode = true;
@@ -142,6 +142,8 @@ export class DoodleSceneManager {
       this.renderer.shadowMap.autoUpdate = false;
       this.renderer.shadowMap.needsUpdate = true;
       this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+      this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      this.renderer.toneMappingExposure = 1.05;
       this.canvasEl.addEventListener('webglcontextlost', this.handleContextLost);
       this.canvasEl.addEventListener('webglcontextrestored', this.handleContextRestored);
     } else {
@@ -150,22 +152,28 @@ export class DoodleSceneManager {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(DOODLE_PALETTE.deskWood);
+    this.scene.fog = new THREE.Fog('#EEDCC3', 48, 92);
 
     this.cameraRig = new DoodleCameraRig(window.innerWidth / window.innerHeight);
     this.outlineCtrl = createOutlineController(0.032);
 
-    // Warm pastel storybook lighting with subtle cool rim separation
-    const hemi = new THREE.HemisphereLight('#FFFDF9', '#E2CEB0', 1.24);
+    // Warm pastel storybook 3-point lighting with gentle cool sky fill & soft shadows
+    const hemi = new THREE.HemisphereLight('#FFFDF9', '#DFC8A6', 1.28);
     this.scene.add(hemi);
 
-    const rim = new THREE.DirectionalLight('#DCEBFF', 0.42);
+    const rim = new THREE.DirectionalLight('#D9EBFF', 0.48);
     rim.position.set(-10, 14, -11);
     this.scene.add(rim);
 
-    const dir = new THREE.DirectionalLight('#FFF6E3', 1.12);
+    const bounce = new THREE.DirectionalLight('#FFE7C7', 0.24);
+    bounce.position.set(0, 6, 16);
+    this.scene.add(bounce);
+
+    const dir = new THREE.DirectionalLight('#FFF7E6', 1.16);
     dir.position.set(11, 22, 13);
     dir.castShadow = true;
-    dir.shadow.mapSize.set(1024, 1024);
+    const shadowRes = window.innerWidth >= 1024 ? 1536 : 1024;
+    dir.shadow.mapSize.set(shadowRes, shadowRes);
     dir.shadow.camera.near = 4;
     dir.shadow.camera.far = 50;
     dir.shadow.camera.left = -13;
@@ -286,6 +294,7 @@ export class DoodleSceneManager {
       this.board.setPreviewTiles(this.arenaModeActive ? this.pinnedArenaMarkers : []);
       if (!this.arenaModeActive) {
         this.board.setActiveZoneLimit(100);
+        this.laddersAndSnakes.setSprintMode(false);
       }
       this.board.setActiveTile(null);
     } else {
@@ -427,11 +436,15 @@ export class DoodleSceneManager {
       this.pinnedArenaMarkers = [];
       this.board.setPreviewTiles([]);
       this.board.setActiveZoneLimit(100);
+      this.laddersAndSnakes.setSprintMode(false);
+      this.cameraRig?.setSprintFocus(false);
       return;
     }
 
     this.arenaModeActive = true;
     this.board.setActiveZoneLimit(finishTile);
+    this.laddersAndSnakes.setSprintMode(finishTile === 30);
+    this.cameraRig?.setSprintFocus(finishTile === 30);
     const markers: TilePreviewMarker[] = [];
     const seen = new Set<number>();
 
@@ -446,7 +459,7 @@ export class DoodleSceneManager {
       }
     }
     if (selectedTargetTile >= 2 && selectedTargetTile < finishTile && !seen.has(selectedTargetTile)) {
-      markers.push({ tileId: selectedTargetTile, kind: 'normal' });
+      markers.push({ tileId: selectedTargetTile, kind: 'aim' });
       seen.add(selectedTargetTile);
     }
     if (finishTile === 30) {
@@ -484,6 +497,8 @@ export class DoodleSceneManager {
     const activeId = state.turnOrder[state.currentTurnIndex];
     if (!this.arenaModeActive) {
       this.board.setActiveZoneLimit(100);
+      this.laddersAndSnakes.setSprintMode(false);
+      this.cameraRig?.setSprintFocus(false);
     }
 
     state.players.forEach((player, idx) => {
@@ -831,6 +846,22 @@ export class DoodleSceneManager {
                 // Tile boing press for 80ms
                 this.board.setTileBoing(stepTileId, -0.14, 1.04);
                 setTimeout(() => this.board.setTileBoing(stepTileId, 0, 1), 80);
+                if (ev.reason === 'dice') {
+                  this.showCallout(
+                    isLastStep ? `+${idx + 1} → #${stepTileId}` : `+${idx + 1}`,
+                    toPos,
+                    isLastStep ? DOODLE_PALETTE.mint : DOODLE_PALETTE.yellow,
+                    isLastStep ? 0.85 : 0.42,
+                  );
+                } else if (isLastStep) {
+                  const delta = stepTileId - ev.from;
+                  this.showCallout(
+                    delta >= 0 ? `+${delta} → #${stepTileId}` : `${delta} → #${stepTileId}`,
+                    toPos,
+                    delta >= 0 ? DOODLE_PALETTE.blue : DOODLE_PALETTE.coral,
+                    0.85,
+                  );
+                }
               },
             })
             // Landing squash 0.8 + spring settle (stiffness ~180, damping ~12)

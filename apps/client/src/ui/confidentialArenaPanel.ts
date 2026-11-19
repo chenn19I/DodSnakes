@@ -17,7 +17,12 @@ import {
   type FheProofLogEntry,
   type OnchainMatchSnapshot,
 } from '../web3/fheClient.js';
-import { ArenaPreviewSimulator } from '../web3/arenaSimulation.js';
+import {
+  ArenaPreviewSimulator,
+  type ArenaOnlineRoomState,
+  type TurnRollResult,
+} from '../web3/arenaSimulation.js';
+import { RoomRelayChannel } from '../controllers/realtimeTransport.js';
 import {
   GOLDEN_WARP_KIND,
   PROTOCOL_DISCLAIMER,
@@ -80,6 +85,8 @@ export class ConfidentialArenaPanel {
   private brakeSeatInput = 0;
   private showVaultDrawer = true;
   private showProofDrawer = true;
+  private showAllProofs = false;
+  private lastStepSummary: string | null = null;
   private showContractConfig = false;
   private showBlindDuelModal = false;
   private showPrivacyModal = false;
@@ -97,6 +104,15 @@ export class ConfidentialArenaPanel {
   private pollInFlight = false;
   private pollEn = true;
   private pollDraft: ArenaPlayerDraft | null = null;
+
+  private readonly clientId = `ar_${Math.random().toString(36).slice(2, 10)}`;
+  private onlineRoomCode: string | null = null;
+  private isOnlineRoomHost = false;
+  private onlineRelay: RoomRelayChannel | null = null;
+  private onlineRelayStatus: 'connecting' | 'connected' | 'local_only' | 'closed' = 'connecting';
+  private remoteAnimQueue: Promise<void> = Promise.resolve();
+  private onlineRoomInput = '';
+  private pendingInitialRoomInvite: { code: string; isGuest: boolean; name: string } | null = null;
 
   constructor(opts: {
     scene: DoodleSceneManager;
@@ -127,6 +143,275 @@ export class ConfidentialArenaPanel {
   public setInitialMatchInvite(matchId: string): void {
     this.mode = 'sepolia';
     this.joinMatchInput = matchId;
+  }
+
+  public setInitialOnlineRoomInvite(roomCode: string, isGuest = false, guestName = 'Boba'): void {
+    const clean = roomCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+    if (!clean) return;
+    this.mode = 'preview';
+    this.onlineRoomInput = clean;
+    this.pendingInitialRoomInvite = { code: clean, isGuest, name: guestName };
+  }
+
+  private ensureDistinctGuestIdentity(preferredName: string): void {
+    const STORAGE_KEY = 'dodsnakes_arena_guest_addr_v1';
+    let saved = '';
+    try {
+      saved = window.sessionStorage.getItem(STORAGE_KEY) ?? '';
+    } catch {
+      // ignore
+    }
+    if (!/^0x[0-9a-fA-F]{40}$/.test(saved) || saved.toLowerCase() === '0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed') {
+      const hex = Array.from({ length: 36 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+      saved = `0x71C8${hex}`;
+      try {
+        window.sessionStorage.setItem(STORAGE_KEY, saved);
+      } catch {
+        // ignore
+      }
+    }
+    const guestName =
+      preferredName && preferredName !== 'Mochi' && preferredName !== 'Boba'
+        ? preferredName
+        : `Boba-${saved.slice(4, 7).toUpperCase()}`;
+    this.sim.setPlayerIdentity(saved as `0x${string}`, guestName);
+  }
+
+  private generateRoomCode(): string {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i = 0; i < 4; i++) {
+      code += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return code;
+  }
+
+  private disconnectOnlineRoom(): void {
+    this.onlineRelay?.close();
+    this.onlineRelay = null;
+    this.onlineRoomCode = null;
+    this.isOnlineRoomHost = false;
+  }
+
+  private broadcastOnlineSync(extra?: {
+    actorAddr?: string;
+    roll?: TurnRollResult;
+    logNotice?: Omit<FheProofLogEntry, 'id' | 'ts'>;
+    toast?: { en: string; id: string };
+  }): void {
+    if (!this.onlineRelay || !this.onlineRoomCode) return;
+    this.onlineRelay.send('arena_state_sync', {
+      roomState: this.sim.exportRoomState(),
+      actorAddr: extra?.actorAddr,
+      roll: extra?.roll,
+      logNotice: extra?.logNotice,
+      toast: extra?.toast,
+    });
+  }
+
+  private connectOnlineRoom(roomCode: string, asHost: boolean, draft: ArenaPlayerDraft): void {
+    const clean = roomCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+    if (!clean) return;
+    this.disconnectOnlineRoom();
+    this.onlineRoomCode = clean;
+    this.isOnlineRoomHost = asHost;
+    this.onlineRoomInput = clean;
+    this.pollDraft = draft;
+
+    if (asHost) {
+      this.sim.setPlayerIdentity(this.sim.getAddress(), draft.name);
+      if (!this.snapshot || this.snapshot.status === 0) {
+        const targetPlayers = Math.max(2, this.maxPlayers);
+        this.maxPlayers = targetPlayers;
+        this.activeMatchId = this.sim.createMatch(this.boardMode, this.stakeTokens, targetPlayers);
+      } else if (this.sim.getSnapshot().playerCount < 2) {
+        this.maxPlayers = 2;
+        this.activeMatchId = this.sim.createMatch(this.boardMode, this.stakeTokens, 2);
+      }
+      this.snapshot = this.sim.getSnapshot();
+      this.syncSceneWithArena(draft);
+    } else {
+      this.ensureDistinctGuestIdentity(draft.name);
+      if (!this.snapshot || this.snapshot.status === 0) {
+        // Initialize local waiting board until host sync arrives
+        this.activeMatchId = this.sim.createMatch(this.boardMode, 0, 2);
+        this.snapshot = this.sim.getSnapshot();
+        this.syncSceneWithArena(draft);
+      }
+    }
+
+    this.onlineRelay = new RoomRelayChannel({
+      roomCode: `ARENA_${clean}`,
+      clientId: this.clientId,
+      onStatusChange: (status) => {
+        this.onlineRelayStatus = status;
+        if (!asHost && status === 'connected') {
+          this.onlineRelay?.send('arena_join_request', {
+            guestAddr: this.sim.getAddress(),
+            guestName: this.sim.getPlayerName(),
+          });
+        }
+        this.onRequestRender();
+      },
+      onEnvelope: (env) => {
+        if (env.event === 'arena_join_request') {
+          if (!this.isOnlineRoomHost) return;
+          const payload = env.payload as { guestAddr?: `0x${string}`; guestName?: string };
+          if (!payload?.guestAddr) return;
+          const joined = this.sim.joinOnlineHumanSeat(payload.guestAddr, payload.guestName || 'Online Peer');
+          this.snapshot = this.sim.getSnapshot();
+          if (this.pollDraft) this.syncSceneWithArena(this.pollDraft);
+          this.broadcastOnlineSync(
+            joined
+              ? {
+                  logNotice: {
+                    kind: 'info',
+                    title: `Online Player Joined: ${payload.guestName || shortAddr(payload.guestAddr)}`,
+                    detail: 'Seated in Confidential Room with private FHE Vault.',
+                  },
+                }
+              : undefined,
+          );
+          if (joined) {
+            this.sound.playTurnReady();
+            this.onToast(
+              this.pollEn
+                ? `${payload.guestName || 'Online Player'} joined Room ${clean}`
+                : `${payload.guestName || 'Pemain Online'} bergabung ke Room ${clean}`,
+            );
+          }
+          this.onRequestRender();
+        } else if (env.event === 'arena_state_sync') {
+          const payload = env.payload as {
+            roomState?: ArenaOnlineRoomState;
+            actorAddr?: string;
+            roll?: TurnRollResult;
+            logNotice?: Omit<FheProofLogEntry, 'id' | 'ts'>;
+            toast?: { en: string; id: string };
+          };
+          if (!payload?.roomState) return;
+          const myLow = this.sim.getAddress().toLowerCase();
+          const hadIncomingDuel = Boolean(
+            this.sim.getPendingOnlineDuel() &&
+              this.sim.getPendingOnlineDuel()!.challenger.toLowerCase() !== myLow,
+          );
+          const prevTurnName = this.sim.getActiveSeatName();
+          this.sim.importRoomState(payload.roomState, payload.logNotice);
+          this.snapshot = this.sim.getSnapshot();
+          const activeDraft = this.pollDraft ?? draft;
+          if (
+            payload.roll &&
+            payload.actorAddr &&
+            payload.actorAddr.toLowerCase() !== myLow
+          ) {
+            const snapForAnim = this.snapshot;
+            const rollForAnim = payload.roll;
+            const actorForAnim = payload.actorAddr;
+            this.remoteAnimQueue = this.remoteAnimQueue
+              .then(async () => {
+                await this.animateRollOutcome(snapForAnim, activeDraft, actorForAnim, rollForAnim);
+                this.formatRollOutcomeToast(this.pollEn, rollForAnim);
+                this.onRequestRender();
+              })
+              .catch(() => {});
+          } else {
+            this.syncSceneWithArena(activeDraft);
+          }
+          if (payload.toast) {
+            this.onToast(this.pollEn ? payload.toast.en : payload.toast.id);
+          }
+          const pendingDuel = this.sim.getPendingOnlineDuel();
+          if (pendingDuel && pendingDuel.challenger.toLowerCase() !== myLow && !hadIncomingDuel) {
+            this.sound.playTurnReady();
+            this.onToast(
+              this.pollEn
+                ? `⚔️ ${pendingDuel.challengerName} challenged you to a Blind Duel!`
+                : `⚔️ ${pendingDuel.challengerName} menantangmu Duel Buta!`,
+            );
+          }
+          const nowTurnName = this.sim.getActiveSeatName();
+          const nowSnap = this.snapshot;
+          const activeAddr = nowSnap.players[nowSnap.turnIndex]?.address?.toLowerCase();
+          if (nowSnap.status === 1 && activeAddr === myLow && prevTurnName !== nowTurnName) {
+            this.sound.playTurnReady();
+            this.onToast(this.pollEn ? '🎲 Your turn!' : '🎲 Giliranmu!');
+          }
+          this.onRequestRender();
+        } else if (env.event === 'arena_brake_curse') {
+          const payload = env.payload as { targetAddr?: string };
+          if (payload?.targetAddr && payload.targetAddr.toLowerCase() === this.sim.getAddress().toLowerCase()) {
+            this.sim.applyIncomingBrake();
+            this.sound.playItemUse();
+            this.onToast(
+              this.pollEn
+                ? '🧊 A rival cast a Secret Brake on you (next roll ≤ 3)!'
+                : '🧊 Lawan melempar Rem Rahasia padamu (dadu berikutnya ≤ 3)!',
+            );
+            this.onRequestRender();
+          }
+        } else if (env.event === 'arena_duel_response') {
+          const payload = env.payload as {
+            challenger?: string;
+            responderAddr?: `0x${string}`;
+            choice?: 0 | 1 | 2;
+          };
+          if (
+            !payload?.responderAddr ||
+            payload.choice === undefined ||
+            payload.challenger?.toLowerCase() !== this.sim.getAddress().toLowerCase()
+          ) {
+            return;
+          }
+          const res = this.sim.resolveOnlineDuelAsChallenger(payload.responderAddr, payload.choice);
+          if (!res) return;
+          this.snapshot = this.sim.getSnapshot();
+          const challengerName = this.sim.getPlayerName(payload.challenger);
+          const roomToast = {
+            en:
+              res.outcome === 1
+                ? `Blind Duel: ${challengerName} beat ${res.responderName} (+2 ★)`
+                : res.outcome === 0
+                  ? `Blind Duel: ${challengerName} & ${res.responderName} tied (+1 ★ each)`
+                  : `Blind Duel: ${res.responderName} beat ${challengerName} (+2 ★)`,
+            id:
+              res.outcome === 1
+                ? `Duel Buta: ${challengerName} mengalahkan ${res.responderName} (+2 ★)`
+                : res.outcome === 0
+                  ? `Duel Buta: ${challengerName} & ${res.responderName} seri (+1 ★)`
+                  : `Duel Buta: ${res.responderName} mengalahkan ${challengerName} (+2 ★)`,
+          };
+          this.onToast(this.pollEn ? roomToast.en : roomToast.id);
+          this.broadcastOnlineSync({
+            logNotice: {
+              kind: 'public_decrypt',
+              title: `PvP Blind Duel resolved: ${challengerName} vs ${res.responderName}`,
+              detail: 'Both encrypted RPS moves compared homomorphically; result revealed to the room.',
+            },
+            toast: roomToast,
+          });
+          this.syncSceneWithArena(this.pollDraft ?? draft);
+          this.onRequestRender();
+        } else if (env.event === 'arena_onchain_ping' && this.mode === 'sepolia') {
+          void this.pollSepoliaState();
+        }
+      },
+    });
+
+    if (asHost) {
+      this.broadcastOnlineSync();
+    } else {
+      this.onlineRelay.send('arena_join_request', {
+        guestAddr: this.sim.getAddress(),
+        guestName: this.sim.getPlayerName(),
+      });
+      window.setTimeout(() => {
+        this.onlineRelay?.send('arena_join_request', {
+          guestAddr: this.sim.getAddress(),
+          guestName: this.sim.getPlayerName(),
+        });
+      }, 450);
+    }
+    this.onRequestRender();
   }
 
   public stopPolling(): void {
@@ -328,9 +613,17 @@ export class ConfidentialArenaPanel {
 
     const players: Player[] = snap.players.map((p, idx) => {
       const isMe = p.address.toLowerCase() === myAddr.toLowerCase();
+      const seatName =
+        this.mode === 'preview'
+          ? isMe
+            ? this.sim.getPlayerName(p.address) || draft.name
+            : this.sim.getPlayerName(p.address)
+          : isMe
+            ? draft.name
+            : `P${idx + 1} (${shortAddr(p.address)})`;
       return {
         id: p.address,
-        name: isMe ? draft.name : `P${idx + 1} (${shortAddr(p.address)})`,
+        name: seatName,
         pawn: isMe ? draft.pawn : pawns[(idx + 1) % pawns.length],
         color: isMe ? draft.color : colors[(idx + 1) % colors.length],
         accessory: isMe ? draft.accessory : 'none',
@@ -475,33 +768,51 @@ export class ConfidentialArenaPanel {
         trapAdjustedPos = Math.min(maxTile - 1, roll.landedPos + 3);
       }
       if (trapAdjustedPos !== roll.landedPos) {
+        const trapPath: number[] = [];
+        const stepDir = trapAdjustedPos > roll.landedPos ? 1 : -1;
+        for (
+          let t = roll.landedPos + stepDir;
+          stepDir > 0 ? t <= trapAdjustedPos : t >= trapAdjustedPos;
+          t += stepDir
+        ) {
+          trapPath.push(t);
+        }
+        if (trapPath.length === 0) trapPath.push(trapAdjustedPos);
         events.push({
           type: 'PawnMoved',
           seq: baseSeq + 3,
           playerId: moverAddr,
           from: roll.landedPos,
           to: trapAdjustedPos,
-          path: [trapAdjustedPos],
+          path: trapPath,
           bounced: false,
           reason: roll.trapTriggered === GOLDEN_WARP_KIND ? 'bonus_advance' : 'penalty_retreat',
         });
       }
 
       if (roll.ladderTo > 0) {
+        const sprintLadderId =
+          trapAdjustedPos === 3 ? 'SL1' : trapAdjustedPos === 8 ? 'SL2' : trapAdjustedPos === 15 ? 'SL3' : null;
+        const classicLadderId =
+          BOARD_LAYOUT.ladders.find((l) => l.from === trapAdjustedPos)?.id ?? 'L1';
         events.push({
           type: 'LadderClimbed',
           seq: baseSeq + 4,
           playerId: moverAddr,
-          ladderId: 'L1',
+          ladderId: maxTile === 30 ? (sprintLadderId ?? 'SL1') : classicLadderId,
           from: trapAdjustedPos,
           to: roll.ladderTo,
         });
       } else if (roll.snakeTo > 0) {
+        const sprintSnakeId =
+          trapAdjustedPos === 14 ? 'SS1' : trapAdjustedPos === 21 ? 'SS2' : trapAdjustedPos === 27 ? 'SS3' : null;
+        const classicSnakeId =
+          BOARD_LAYOUT.snakes.find((s) => s.from === trapAdjustedPos)?.id ?? 'S1';
         events.push({
           type: 'SnakeBitten',
           seq: baseSeq + 4,
           playerId: moverAddr,
-          snakeId: 'S1',
+          snakeId: maxTile === 30 ? (sprintSnakeId ?? 'SS1') : classicSnakeId,
           from: trapAdjustedPos,
           to: roll.shieldBlocked ? trapAdjustedPos : roll.snakeTo,
           blockedByShield: roll.shieldBlocked,
@@ -572,8 +883,8 @@ export class ConfidentialArenaPanel {
           ? (Number(this.chipClearMicro) / 1e6).toFixed(1)
           : null;
     const balanceBtnLabel = isUnlockedBal
-      ? `🔓 ${clearTokens} ${tokenCfg.symbol}`
-      : `🔒 ${tokenCfg.symbol}`;
+      ? `${clearTokens} ${tokenCfg.symbol}`
+      : `${en ? 'Decrypt' : 'Dekripsi'} ${tokenCfg.symbol}`;
 
     const logs: FheProofLogEntry[] =
       this.mode === 'preview' ? this.sim.getLogs() : this.fheClient.getLogs();
@@ -590,30 +901,23 @@ export class ConfidentialArenaPanel {
       <div class="arena-shell">
         <div class="arena-topbar ui-interactive">
           <div class="arena-topbar-left">
-            <button class="doodle-btn" id="btn-arena-back" style="min-height:36px;padding:4px 10px">
-              ${renderUiIconSvg('back', 15)} <span>${en ? 'Menu' : 'Menu'}</span>
+            <button class="doodle-btn" id="btn-arena-back" style="min-height:34px;padding:4px 10px;font-size:0.82rem">
+              ${renderUiIconSvg('back', 14)} <span>${en ? 'Menu' : 'Menu'}</span>
             </button>
             <div class="arena-mode-switch">
-              <button class="doodle-btn ${this.mode === 'preview' ? 'doodle-btn-mint' : ''}" id="btn-mode-preview" style="min-height:34px;padding:3px 10px;font-size:0.82rem">
-                ${en ? 'Instant FHE Preview' : 'Preview FHE Instan'}
+              <button class="doodle-btn ${this.mode === 'preview' ? 'doodle-btn-mint' : ''}" id="btn-mode-preview" style="min-height:34px;padding:3px 10px;font-size:0.8rem">
+                ${en ? 'Instant Preview' : 'Preview Instan'}
               </button>
-              <button class="doodle-btn ${this.mode === 'sepolia' ? 'doodle-btn-primary' : ''}" id="btn-mode-sepolia" style="min-height:34px;padding:3px 10px;font-size:0.82rem">
+              <button class="doodle-btn ${this.mode === 'sepolia' ? 'doodle-btn-primary' : ''}" id="btn-mode-sepolia" style="min-height:34px;padding:3px 10px;font-size:0.8rem">
                 Sepolia FHEVM
               </button>
             </div>
-            <button class="doodle-btn doodle-btn-blue" id="btn-arena-faucets" style="min-height:34px;padding:3px 10px;font-size:0.82rem">
-              🚰 ${en ? '12 Faucets & Testnet' : '12 Faucet & Testnet'}
+            <button class="doodle-btn doodle-btn-blue" id="btn-arena-faucets" style="min-height:34px;padding:3px 10px;font-size:0.8rem">
+              ${renderUiIconSvg('faucet', 14)} <span>${en ? 'Faucets' : 'Faucet'}</span>
             </button>
-            <button class="doodle-btn" id="btn-arena-privacy-modal" style="min-height:34px;padding:3px 10px;font-size:0.82rem">
-              🛡️ ${en ? 'Why FHE?' : 'Kenapa FHE?'}
+            <button class="doodle-btn" id="btn-arena-privacy-modal" style="min-height:34px;padding:3px 10px;font-size:0.8rem">
+              ${renderUiIconSvg('shield', 14)} <span>${en ? 'Why FHE?' : 'Kenapa FHE?'}</span>
             </button>
-            ${
-              isMatchActive
-                ? `<button class="doodle-btn" id="btn-arena-cam-toggle" style="min-height:34px;padding:3px 10px;font-size:0.82rem" title="${en ? 'Toggle full-board overview vs follow camera' : 'Ganti kamera keseluruhan papan / ikuti bidak'}">
-                     🎥 ${this.scene.getPreferredCameraMode() === 'overview' ? (en ? 'Follow' : 'Ikuti') : (en ? 'Overview' : 'Semua Kotak')}
-                   </button>`
-                : ''
-            }
           </div>
 
           <div class="arena-topbar-right">
@@ -622,28 +926,39 @@ export class ConfidentialArenaPanel {
                 ? `Decrypt ERC-7984 balance (handle: ${activeHandle})`
                 : `Dekripsi saldo ERC-7984 (handle: ${activeHandle})`,
             )}">
-              ${esc(balanceBtnLabel)}
-            </button>
-            <button class="doodle-btn doodle-btn-mint" id="btn-arena-faucet-claim" style="min-height:34px;padding:3px 9px;font-size:0.8rem">
-              +100 cDOD
-            </button>
-            <button class="doodle-btn" id="btn-arena-mute" style="min-height:34px;padding:3px 8px;font-size:0.82rem" title="${en ? 'Toggle Sound' : 'Suara / Bisu'}">
-              ${this.checkMuted() ? '🔇' : '🔊'}
+              ${renderUiIconSvg(isUnlockedBal ? 'unlock' : 'lock', 14)} <span>${esc(balanceBtnLabel)}</span>
             </button>
             ${
               this.mode === 'sepolia'
-                ? `<button class="doodle-btn doodle-btn-primary" id="btn-arena-connect" style="min-height:34px;padding:3px 10px;font-size:0.82rem">
-                     🦊 ${esc(displayAddr)}
+                ? `<button class="doodle-btn doodle-btn-mint" id="btn-arena-faucet-claim" style="min-height:34px;padding:3px 9px;font-size:0.8rem">
+                     +100 cDOD
+                   </button>`
+                : ''
+            }
+            ${
+              isMatchActive
+                ? `<button class="doodle-btn" id="btn-arena-cam-toggle" style="min-height:34px;padding:3px 9px;font-size:0.8rem" title="${en ? 'Toggle full-board overview vs follow camera' : 'Ganti kamera keseluruhan papan / ikuti bidak'}">
+                     ${renderUiIconSvg('camera', 14)} <span>${this.scene.getPreferredCameraMode() === 'overview' ? (en ? 'Follow' : 'Ikuti') : (en ? 'Overview' : 'Penuh')}</span>
+                   </button>`
+                : ''
+            }
+            <button class="doodle-btn" id="btn-arena-mute" style="min-height:34px;padding:3px 8px;font-size:0.8rem" title="${en ? 'Toggle Sound' : 'Suara / Bisu'}">
+              ${renderUiIconSvg(this.checkMuted() ? 'muted' : 'sound', 15)}
+            </button>
+            ${
+              this.mode === 'sepolia'
+                ? `<button class="doodle-btn doodle-btn-primary" id="btn-arena-connect" style="min-height:34px;padding:3px 10px;font-size:0.8rem">
+                     <span>${esc(displayAddr)}</span>
                    </button>
-                   <button class="doodle-btn" id="btn-arena-contracts" style="min-height:34px;padding:3px 8px;font-size:0.78rem">⚙️</button>`
-                : `<span class="arena-addr-badge">${esc(displayAddr)}</span>`
+                   <button class="doodle-btn" id="btn-arena-contracts" style="min-height:34px;padding:3px 8px;font-size:0.78rem" title="Sepolia Contract Addresses">${renderUiIconSvg('settings', 14)}</button>`
+                : `<span class="arena-addr-badge">${esc(this.sim.getPlayerName())} • ${shortAddr(this.sim.getAddress())}</span>`
             }
           </div>
         </div>
 
         ${
           this.busyLabel
-            ? `<div class="arena-busy-pill ui-interactive">⏳ ${esc(this.busyLabel)}</div>`
+            ? `<div class="arena-busy-pill ui-interactive">${esc(this.busyLabel)}</div>`
             : ''
         }
 
@@ -665,7 +980,7 @@ export class ConfidentialArenaPanel {
         ${this.showPrivacyModal ? this.renderPrivacyMatrixModal(en) : ''}
 
         <div class="arena-disclaimer-bar ui-interactive">
-          <span>⚠️ ${esc(PROTOCOL_DISCLAIMER)}</span>
+          <span>${esc(PROTOCOL_DISCLAIMER)}</span>
         </div>
       </div>
     `;
@@ -785,16 +1100,16 @@ export class ConfidentialArenaPanel {
       <div class="arena-lobby-wrap">
         <div class="doodle-card sketchbook-panel arena-lobby-card ui-interactive stagger-item">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-            <div class="showcase-badge">🔐 FHEVM + ERC-7984 • ${this.mode === 'preview' ? (en ? 'Instant Preview' : 'Preview Instan') : en ? 'Sepolia Onchain' : 'Sepolia Onchain'}</div>
+            <div class="showcase-badge">${renderUiIconSvg('lock', 14)} <span>FHEVM + ERC-7984 • ${this.mode === 'preview' ? (en ? 'Instant Preview' : 'Preview Instan') : 'Sepolia Testnet'}</span></div>
           </div>
           <h2 style="margin:6px 0 4px;font-family:var(--font-display)">
             ${en ? 'DodSnakes Confidential Arena' : 'Arena Rahasia DodSnakes'}
           </h2>
-          <p style="margin:0 0 10px;font-size:0.86rem;opacity:0.85">
+          <p style="margin:0 0 10px;font-size:0.84rem;opacity:0.84">
             ${
               en
-                ? 'Secret Traps, Hidden Golden Warp, Encrypted Missions, Rival Brake Curse, Verifiable FHE Dice & Blind Duels — impossible on a public blockchain!'
-                : 'Jebakan Rahasia, Golden Warp Tersembunyi, Misi Terenkripsi, Kutukan Rem Lawan, Dadu FHE Terverifikasi & Duel Buta — mustahil di blockchain transparan!'
+                ? 'Hidden board traps, blind RPS duels, private shield inventory, and ERC-7984 wagers powered by FHEVM.'
+                : 'Jebakan papan tersembunyi, duel RPS buta, inventori perisai privat, dan taruhan ERC-7984 berbasis FHEVM.'
             }
           </p>
 
@@ -822,8 +1137,8 @@ export class ConfidentialArenaPanel {
               ? `<div class="arena-warn-note">
                    ${
                      en
-                       ? 'Tip: Sepolia contracts are not configured yet in this build. Use "Instant FHE Preview" to test immediately, or deploy with npm run deploy:sepolia & paste addresses via ⚙️.'
-                       : 'Tips: Kontrak Sepolia belum di-deploy pada build ini. Gunakan "Preview FHE Instan" untuk mencoba langsung, atau deploy via npm run deploy:sepolia & isi alamat di ⚙️.'
+                       ? 'Sepolia contracts are not configured in this build yet. Use "Instant Preview" to play immediately, or deploy via npm run deploy:sepolia & paste addresses in Settings.'
+                       : 'Kontrak Sepolia belum dikonfigurasi pada build ini. Gunakan "Preview Instan" untuk bermain langsung, atau deploy via npm run deploy:sepolia.'
                    }
                  </div>`
               : ''
@@ -831,25 +1146,25 @@ export class ConfidentialArenaPanel {
 
           <div class="arena-setup-grid">
             <div class="arena-setup-block">
-              <label><b>${en ? 'Board Length' : 'Panjang Papan'}</b></label>
+              <label><b>${en ? 'Board Mode' : 'Mode Papan'}</b></label>
               <div style="display:flex;gap:6px">
                 <button class="doodle-btn ${this.boardMode === 1 ? 'doodle-btn-blue' : ''}" id="btn-board-sprint" style="flex:1;min-height:36px;font-size:0.84rem">
-                  ⚡ ${en ? 'Sprint (30 Tiles)' : 'Kilat (30 Kotak)'}
+                  ${en ? 'Sprint (30 Tiles)' : 'Kilat (30 Kotak)'}
                 </button>
                 <button class="doodle-btn ${this.boardMode === 0 ? 'doodle-btn-blue' : ''}" id="btn-board-classic" style="flex:1;min-height:36px;font-size:0.84rem">
-                  🗺️ ${en ? 'Classic (100 Tiles)' : 'Klasik (100 Kotak)'}
+                  ${en ? 'Classic (100 Tiles)' : 'Klasik (100 Kotak)'}
                 </button>
               </div>
             </div>
 
             <div class="arena-setup-block">
-              <label><b>${en ? 'Players' : 'Pemain'}</b></label>
+              <label><b>${en ? 'Match Format' : 'Format Laga'}</b></label>
               <div style="display:flex;gap:6px">
                 ${[1, 2, 4]
                   .map(
                     (n) =>
                       `<button class="doodle-btn ${this.maxPlayers === n ? 'doodle-btn-mint' : ''}" data-arena-maxp="${n}" style="flex:1;min-height:36px;font-size:0.84rem">${
-                        n === 1 ? (en ? 'Solo vs FHE' : 'Solo vs FHE') : `${n}P`
+                        n === 1 ? (en ? 'Solo vs FHE' : 'Solo vs FHE') : `${n} Players`
                       }</button>`,
                   )
                   .join('')}
@@ -857,22 +1172,25 @@ export class ConfidentialArenaPanel {
             </div>
 
             <div class="arena-setup-block">
-              <label><b>${en ? 'ERC-7984 Token' : 'Token ERC-7984'}</b></label>
-              <div style="display:flex;gap:6px;margin-bottom:6px">
-                <button class="doodle-btn ${this.stakeTokenKind === 'cdod' ? 'doodle-btn-blue' : ''}" id="btn-tok-cdod" style="flex:1;min-height:34px;font-size:0.8rem">
-                  cDOD (Faucet)
-                </button>
-                <button class="doodle-btn ${this.stakeTokenKind === 'cusdt' ? 'doodle-btn-blue' : ''}" id="btn-tok-cusdt" style="flex:1;min-height:34px;font-size:0.8rem">
-                  Sepolia cUSDT
-                </button>
-              </div>
-              <label><b>${en ? `Encrypted Wager (${tokenCfg.symbol})` : `Taruhan Terenkripsi (${tokenCfg.symbol})`}</b></label>
+              <label><b>${en ? `Confidential Wager (${tokenCfg.symbol})` : `Taruhan Rahasia (${tokenCfg.symbol})`}</b></label>
+              ${
+                this.mode === 'sepolia'
+                  ? `<div style="display:flex;gap:6px;margin-bottom:6px">
+                       <button class="doodle-btn ${this.stakeTokenKind === 'cdod' ? 'doodle-btn-blue' : ''}" id="btn-tok-cdod" style="flex:1;min-height:34px;font-size:0.8rem">
+                         cDOD (In-App Faucet)
+                       </button>
+                       <button class="doodle-btn ${this.stakeTokenKind === 'cusdt' ? 'doodle-btn-blue' : ''}" id="btn-tok-cusdt" style="flex:1;min-height:34px;font-size:0.8rem">
+                         Sepolia cUSDT
+                       </button>
+                     </div>`
+                  : ''
+              }
               <div style="display:flex;gap:6px">
                 ${[0, 10, 25]
                   .map(
                     (amt) =>
                       `<button class="doodle-btn ${this.stakeTokens === amt ? 'doodle-btn-primary' : ''}" data-arena-stake="${amt}" style="flex:1;min-height:36px;font-size:0.84rem">${
-                        amt === 0 ? (en ? 'Free' : 'Gratis') : `${amt} ${tokenCfg.symbol}`
+                        amt === 0 ? (en ? 'Free Play' : 'Gratis') : `${amt} ${tokenCfg.symbol}`
                       }</button>`,
                   )
                   .join('')}
@@ -882,22 +1200,32 @@ export class ConfidentialArenaPanel {
 
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
             ${
-              !step3Done && this.stakeTokens > 0
+              this.mode === 'sepolia' && !step3Done && this.stakeTokens > 0
                 ? `<button class="doodle-btn doodle-btn-blue" id="btn-arena-approve-op" style="flex:1">
-                     ✍️ ${en ? `Approve ${tokenCfg.symbol} Operator` : `Setujui Operator ${tokenCfg.symbol}`}
+                     ${renderUiIconSvg('check', 15)} <span>${en ? `Approve ${tokenCfg.symbol}` : `Setujui ${tokenCfg.symbol}`}</span>
                    </button>`
                 : ''
             }
-            <button class="doodle-btn doodle-btn-primary" id="btn-arena-create-match" style="flex:2">
-              🎲 ${en ? `Launch as ${draft.name}` : `Mulai sebagai ${draft.name}`}
+            <button class="doodle-btn doodle-btn-primary" id="btn-arena-create-match" style="flex:1.4">
+              ${renderUiIconSvg('dice', 17)} <span>${en ? `Start Match as ${draft.name}` : `Mulai Laga sebagai ${draft.name}`}</span>
+            </button>
+            <button class="doodle-btn doodle-btn-mint" id="btn-arena-create-online-room" style="flex:1.2">
+              ${renderUiIconSvg('online', 16)} <span>${en ? 'Create Online Room (2–4P)' : 'Buat Room Online (2–4P)'}</span>
+            </button>
+          </div>
+
+          <div class="arena-online-join-row">
+            <input class="doodle-input" id="inp-arena-room-code" value="${esc(this.onlineRoomInput)}" maxlength="6" placeholder="${en ? 'Have a 4-letter Room Code? (e.g. FHE7)' : 'Punya Kode Room 4 huruf? (mis. FHE7)'}" style="min-height:36px;flex:1;text-transform:uppercase;font-weight:700" />
+            <button class="doodle-btn doodle-btn-blue" id="btn-arena-join-online-room" style="min-height:36px;white-space:nowrap">
+              ${renderUiIconSvg('online', 14)} <span>${en ? 'Join Online Room' : 'Gabung Room Online'}</span>
             </button>
           </div>
 
           ${
             this.mode === 'sepolia'
-              ? `<div style="display:flex;gap:6px;margin-top:8px">
-                   <input class="doodle-input" id="inp-arena-join-id" value="${esc(this.joinMatchInput)}" placeholder="${en ? 'Or enter Match ID to join...' : 'Atau masukkan Match ID...'}" style="min-height:36px;flex:1" />
-                   <button class="doodle-btn doodle-btn-mint" id="btn-arena-join-match" style="min-height:36px">${en ? 'Join' : 'Gabung'}</button>
+              ? `<div style="display:flex;gap:6px;margin-top:6px">
+                   <input class="doodle-input" id="inp-arena-join-id" value="${esc(this.joinMatchInput)}" placeholder="${en ? 'Or enter Sepolia Match ID (#1, #2)...' : 'Atau masukkan Match ID Sepolia...'}" style="min-height:36px;flex:1" />
+                   <button class="doodle-btn doodle-btn-mint" id="btn-arena-join-match" style="min-height:36px">${en ? 'Join ID' : 'Gabung ID'}</button>
                  </div>`
               : ''
           }
@@ -926,12 +1254,32 @@ export class ConfidentialArenaPanel {
     const isWinner =
       snap.status === 2 && snap.winner.toLowerCase() === myAddr.toLowerCase();
 
+    const visibleLogs = logs.slice(0, this.showAllProofs ? 7 : 2);
+    const pendingOnlineDuel =
+      this.mode === 'preview' ? this.sim.getPendingOnlineDuel() : null;
+    const hasIncomingOnlineDuel = Boolean(
+      pendingOnlineDuel &&
+        pendingOnlineDuel.challenger.toLowerCase() !== myAddr.toLowerCase(),
+    );
+    const stepFormulaText =
+      this.lastStepSummary ??
+      (en
+        ? `Tile ${me?.position ?? 1} / ${snap.boardSize} • Roll dice or click any board tile to aim a trap`
+        : `Kotak ${me?.position ?? 1} / ${snap.boardSize} • Lempar dadu atau klik petak papan untuk bidik jebakan`);
+
     return `
       <div class="arena-hud-layout">
         <div class="doodle-card arena-vault-card ui-interactive">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
-            <b>🔐 ${en ? `Match #${snap.matchId}` : `Laga #${snap.matchId}`}</b>
+            <b>${en ? `Match #${snap.matchId}` : `Laga #${snap.matchId}`} • ${snap.boardSize === 30 ? 'Sprint 30' : 'Classic 100'}</b>
             <div style="display:flex;align-items:center;gap:4px">
+              ${
+                !this.onlineRoomCode && this.mode === 'preview'
+                  ? `<button class="doodle-btn doodle-btn-mint" id="btn-arena-enable-online" style="min-height:24px;padding:1px 7px;font-size:0.7rem" title="${en ? 'Open this match to online friends via 4-letter Room Code' : 'Buka laga ini untuk teman online dengan Kode Room'}">
+                       ${renderUiIconSvg('online', 12)} <span>${en ? '+ Invite Online' : '+ Undang Online'}</span>
+                     </button>`
+                  : ''
+              }
               <span class="arena-turn-badge ${isMyTurn ? 'is-mine' : ''}">
                 ${
                   snap.status === 2
@@ -943,8 +1291,8 @@ export class ConfidentialArenaPanel {
                         ? 'Your Turn'
                         : 'Giliranmu'
                       : en
-                        ? 'Waiting Rival'
-                        : 'Menunggu Lawan'
+                        ? 'Rival Turn'
+                        : 'Giliran Lawan'
                 }
               </span>
               <button class="doodle-btn" id="btn-toggle-vault" style="min-height:24px;padding:1px 7px;font-size:0.72rem">
@@ -953,80 +1301,91 @@ export class ConfidentialArenaPanel {
             </div>
           </div>
 
-          <div class="arena-stats-row">
-            <span>📍 ${me ? `${me.position}/${snap.boardSize}` : '-'}</span>
-            <span>★ ${me?.stars ?? 0}</span>
-            <span>🪜 ${me?.laddersClimbed ?? 0}</span>
-            <span>⚔️ ${me?.duelWins ?? 0}</span>
-          </div>
           ${
-            this.showVaultDrawer
-              ? `
-          ${
-            snap.players.length > 1
-              ? `<div class="arena-players-strip">
-                   ${snap.players
-                     .map((p, idx) => {
-                       const isMeSeat = p.address.toLowerCase() === myAddr.toLowerCase();
-                       const isTurnSeat = idx === snap.turnIndex;
-                       return `<span class="arena-seat-chip ${isTurnSeat ? 'is-turn' : ''} ${isMeSeat ? 'is-me' : ''}">${isMeSeat ? (en ? 'You' : 'Kamu') : `P${idx + 1}`}: #${p.position} ★${p.stars}</span>`;
-                     })
-                     .join('')}
+            this.onlineRoomCode
+              ? `<div class="arena-online-bar">
+                   <div class="arena-online-code">
+                     <span class="arena-online-dot ${this.onlineRelayStatus === 'connected' ? 'is-live' : ''}"></span>
+                     <b>ROOM: ${esc(this.onlineRoomCode)}</b>
+                     <small>(${this.sim.getHumanSeatCount()}P ${this.onlineRelayStatus === 'connected' ? 'WSS Live' : 'Tab Sync'})</small>
+                   </div>
+                   <div style="display:flex;gap:4px">
+                     <button class="doodle-btn" id="btn-arena-copy-room-link" style="min-height:24px;padding:1px 7px;font-size:0.7rem" title="${en ? 'Copy online invite URL' : 'Salin link undangan online'}">
+                       ${renderUiIconSvg('copy', 11)} <span>${en ? 'Link' : 'Link'}</span>
+                     </button>
+                     <button class="doodle-btn doodle-btn-blue" id="btn-arena-open-guest-tab" style="min-height:24px;padding:1px 7px;font-size:0.7rem" title="${en ? 'Open a 2nd player tab to test live FHE multiplayer side-by-side' : 'Buka tab pemain ke-2 untuk uji multiplayer FHE langsung'}">
+                       <span>${en ? '+ 2nd Player Tab ↗' : '+ Tab Pemain 2 ↗'}</span>
+                     </button>
+                   </div>
                  </div>`
               : ''
           }
 
+          <div class="arena-players-strip" style="margin-top:5px">
+            ${snap.players
+              .map((p, idx) => {
+                const isMeSeat = p.address.toLowerCase() === myAddr.toLowerCase();
+                const isTurnSeat = idx === snap.turnIndex;
+                const label =
+                  this.mode === 'preview'
+                    ? isMeSeat
+                      ? `${en ? 'You' : 'Kamu'} (${this.sim.getPlayerName(p.address)})`
+                      : this.sim.getPlayerName(p.address)
+                    : isMeSeat
+                      ? en
+                        ? 'You'
+                        : 'Kamu'
+                      : `P${idx + 1}`;
+                return `<span class="arena-seat-chip ${isTurnSeat ? 'is-turn' : ''} ${isMeSeat ? 'is-me' : ''}">${esc(label)}: ${en ? 'Tile' : 'Kt.'} ${p.position} • ★${p.stars}</span>`;
+              })
+              .join('')}
+          </div>
+
+          <div class="arena-step-formula">${esc(stepFormulaText)}</div>
+          ${
+            this.showVaultDrawer
+              ? `
           <div class="arena-secret-box">
-            <div style="display:flex;justify-content:space-between;align-items:center">
-              <b>🎯 ${en ? 'Secret Mission' : 'Misi Rahasia'}</b>
-              <button class="doodle-btn" id="btn-arena-unlock-secrets" style="min-height:26px;padding:2px 8px;font-size:0.74rem">
-                ${missionUnlocked ? (en ? '🔄 Refresh' : '🔄 Segarkan') : `🔓 ${en ? 'Decrypt' : 'Dekripsi'}`}
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+              <b>${en ? 'Confidential Vault' : 'Brankas Rahasia'}</b>
+              <button class="doodle-btn" id="btn-arena-unlock-secrets" style="min-height:24px;padding:1px 8px;font-size:0.72rem">
+                ${renderUiIconSvg(missionUnlocked ? 'reset' : 'unlock', 12)} <span>${missionUnlocked ? (en ? 'Refresh' : 'Segarkan') : en ? 'Decrypt' : 'Dekripsi'}</span>
               </button>
             </div>
-            ${
-              missionInfo
-                ? `<div class="arena-revealed-secret">
-                     <b>${esc(en ? missionInfo.titleEn : missionInfo.titleId)}</b>
-                     <small>${esc(en ? missionInfo.descEn : missionInfo.descId)}</small>
-                   </div>`
-                : `<div class="arena-locked-cipher">🔒 ${esc(snap.mySecret?.missionHandle.slice(0, 18) || '0x0000...')} (FHE.allow owner only)</div>`
-            }
+            <div class="arena-vault-metrics">
+              <div class="arena-vault-metric">
+                <small>${en ? 'Shields' : 'Perisai'}</small>
+                <b>${snap.mySecret?.shields !== undefined ? snap.mySecret.shields : 'Encrypted'}</b>
+              </div>
+              <div class="arena-vault-metric">
+                <small>${en ? 'Trap Charges' : 'Stok Jebakan'}</small>
+                <b>${snap.mySecret?.trapCharges !== undefined ? snap.mySecret.trapCharges : 'Encrypted'}</b>
+              </div>
+              <div class="arena-vault-metric">
+                <small>${en ? 'Planted' : 'Terpasang'}</small>
+                <b>${snap.myPlantedTrapTiles.length > 0 ? snap.myPlantedTrapTiles.map((t) => `#${t}`).join(', ') : '—'}</b>
+              </div>
+            </div>
+            <div class="arena-mission-compact">
+              <div style="flex:1;min-width:0">
+                <small style="opacity:0.72;display:block">${en ? 'Secret Objective (+3★)' : 'Misi Rahasia (+3★)'}</small>
+                ${
+                  missionInfo
+                    ? `<b>${esc(en ? missionInfo.titleEn : missionInfo.titleId)}</b>
+                       <div style="font-size:0.72rem;opacity:0.84">${esc(en ? missionInfo.descEn : missionInfo.descId)}</div>`
+                    : `<div class="arena-locked-cipher">ct: ${esc(snap.mySecret?.missionHandle.slice(0, 14) || '0x0000...')}</div>`
+                }
+              </div>
+              <button class="doodle-btn doodle-btn-mint" id="btn-arena-claim-mission" style="min-height:28px;padding:2px 8px;font-size:0.74rem;white-space:nowrap" ${me?.missionClaimed ? 'disabled' : ''}>
+                ${me?.missionClaimed ? (en ? '✓ Claimed' : '✓ Diklaim') : en ? 'Verify +3★' : 'Klaim +3★'}
+              </button>
+            </div>
           </div>
 
-          <div class="arena-secret-box">
-            <b>🎒 ${en ? 'Confidential Bag' : 'Tas Rahasia'}</b>
-            <div style="display:flex;gap:8px;margin-top:4px;font-size:0.84rem">
-              <span>🛡️ ${en ? 'Shields' : 'Perisai'}: <b>${snap.mySecret?.shields !== undefined ? snap.mySecret.shields : '🔒'}</b></span>
-              <span>💣 ${en ? 'Traps' : 'Jebakan'}: <b>${snap.mySecret?.trapCharges !== undefined ? snap.mySecret.trapCharges : '🔒'}</b></span>
-            </div>
-            <div style="font-size:0.73rem;margin-top:4px;color:#8a4b00">
-              ⚡ ${en ? '1 Hidden FHE Golden Warp (+3 steps +1★) active on board!' : '1 Golden Warp FHE tersembunyi (+3 langkah +1★) aktif di papan!'}
-            </div>
-            ${
-              snap.boardSize === 30
-                ? `<div class="arena-sprint-guide">
-                     🪜 3→11 • 8→19 • 15→24 &nbsp;|&nbsp; 🐍 14↘5 • 21↘10 • 27↘18
-                   </div>`
-                : ''
-            }
-            <div style="font-size:0.69rem;margin-top:3px;opacity:0.78">
-              🎯 ${en ? 'Tip: Click any 3D board tile to aim a trap.' : 'Tips: Klik petak di papan 3D untuk bidik jebakan.'}
-            </div>
-            ${
-              snap.myPlantedTrapTiles.length > 0
-                ? `<div style="font-size:0.75rem;margin-top:4px;color:#b21f66">
-                     ${en ? 'Your hidden traps' : 'Jebakan tersembunyimu'}: <b>${snap.myPlantedTrapTiles.map((t) => `#${t}`).join(', ')}</b>
-                   </div>`
-                : ''
-            }
-          </div>
-
-          <div style="display:flex;gap:6px;margin-top:6px">
-            <button class="doodle-btn doodle-btn-mint" id="btn-arena-claim-mission" style="flex:1;min-height:32px;font-size:0.78rem" ${me?.missionClaimed ? 'disabled' : ''}>
-              ${me?.missionClaimed ? (en ? '✓ Mission Claimed' : '✓ Misi Diklaim') : en ? 'Verify Mission (+3★)' : 'Verifikasi Misi (+3★)'}
-            </button>
-            <button class="doodle-btn" id="btn-arena-new-match" style="min-height:32px;padding:2px 8px;font-size:0.78rem">
-              ${en ? 'New' : 'Baru'}
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-top:6px;font-size:0.74rem">
+            <span style="opacity:0.76">${en ? 'Ladders' : 'Tangga'}: <b>${me?.laddersClimbed ?? 0}</b> • ${en ? 'Duels' : 'Duel'}: <b>${me?.duelWins ?? 0}</b></span>
+            <button class="doodle-btn" id="btn-arena-new-match" style="min-height:26px;padding:2px 9px;font-size:0.74rem">
+              ${en ? 'New Match' : 'Laga Baru'}
             </button>
           </div>`
               : ''
@@ -1034,20 +1393,28 @@ export class ConfidentialArenaPanel {
         </div>
 
         <div class="doodle-card arena-proof-card ui-interactive">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <b>⚡ ${en ? 'FHE Proof & Tx Inspector' : 'Inspektor Bukti FHE & Tx'}</b>
-            <button class="doodle-btn" id="btn-toggle-proofs" style="min-height:24px;padding:1px 7px;font-size:0.72rem">
-              ${this.showProofDrawer ? '−' : '+'}
-            </button>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+            <b>${en ? 'FHE Proof Log' : 'Log Bukti FHE'} (${logs.length})</b>
+            <div style="display:flex;gap:4px">
+              ${
+                this.showProofDrawer && logs.length > 2
+                  ? `<button class="doodle-btn" id="btn-toggle-all-proofs" style="min-height:24px;padding:1px 7px;font-size:0.7rem">
+                       ${this.showAllProofs ? (en ? 'Compact' : 'Ringkas') : en ? `All (${logs.length})` : `Semua (${logs.length})`}
+                     </button>`
+                  : ''
+              }
+              <button class="doodle-btn" id="btn-toggle-proofs" style="min-height:24px;padding:1px 7px;font-size:0.72rem">
+                ${this.showProofDrawer ? '−' : '+'}
+              </button>
+            </div>
           </div>
           ${
             this.showProofDrawer
               ? `<div class="arena-proof-list">
                    ${
-                     logs.length === 0
-                       ? `<div style="font-size:0.76rem;opacity:0.7">${en ? 'Encrypted handles and KMS proofs will appear here.' : 'Handle terenkripsi dan bukti KMS akan muncul di sini.'}</div>`
-                       : logs
-                           .slice(0, 7)
+                     visibleLogs.length === 0
+                       ? `<div style="font-size:0.74rem;opacity:0.7">${en ? 'Encrypted handles and KMS proofs appear here.' : 'Handle terenkripsi dan bukti KMS muncul di sini.'}</div>`
+                       : visibleLogs
                            .map(
                              (l) => `
                          <div class="arena-proof-item">
@@ -1056,7 +1423,7 @@ export class ConfidentialArenaPanel {
                              <b>${esc(l.title)}</b>
                            </div>
                            <div class="arena-proof-detail">${esc(l.detail)}</div>
-                           ${l.handle ? `<div class="arena-proof-hash">ct: <code>${esc(l.handle.slice(0, 18))}...</code></div>` : ''}
+                           ${l.handle ? `<div class="arena-proof-hash">ct: <code>${esc(l.handle.slice(0, 16))}...</code></div>` : ''}
                            ${
                              l.txHash
                                ? `<a class="arena-tx-link" href="${esc(this.fheClient.getExplorerTxUrl(l.txHash))}" target="_blank" rel="noopener">Tx: ${esc(l.txHash.slice(0, 12))}... ↗</a>`
@@ -1073,13 +1440,24 @@ export class ConfidentialArenaPanel {
       </div>
 
       <div class="arena-bottom-deck ui-interactive">
+        ${
+          hasIncomingOnlineDuel && pendingOnlineDuel && snap.status === 1
+            ? `<div class="doodle-card arena-duel-incoming">
+                 <div>
+                   <b>${renderUiIconSvg('sword', 14)} ${esc(pendingOnlineDuel.challengerName)} ${en ? 'challenged you to a Blind Duel' : 'menantangmu Duel Buta'}</b>
+                   <div style="font-size:0.72rem;opacity:0.82">${en ? 'Their move is encrypted' : 'Langkah mereka terenkripsi'} • ct: <code>${esc(pendingOnlineDuel.handle.slice(0, 14))}...</code></div>
+                 </div>
+                 <button class="doodle-btn doodle-btn-mint" id="btn-arena-answer-duel" data-open-duel="1">${en ? 'Answer (Encrypted)' : 'Jawab (Terenkripsi)'}</button>
+               </div>`
+            : ''
+        }
         ${(() => {
           if (snap.status === 2) {
             return `<div class="doodle-card arena-win-banner">
-                 <b>🏆 ${isWinner ? (en ? 'Victory! You reached the goal!' : 'Menang! Kamu mencapai finis!') : `${shortAddr(snap.winner)} Won!`}</b>
+                 <b>${isWinner ? (en ? 'Victory! You reached the goal!' : 'Menang! Kamu mencapai finis!') : `${esc(this.mode === 'preview' ? this.sim.getPlayerName(snap.winner) : shortAddr(snap.winner))} Won!`}</b>
                  ${
                    !snap.payoutClaimed
-                     ? `<button class="doodle-btn doodle-btn-primary" id="btn-arena-claim-pot">💰 ${
+                     ? `<button class="doodle-btn doodle-btn-primary" id="btn-arena-claim-pot">${
                          isWinner
                            ? en
                              ? 'Claim Encrypted ERC-7984 Pot'
@@ -1090,7 +1468,7 @@ export class ConfidentialArenaPanel {
                        }</button>`
                      : `<span>✓ ${en ? 'Encrypted Pot Paid Out' : 'Pot Terenkripsi Dibayarkan'}</span>`
                  }
-                 <button class="doodle-btn doodle-btn-mint" id="btn-arena-win-new">🎲 ${en ? 'Play Again' : 'Main Lagi'}</button>
+                 <button class="doodle-btn doodle-btn-mint" id="btn-arena-win-new">${en ? 'Play Again' : 'Main Lagi'}</button>
                </div>`;
           }
 
@@ -1102,9 +1480,9 @@ export class ConfidentialArenaPanel {
               4: en ? 'Secret Mission Verification' : 'Verifikasi Misi Rahasia',
             };
             return `<div class="doodle-card arena-win-banner">
-                 <b>⚡ ${en ? 'Pending Onchain KMS Proof:' : 'Menunggu Verifikasi Bukti KMS:'} ${esc(pendingLabels[snap.pendingAction] || `#${snap.pendingAction}`)}</b>
+                 <b>${en ? 'Pending KMS Proof:' : 'Bukti KMS Tertunda:'} ${esc(pendingLabels[snap.pendingAction] || `#${snap.pendingAction}`)}</b>
                  <button class="doodle-btn doodle-btn-primary" id="btn-arena-resume-pending">
-                   🔄 ${en ? 'Complete Pending KMS Proof' : 'Selesaikan Bukti KMS'}
+                   ${en ? 'Complete Pending KMS Proof' : 'Selesaikan Bukti KMS'}
                  </button>
                </div>`;
           }
@@ -1118,7 +1496,7 @@ export class ConfidentialArenaPanel {
               (isOpp && !snap.duel.opponentCommitted);
             const rivalAddr = isChal ? snap.duel.opponent : snap.duel.challenger;
             return `<div class="doodle-card arena-win-banner">
-                 <b>⚔️ ${
+                 <b>${
                    needsMyMove
                      ? en
                        ? `Blind Duel vs ${shortAddr(rivalAddr)} — Choose Your Move!`
@@ -1129,43 +1507,43 @@ export class ConfidentialArenaPanel {
                  }</b>
                  ${
                    needsMyMove
-                     ? `<button class="doodle-btn doodle-btn-mint" id="btn-arena-open-duel">⚔️ ${en ? 'Commit Secret RPS Move' : 'Kirim Langkah RPS Rahasia'}</button>`
-                     : `<button class="doodle-btn" id="btn-refresh-lobby">🔄 ${en ? 'Refresh' : 'Segarkan'}</button>`
+                     ? `<button class="doodle-btn doodle-btn-mint" id="btn-arena-open-duel" data-open-duel="1">${en ? 'Commit Secret RPS Move' : 'Kirim Langkah RPS Rahasia'}</button>`
+                     : `<button class="doodle-btn" id="btn-refresh-lobby">${en ? 'Refresh' : 'Segarkan'}</button>`
                  }
                </div>`;
           }
 
           return `<div class="doodle-card arena-action-bar">
-                 <button class="doodle-btn doodle-btn-primary" id="btn-arena-roll" ${!isMyTurn ? 'disabled' : ''} style="min-height:46px;font-size:1.05rem;padding:8px 18px">
-                   🎲 ${en ? 'Roll FHE Dice' : 'Lempar Dadu FHE'}
+                 <button class="doodle-btn doodle-btn-primary" id="btn-arena-roll" ${!isMyTurn ? 'disabled' : ''} style="min-height:42px;font-size:0.98rem;padding:6px 16px">
+                   ${renderUiIconSvg('dice', 17)} <span>${en ? `Roll Dice (Tile ${me?.position ?? 1})` : `Lempar Dadu (Kt.${me?.position ?? 1})`}</span>
                  </button>
 
                  <div class="arena-trap-inline">
-                   <input class="doodle-input" id="inp-trap-tile" type="number" min="2" max="${snap.boardSize - 1}" value="${this.trapTileInput}" style="width:58px;min-height:38px;padding:4px 6px" title="${en ? 'Target tile' : 'Target kotak'}" />
-                   <select class="doodle-input" id="sel-trap-kind" style="width:auto;min-height:38px;padding:4px 6px;font-size:0.8rem">
+                   <input class="doodle-input" id="inp-trap-tile" type="number" min="2" max="${snap.boardSize - 1}" value="${this.trapTileInput}" style="width:52px;min-height:36px;padding:3px 6px;font-size:0.82rem" title="${en ? 'Target tile (or click board)' : 'Target kotak (atau klik papan)'}" />
+                   <select class="doodle-input" id="sel-trap-kind" style="width:auto;min-height:36px;padding:3px 6px;font-size:0.78rem">
                      ${TRAP_KIND_META.map(
                        (tm) =>
                          `<option value="${tm.kind}" ${this.trapKindInput === tm.kind ? 'selected' : ''}>${esc(en ? tm.shortEn : tm.shortId)}</option>`,
                      ).join('')}
                    </select>
-                   <button class="doodle-btn doodle-btn-pink" id="btn-arena-plant-trap" ${!isMyTurn ? 'disabled' : ''} style="min-height:38px;font-size:0.82rem;white-space:nowrap">
-                     💣 ${en ? 'Plant Trap' : 'Tanam Jebakan'}
+                   <button class="doodle-btn doodle-btn-pink" id="btn-arena-plant-trap" ${!isMyTurn ? 'disabled' : ''} style="min-height:36px;font-size:0.8rem;white-space:nowrap">
+                     ${renderUiIconSvg('trap', 14)} <span>${en ? 'Plant Trap' : 'Tanam Jebakan'}</span>
                    </button>
                  </div>
 
-                 <button class="doodle-btn doodle-btn-blue" id="btn-arena-buy-mystery" ${!isMyTurn || (me?.stars ?? 0) < 2 ? 'disabled' : ''} style="min-height:38px;font-size:0.82rem;white-space:nowrap">
-                   🎁 ${en ? 'Mystery (2★)' : 'Misteri (2★)'}
+                 <button class="doodle-btn doodle-btn-blue" id="btn-arena-buy-mystery" ${!isMyTurn || (me?.stars ?? 0) < 2 ? 'disabled' : ''} style="min-height:36px;font-size:0.8rem;white-space:nowrap">
+                   ${renderUiIconSvg('shop', 14)} <span>${en ? 'Mystery (2★)' : 'Misteri (2★)'}</span>
                  </button>
 
                  <div class="arena-trap-inline">
                    ${
-                     snap.players.length > 1
-                       ? `<select class="doodle-input" id="sel-brake-seat" style="width:auto;min-width:84px;min-height:38px;padding:4px 8px;font-size:0.78rem" title="${en ? 'Hidden target seat for FHE Brake' : 'Kursi target terenkripsi'}">
+                     snap.players.length > 2
+                       ? `<select class="doodle-input" id="sel-brake-seat" style="width:auto;min-width:78px;min-height:36px;padding:3px 6px;font-size:0.76rem" title="${en ? 'Hidden target seat for FHE Brake' : 'Kursi target terenkripsi'}">
                             ${snap.players
                               .map((p, idx) =>
                                 p.address.toLowerCase() === myAddr.toLowerCase()
                                   ? ''
-                                  : `<option value="${idx}" ${this.brakeSeatInput === idx ? 'selected' : ''}>Seat #${idx + 1}</option>`,
+                                  : `<option value="${idx}" ${this.brakeSeatInput === idx ? 'selected' : ''}>${esc(this.mode === 'preview' ? this.sim.getPlayerName(p.address) : `Seat #${idx + 1}`)}</option>`,
                               )
                               .join('')}
                           </select>`
@@ -1177,7 +1555,7 @@ export class ConfidentialArenaPanel {
                      (this.mode === 'sepolia' && snap.players.length <= 1)
                        ? 'disabled'
                        : ''
-                   } style="min-height:38px;font-size:0.82rem;white-space:nowrap" title="${
+                   } style="min-height:36px;font-size:0.8rem;white-space:nowrap" title="${
                      this.mode === 'sepolia' && snap.players.length <= 1
                        ? en
                          ? 'Multiplayer (2P/4P) only — encrypts target seat & caps next dice to 1..3'
@@ -1186,12 +1564,12 @@ export class ConfidentialArenaPanel {
                          ? 'Cast FHE Secret Brake (caps next dice roll to 1..3)'
                          : 'Kutuk Rem FHE Rahasia (dadu berikutnya max 3)'
                    }">
-                     🧊 ${en ? 'Secret Brake (2★)' : 'Rem Rahasia (2★)'}
+                     ${renderUiIconSvg('bolt', 14)} <span>${en ? 'Brake (2★)' : 'Rem (2★)'}</span>
                    </button>
                  </div>
 
-                 <button class="doodle-btn doodle-btn-mint" id="btn-arena-open-duel" ${!isMyTurn ? 'disabled' : ''} style="min-height:38px;font-size:0.82rem;white-space:nowrap">
-                   ⚔️ ${en ? 'Blind Duel' : 'Duel Buta'}
+                 <button class="doodle-btn doodle-btn-mint" id="btn-arena-open-duel" data-open-duel="1" ${!isMyTurn && !hasIncomingOnlineDuel ? 'disabled' : ''} style="min-height:36px;font-size:0.8rem;white-space:nowrap">
+                   ${renderUiIconSvg('sword', 14)} <span>${en ? 'Blind Duel' : 'Duel Buta'}</span>
                  </button>
                </div>`;
         })()}
@@ -1202,15 +1580,20 @@ export class ConfidentialArenaPanel {
   private renderBlindDuelModal(en: boolean, snap: OnchainMatchSnapshot): string {
     const myAddr = (this.mode === 'sepolia' ? this.walletInfo?.address : this.sim.getAddress()) || '';
     const rivals = snap.players.filter((p) => p.address.toLowerCase() !== myAddr.toLowerCase());
+    const pendingOnline = this.mode === 'preview' ? this.sim.getPendingOnlineDuel() : null;
     const lockedOpponent = snap.duel?.active
       ? snap.duel.challenger.toLowerCase() === myAddr.toLowerCase()
         ? snap.duel.opponent
         : snap.duel.challenger
       : null;
+    const activeOnlineChallenger =
+      pendingOnline && pendingOnline.challenger.toLowerCase() !== myAddr.toLowerCase()
+        ? pendingOnline.challengerName
+        : null;
     return `
       <div class="challenge-backdrop ui-interactive">
         <div class="doodle-card menu-box setup-card-compact stagger-item">
-          <h2 class="modal-heading">⚔️ ${en ? 'Encrypted Blind Duel' : 'Duel Buta Terenkripsi'}</h2>
+          <h2 class="modal-heading">${renderUiIconSvg('sword', 20)} <span>${en ? 'Encrypted Blind Duel' : 'Duel Buta Terenkripsi'}</span></h2>
           <p style="margin:0 0 8px;font-size:0.85rem">
             ${
               en
@@ -1219,9 +1602,13 @@ export class ConfidentialArenaPanel {
             }
           </p>
           ${
-            lockedOpponent
+            activeOnlineChallenger
               ? `<div class="arena-secret-box" style="margin-bottom:8px;font-size:0.84rem">
-                   🎯 ${en ? 'Active Duel vs' : 'Duel Aktif vs'}: <b>${lockedOpponent === '0x0000000000000000000000000000000000000000' ? (en ? 'FHE House Bot' : 'Bot Rumah FHE') : shortAddr(lockedOpponent)}</b>
+                   ${renderUiIconSvg('lock', 14)} ${en ? 'Answering encrypted challenge from' : 'Menjawab tantangan terenkripsi dari'}: <b>${esc(activeOnlineChallenger)}</b>
+                 </div>`
+              : lockedOpponent
+              ? `<div class="arena-secret-box" style="margin-bottom:8px;font-size:0.84rem">
+                   ${renderUiIconSvg('lock', 14)} ${en ? 'Active Duel vs' : 'Duel Aktif vs'}: <b>${lockedOpponent === '0x0000000000000000000000000000000000000000' ? (en ? 'FHE House Bot' : 'Bot Rumah FHE') : shortAddr(lockedOpponent)}</b>
                  </div>`
               : this.mode === 'sepolia' && rivals.length > 0
                 ? `<label><b>${en ? 'Target Opponent' : 'Target Lawan'}:</b></label>
@@ -1232,17 +1619,17 @@ export class ConfidentialArenaPanel {
                 : ''
           }
           <div style="display:flex;gap:8px;margin-bottom:10px">
-            <button class="doodle-btn doodle-btn-primary" data-duel-rps="0" style="flex:1;min-height:60px;flex-direction:column">
-              <span style="font-size:1.3rem">🪨</span>
-              <span>${en ? 'Ink Rock' : 'Batu Tinta'}</span>
+            <button class="doodle-btn doodle-btn-primary" data-duel-rps="0" style="flex:1;min-height:58px;flex-direction:column;gap:2px">
+              <b style="font-size:1.05rem">${en ? 'Ink Rock' : 'Batu'}</b>
+              <small style="opacity:0.75;font-size:0.72rem">${en ? 'Beats Scissors' : 'Kalahkan Gunting'}</small>
             </button>
-            <button class="doodle-btn doodle-btn-mint" data-duel-rps="1" style="flex:1;min-height:60px;flex-direction:column">
-              <span style="font-size:1.3rem">📄</span>
-              <span>${en ? 'Scroll' : 'Kertas'}</span>
+            <button class="doodle-btn doodle-btn-mint" data-duel-rps="1" style="flex:1;min-height:58px;flex-direction:column;gap:2px">
+              <b style="font-size:1.05rem">${en ? 'Scroll' : 'Kertas'}</b>
+              <small style="opacity:0.75;font-size:0.72rem">${en ? 'Beats Rock' : 'Kalahkan Batu'}</small>
             </button>
-            <button class="doodle-btn doodle-btn-pink" data-duel-rps="2" style="flex:1;min-height:60px;flex-direction:column">
-              <span style="font-size:1.3rem">✂️</span>
-              <span>${en ? 'Scissors' : 'Gunting'}</span>
+            <button class="doodle-btn doodle-btn-pink" data-duel-rps="2" style="flex:1;min-height:58px;flex-direction:column;gap:2px">
+              <b style="font-size:1.05rem">${en ? 'Scissors' : 'Gunting'}</b>
+              <small style="opacity:0.75;font-size:0.72rem">${en ? 'Beats Scroll' : 'Kalahkan Kertas'}</small>
             </button>
           </div>
           <button class="doodle-btn" id="btn-close-duel-modal">${en ? 'Cancel' : 'Batal'}</button>
@@ -1301,7 +1688,7 @@ export class ConfidentialArenaPanel {
       <div class="challenge-backdrop ui-interactive">
         <div class="doodle-card menu-box setup-card stagger-item" style="max-height:88vh;overflow:auto">
           <div style="display:flex;justify-content:space-between;align-items:center">
-            <h2 class="modal-heading" style="margin:0">🛡️ ${en ? 'Why FHE? Confidentiality Matrix' : 'Kenapa FHE? Matriks Privasi'}</h2>
+            <h2 class="modal-heading" style="margin:0">${renderUiIconSvg('shield', 20)} <span>${en ? 'Why FHE? Confidentiality Matrix' : 'Kenapa FHE? Matriks Privasi'}</span></h2>
             <button class="doodle-btn" id="btn-close-privacy-modal" style="min-height:32px;padding:3px 10px">✕</button>
           </div>
           <p style="margin:6px 0 10px;font-size:0.84rem;opacity:0.85">
@@ -1337,7 +1724,7 @@ export class ConfidentialArenaPanel {
       <div class="challenge-backdrop ui-interactive" id="faucets-modal-backdrop">
         <div class="doodle-card menu-box setup-card stagger-item" style="max-height:88vh;overflow:auto">
           <div style="display:flex;justify-content:space-between;align-items:center">
-            <h2 class="modal-heading" style="margin:0">🚰 ${en ? 'Sepolia Testnet & 12 Faucets' : 'Testnet Sepolia & 12 Faucet'}</h2>
+            <h2 class="modal-heading" style="margin:0">${renderUiIconSvg('faucet', 20)} <span>${en ? 'Sepolia Testnet & 12 Faucets' : 'Testnet Sepolia & 12 Faucet'}</span></h2>
             <button class="doodle-btn" id="btn-close-faucets" style="min-height:32px;padding:3px 10px">✕</button>
           </div>
           <p style="margin:4px 0 8px;font-size:0.84rem;opacity:0.85">
@@ -1350,13 +1737,13 @@ export class ConfidentialArenaPanel {
 
           <div class="faucet-wallets-box" style="margin-bottom:8px">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap">
-              <b>🧪 ${en ? 'Sepolia Protocol, Deployer & 10 Testnet Accounts' : 'Protokol Sepolia, Deployer & 10 Akun Testnet'}</b>
+              <b>${en ? 'Sepolia Protocol, Deployer & 10 Testnet Accounts' : 'Protokol Sepolia, Deployer & 10 Akun Testnet'}</b>
               <div style="display:flex;gap:5px;flex-wrap:wrap">
                 <button class="doodle-btn" id="btn-refresh-sepolia-eth" style="min-height:26px;padding:1px 8px;font-size:0.74rem" ${this.checkingSepoliaEth ? 'disabled' : ''}>
-                  ${this.checkingSepoliaEth ? '⏳...' : `🔄 ${en ? 'Check Sepolia ETH' : 'Cek ETH Sepolia'}`}
+                  ${this.checkingSepoliaEth ? '...' : `${renderUiIconSvg('reset', 12)} <span>${en ? 'Check Sepolia ETH' : 'Cek ETH Sepolia'}</span>`}
                 </button>
                 <button class="doodle-btn doodle-btn-mint" data-copy-addr="${TESTNET_DIRECTORY.deployerAddress}" style="min-height:26px;padding:1px 8px;font-size:0.74rem">
-                  📋 ${en ? 'Copy Deployer' : 'Salin Deployer'}
+                  ${renderUiIconSvg('copy', 12)} <span>${en ? 'Copy Deployer' : 'Salin Deployer'}</span>
                 </button>
               </div>
             </div>
@@ -1422,9 +1809,22 @@ export class ConfidentialArenaPanel {
     const en = lang === 'en';
     const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel);
 
+    if (this.pendingInitialRoomInvite) {
+      const invite = this.pendingInitialRoomInvite;
+      this.pendingInitialRoomInvite = null;
+      window.setTimeout(() => {
+        this.connectOnlineRoom(invite.code, false, { ...draft, name: invite.name || draft.name });
+        this.onToast(
+          en
+            ? `🌐 Joining Room ${invite.code}... waiting for host sync`
+            : `🌐 Bergabung ke Room ${invite.code}... menunggu sinkronisasi host`,
+        );
+      }, 0);
+    }
     q('#btn-arena-back')?.addEventListener('click', () => {
       this.sound.playUiClick();
       this.stopPolling();
+      this.disconnectOnlineRoom();
       this.onBackToMenu();
     });
 
@@ -1440,6 +1840,7 @@ export class ConfidentialArenaPanel {
     q('#btn-mode-sepolia')?.addEventListener('click', () => {
       this.sound.playUiClick();
       this.stopPolling();
+      this.disconnectOnlineRoom();
       this.mode = 'sepolia';
       this.snapshot = null;
       this.activeMatchId = null;
@@ -1549,6 +1950,59 @@ export class ConfidentialArenaPanel {
     });
 
     q('#btn-arena-create-match')?.addEventListener('click', () => void this.handleCreateMatch(en, draft));
+
+    const startOnlineHost = () => {
+      this.sound.playUiClick();
+      this.stopPolling();
+      this.mode = 'preview';
+      this.stakeTokens = 0;
+      if (this.maxPlayers < 2) this.maxPlayers = 2;
+      const code = this.generateRoomCode();
+      this.lastStepSummary = null;
+      this.connectOnlineRoom(code, true, draft);
+      const url = `${window.location.origin}/?arenaRoom=${code}`;
+      void navigator.clipboard?.writeText(url).catch(() => {});
+      this.onToast(
+        en
+          ? `Room ${code} is live! Invite link copied — friends join with the code.`
+          : `Room ${code} aktif! Link undangan disalin — teman gabung dengan kodenya.`,
+      );
+    };
+    q('#btn-arena-create-online-room')?.addEventListener('click', startOnlineHost);
+    q('#btn-arena-enable-online')?.addEventListener('click', startOnlineHost);
+    q<HTMLInputElement>('#inp-arena-room-code')?.addEventListener('input', (e) => {
+      const el = e.target as HTMLInputElement;
+      el.value = el.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      this.onlineRoomInput = el.value;
+    });
+    q('#btn-arena-join-online-room')?.addEventListener('click', () => {
+      this.sound.playUiClick();
+      const code = this.onlineRoomInput.trim().toUpperCase();
+      if (code.length < 3) {
+        this.onToast(en ? 'Enter the Room Code your friend shared.' : 'Masukkan Kode Room dari temanmu.');
+        return;
+      }
+      this.stopPolling();
+      this.mode = 'preview';
+      this.snapshot = null;
+      this.connectOnlineRoom(code, false, draft);
+      this.onToast(
+        en
+          ? `🌐 Joining Room ${code}... waiting for host sync`
+          : `🌐 Bergabung ke Room ${code}... menunggu sinkronisasi host`,
+      );
+    });
+    q('#btn-arena-copy-room-link')?.addEventListener('click', () => {
+      if (!this.onlineRoomCode) return;
+      this.sound.playUiClick();
+      void navigator.clipboard?.writeText(`${window.location.origin}/?arenaRoom=${this.onlineRoomCode}`).catch(() => {});
+      this.onToast(en ? `Invite link copied (Room ${this.onlineRoomCode})` : `Link undangan disalin (Room ${this.onlineRoomCode})`);
+    });
+    q('#btn-arena-open-guest-tab')?.addEventListener('click', () => {
+      if (!this.onlineRoomCode) return;
+      this.sound.playUiClick();
+      window.open(`${window.location.origin}/?arenaRoom=${this.onlineRoomCode}&guest=1`, '_blank');
+    });
     q('#inp-arena-join-id')?.addEventListener('input', (e) => {
       this.joinMatchInput = (e.target as HTMLInputElement).value;
     });
@@ -1585,10 +2039,12 @@ export class ConfidentialArenaPanel {
       this.brakeSeatInput = Number((e.target as HTMLSelectElement).value || 0);
     });
     q('#btn-arena-cast-brake')?.addEventListener('click', () => void this.handleCastBrake(en, draft));
-    q('#btn-arena-open-duel')?.addEventListener('click', () => {
-      this.sound.playUiClick();
-      this.showBlindDuelModal = true;
-      this.onRequestRender();
+    root.querySelectorAll<HTMLElement>('[data-open-duel]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.sound.playUiClick();
+        this.showBlindDuelModal = true;
+        this.onRequestRender();
+      });
     });
     q('#btn-close-duel-modal')?.addEventListener('click', () => {
       this.sound.playUiClick();
@@ -1609,9 +2065,9 @@ export class ConfidentialArenaPanel {
     q('#btn-copy-arena-invite')?.addEventListener('click', () => {
       if (!this.activeMatchId) return;
       const url = `${window.location.origin}/?arenaMatch=${this.activeMatchId}`;
-      void navigator.clipboard?.writeText(url);
+      void navigator.clipboard?.writeText(url).catch(() => {});
       this.sound.playUiClick();
-      this.onToast(en ? `🔗 Invite copied: Match #${this.activeMatchId}` : `🔗 Link undangan disalin: Laga #${this.activeMatchId}`);
+      this.onToast(en ? `Invite copied: Match #${this.activeMatchId}` : `Link undangan disalin: Laga #${this.activeMatchId}`);
     });
     q('#btn-refresh-lobby')?.addEventListener('click', () => void this.handleRefreshMatch(en, draft));
     q('#btn-arena-start-early')?.addEventListener('click', () => void this.handleStartEarly(en, draft));
@@ -1619,9 +2075,12 @@ export class ConfidentialArenaPanel {
     const resetToSetup = () => {
       this.sound.playUiClick();
       this.stopPolling();
+      this.disconnectOnlineRoom();
+      this.sim.resetForNewLobby();
       this.snapshot = null;
       this.activeMatchId = null;
       this.userTouchedCameraMode = false;
+      this.lastStepSummary = null;
       this.syncSceneWithArena(draft);
       this.onRequestRender();
     };
@@ -1635,6 +2094,11 @@ export class ConfidentialArenaPanel {
     q('#btn-toggle-proofs')?.addEventListener('click', () => {
       this.sound.playUiClick();
       this.showProofDrawer = !this.showProofDrawer;
+      this.onRequestRender();
+    });
+    q('#btn-toggle-all-proofs')?.addEventListener('click', () => {
+      this.sound.playUiClick();
+      this.showAllProofs = !this.showAllProofs;
       this.onRequestRender();
     });
   }
@@ -1655,7 +2119,7 @@ export class ConfidentialArenaPanel {
     modalRoot.querySelectorAll<HTMLElement>('[data-copy-addr]').forEach((btn) => {
       btn.onclick = () => {
         const addr = btn.dataset.copyAddr || '';
-        void navigator.clipboard?.writeText(addr);
+        void navigator.clipboard?.writeText(addr).catch(() => {});
         this.sound.playUiClick();
         this.onToast(`${en ? 'Copied' : 'Disalin'}: ${shortAddr(addr)}`);
       };
@@ -1916,6 +2380,8 @@ export class ConfidentialArenaPanel {
     en: boolean,
     res: {
       dieValue: number;
+      fromPos?: number;
+      landedPos?: number;
       finalPos: number;
       trapTriggered: number;
       shieldBlocked: boolean;
@@ -1924,24 +2390,28 @@ export class ConfidentialArenaPanel {
       usedBrake?: boolean;
     },
   ): string {
-    const brakeTag = res.usedBrake ? (en ? ' [Cursed Brake ≤3]' : ' [Kutukan Rem ≤3]') : '';
+    const brakeTag = res.usedBrake ? (en ? ' [Brake ≤3]' : ' [Rem ≤3]') : '';
+    const fromP = res.fromPos ?? Math.max(1, res.finalPos - res.dieValue);
+    const landP = res.landedPos ?? res.finalPos;
+    const baseMove = en
+      ? `Rolled ${res.dieValue}${brakeTag}: Tile ${fromP} + ${res.dieValue} = Tile ${landP}`
+      : `Dadu ${res.dieValue}${brakeTag}: Kt.${fromP} + ${res.dieValue} = Kt.${landP}`;
+
+    let msg = baseMove;
     if (res.trapTriggered === GOLDEN_WARP_KIND) {
-      return `⚡ ${en ? 'Golden Warp Shortcut! +3 steps +1★' : 'Golden Warp Rahasia! +3 langkah +1★'} (🎲 ${res.dieValue}${brakeTag})`;
-    }
-    if (res.trapTriggered > 0) {
-      return `💥 ${en ? `FHE Trap #${res.trapTriggered} hit!` : `Kena Jebakan #${res.trapTriggered}!`} 🎲 ${res.dieValue}${brakeTag}`;
-    }
-    if (res.shieldBlocked) {
-      return `🛡️ ${en ? 'Confidential Shield blocked Snake!' : 'Perisai Rahasia menahan Ular!'} 🎲 ${res.dieValue}${brakeTag}`;
-    }
-    if (res.ladderTo > 0) {
+      msg = `${baseMove} • ${en ? `Golden Warp (+3) → Tile ${res.finalPos}` : `Golden Warp (+3) → Kt.${res.finalPos}`}`;
+    } else if (res.trapTriggered > 0) {
+      msg = `${baseMove} • ${en ? `Trap #${res.trapTriggered} → Tile ${res.finalPos}` : `Jebakan #${res.trapTriggered} → Kt.${res.finalPos}`}`;
+    } else if (res.shieldBlocked) {
+      msg = `${baseMove} • ${en ? 'Shield Blocked Snake!' : 'Perisai Menahan Ular!'}`;
+    } else if (res.ladderTo > 0) {
       this.sound.playLadderClimb();
-      return `🪜 ${en ? `Climbed ladder to #${res.ladderTo}!` : `Naik tangga ke #${res.ladderTo}!`} 🎲 ${res.dieValue}${brakeTag}`;
+      msg = `${baseMove} • ${en ? `Ladder Climb → Tile ${res.ladderTo}` : `Naik Tangga → Kt.${res.ladderTo}`}`;
+    } else if (res.snakeTo > 0) {
+      msg = `${baseMove} • ${en ? `Snake Bite → Tile ${res.snakeTo}` : `Turun Ular → Kt.${res.snakeTo}`}`;
     }
-    if (res.snakeTo > 0) {
-      return `🐍 ${en ? `Bitten down to #${res.snakeTo}!` : `Digigit ular ke #${res.snakeTo}!`} 🎲 ${res.dieValue}${brakeTag}`;
-    }
-    return `🎲 FHE Dice: ${res.dieValue}${brakeTag} → #${res.finalPos}`;
+    this.lastStepSummary = msg;
+    return msg;
   }
 
   private async handleRollDice(en: boolean, draft: ArenaPlayerDraft): Promise<void> {
@@ -1951,12 +2421,13 @@ export class ConfidentialArenaPanel {
         const res = this.sim.rollDice();
         this.isAnimatingRoll = true;
         this.snapshot = this.sim.getSnapshot();
+        this.broadcastOnlineSync({ actorAddr: this.sim.getAddress(), roll: res });
         await this.animateRollOutcome(this.snapshot, draft, this.sim.getAddress(), res);
         this.sound.playDiceLand();
         this.onToast(this.formatRollOutcomeToast(en, res));
 
-        // Simulate multiplayer FHE Rival bots taking turns sequentially
-        while (this.sim.getSnapshot().status === 1 && this.sim.getSnapshot().turnIndex !== 0) {
+        // FHE rival bots take their turns (run by whichever browser just finished a human turn)
+        while (this.sim.isActiveSeatBot()) {
           this.busyLabel = en ? 'FHE Rival Bot Rolling...' : 'Bot Lawan FHE Mengocok Dadu...';
           this.onRequestRender();
           await new Promise((r) => setTimeout(r, 320));
@@ -1964,17 +2435,19 @@ export class ConfidentialArenaPanel {
           if (!botRes) break;
           this.isAnimatingRoll = true;
           this.snapshot = this.sim.getSnapshot();
+          this.broadcastOnlineSync({ actorAddr: botRes.actorAddr, roll: botRes });
           await this.animateRollOutcome(this.snapshot, draft, botRes.actorAddr, botRes);
           if (botRes.trapTriggered >= 1 && botRes.trapTriggered <= 3) {
             this.onToast(
               en
-                ? `💥 P${botRes.botNumber} stepped on YOUR Secret Trap (#${botRes.trapTriggered})!`
-                : `💥 P${botRes.botNumber} menginjak Jebakan Rahasiamu (#${botRes.trapTriggered})!`,
+                ? `💥 ${botRes.actorName} stepped on a Secret Trap (#${botRes.trapTriggered})!`
+                : `💥 ${botRes.actorName} menginjak Jebakan Rahasia (#${botRes.trapTriggered})!`,
             );
           } else if (botRes.trapTriggered === GOLDEN_WARP_KIND) {
-            this.onToast(en ? `⚡ P${botRes.botNumber} hit Golden Warp!` : `⚡ P${botRes.botNumber} kena Golden Warp!`);
+            this.onToast(en ? `⚡ ${botRes.actorName} hit Golden Warp!` : `⚡ ${botRes.actorName} kena Golden Warp!`);
           }
         }
+        this.syncSceneWithArena(draft);
       });
       return;
     }
@@ -2010,9 +2483,17 @@ export class ConfidentialArenaPanel {
     this.sound.playUiClick();
     if (this.mode === 'preview') {
       try {
-        this.sim.plantTrap(this.trapTileInput, this.trapKindInput);
+        const planted = this.sim.plantTrap(this.trapTileInput, this.trapKindInput);
         this.snapshot = this.sim.getSnapshot();
         this.syncSceneWithArena(draft);
+        this.broadcastOnlineSync({
+          logNotice: {
+            kind: 'encrypt',
+            title: `${this.sim.getPlayerName()} planted a Secret Trap`,
+            detail: 'ENCRYPT: coordinate & type are euint8 ciphertexts — invisible until stepped on.',
+            handle: planted.handle,
+          },
+        });
         this.onToast(en ? `💣 Secret Trap hidden on Tile ${this.trapTileInput}!` : `💣 Jebakan rahasia ditanam di Kotak ${this.trapTileInput}!`);
       } catch (e) {
         this.onToast(e instanceof Error ? e.message : String(e));
@@ -2036,6 +2517,7 @@ export class ConfidentialArenaPanel {
         this.sim.buyMysteryItem();
         this.snapshot = this.sim.getSnapshot();
         this.syncSceneWithArena(draft);
+        this.broadcastOnlineSync();
         this.sound.playItemUse();
         this.onToast(en ? '🎁 Mystery item encrypted in your bag!' : '🎁 Item misteri masuk ke tas rahasiamu!');
       } catch (e) {
@@ -2057,9 +2539,22 @@ export class ConfidentialArenaPanel {
     this.sound.playUiClick();
     if (this.mode === 'preview') {
       try {
-        this.sim.castSecretBrake(this.brakeSeatInput);
+        const snapNow = this.sim.getSnapshot();
+        const seatTarget = snapNow.players.length > 2 ? this.brakeSeatInput : -1;
+        const brake = this.sim.castSecretBrake(seatTarget);
         this.snapshot = this.sim.getSnapshot();
         this.syncSceneWithArena(draft);
+        if (!brake.targetIsBot && this.onlineRelay) {
+          this.onlineRelay.send('arena_brake_curse', { targetAddr: brake.targetAddr });
+        }
+        this.broadcastOnlineSync({
+          logNotice: {
+            kind: 'encrypt',
+            title: `${this.sim.getPlayerName()} cast a Secret Rival Brake`,
+            detail: 'ENCRYPT: target seat is an euint8 — the curse reveals itself only on the cursed roll.',
+            handle: brake.handle,
+          },
+        });
         this.sound.playItemUse();
         this.onToast(
           en
@@ -2109,23 +2604,59 @@ export class ConfidentialArenaPanel {
     this.showBlindDuelModal = false;
     if (this.mode === 'preview') {
       const icons = ['🪨', '📄', '✂️'];
-      const res = this.sim.playBlindDuel(choice);
-      const matchup = `${icons[choice] ?? '🪨'} vs ${icons[res.houseChoice] ?? '✂️'}`;
+      let res: ReturnType<ArenaPreviewSimulator['playBlindDuel']>;
+      try {
+        res = this.sim.playBlindDuel(choice);
+      } catch (e) {
+        this.onToast(e instanceof Error ? e.message : String(e));
+        this.onRequestRender();
+        return;
+      }
       this.snapshot = this.sim.getSnapshot();
       this.syncSceneWithArena(draft);
-      this.onToast(
-        res.outcome === 1
-          ? en
-            ? `✅ ${matchup} — Blind Duel Won (+2 ★)!`
-            : `✅ ${matchup} — Menang Duel Buta (+2 ★)!`
-          : res.outcome === 0
+
+      if (res.kind === 'posted') {
+        this.broadcastOnlineSync({
+          logNotice: {
+            kind: 'encrypt',
+            title: `${this.sim.getPlayerName()} posted a Blind Duel challenge`,
+            detail: 'ENCRYPT: their move is a ciphertext handle — answer it to reveal the result.',
+            handle: res.handle,
+          },
+        });
+        this.onToast(
+          en
+            ? '⚔️ Encrypted challenge posted — waiting for a rival to answer.'
+            : '⚔️ Tantangan terenkripsi terkirim — menunggu lawan menjawab.',
+        );
+      } else if (res.kind === 'responded') {
+        this.onlineRelay?.send('arena_duel_response', {
+          challenger: res.challenger,
+          responderAddr: this.sim.getAddress(),
+          choice,
+        });
+        this.onToast(
+          en
+            ? `🔐 Encrypted answer sent to ${res.challengerName}…`
+            : `🔐 Jawaban terenkripsi dikirim ke ${res.challengerName}…`,
+        );
+      } else {
+        const matchup = `${icons[choice] ?? '🪨'} vs ${icons[res.houseChoice] ?? '✂️'}`;
+        this.onToast(
+          res.outcome === 1
             ? en
-              ? `🤝 ${matchup} — Blind Duel Tie (+1 ★)!`
-              : `🤝 ${matchup} — Seri Duel Buta (+1 ★)!`
-            : en
-              ? `❌ ${matchup} — Rival Won (-1 ★)!`
-              : `❌ ${matchup} — Lawan Menang (-1 ★)!`,
-      );
+              ? `✅ ${matchup} — Blind Duel Won (+2 ★)!`
+              : `✅ ${matchup} — Menang Duel Buta (+2 ★)!`
+            : res.outcome === 0
+              ? en
+                ? `🤝 ${matchup} — Blind Duel Tie (+1 ★)!`
+                : `🤝 ${matchup} — Seri Duel Buta (+1 ★)!`
+              : en
+                ? `❌ ${matchup} — House Won (-1 ★)!`
+                : `❌ ${matchup} — Rumah Menang (-1 ★)!`,
+        );
+        this.broadcastOnlineSync();
+      }
       this.onRequestRender();
       return;
     }
@@ -2163,6 +2694,15 @@ export class ConfidentialArenaPanel {
       const passed = this.sim.verifySecretMission();
       this.snapshot = this.sim.getSnapshot();
       this.syncSceneWithArena(draft);
+      if (passed) {
+        this.broadcastOnlineSync({
+          logNotice: {
+            kind: 'public_decrypt',
+            title: `${this.sim.getPlayerName()} completed a Secret Mission (+3 ★)`,
+            detail: 'Mission id stayed encrypted; only the pass/fail ebool was publicly decrypted.',
+          },
+        });
+      }
       this.onToast(
         passed
           ? en
@@ -2197,6 +2737,7 @@ export class ConfidentialArenaPanel {
     if (this.mode === 'preview') {
       this.sim.claimPayout();
       this.snapshot = this.sim.getSnapshot();
+      this.broadcastOnlineSync();
       this.sound.playConfettiFanfare();
       this.onToast(en ? '💰 Encrypted ERC-7984 pot paid out!' : '💰 Pot ERC-7984 dibayarkan!');
       this.onRequestRender();

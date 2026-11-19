@@ -230,14 +230,14 @@ contract DodSnakeArena is ZamaEthereumConfig, ReentrancyGuard {
         classicSnakes[93] = 73;
         classicSnakes[98] = 79;
 
-        // Sprint 30-tile fast Sepolia layout
-        sprintLadders[3] = 11;
-        sprintLadders[8] = 19;
-        sprintLadders[15] = 24;
+        // Sprint 30-tile fast Sepolia layout (non-crossing boustrophedon pairs)
+        sprintLadders[3] = 17;
+        sprintLadders[8] = 12;
+        sprintLadders[15] = 25;
 
-        sprintSnakes[14] = 5;
-        sprintSnakes[21] = 10;
-        sprintSnakes[27] = 18;
+        sprintSnakes[14] = 6;
+        sprintSnakes[21] = 19;
+        sprintSnakes[27] = 13;
     }
 
     /**

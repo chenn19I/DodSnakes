@@ -86,7 +86,7 @@ interface CareerStats {
   laddersClimbed: number;
 }
 
-const SETTINGS_STORAGE_KEY = 'doodle_dash_settings_v3';
+const SETTINGS_STORAGE_KEY = 'dodsnakes_settings_en_v1';
 const CAREER_STORAGE_KEY = 'doodle_dash_career_v1';
 
 const EMOTE_LIST: Array<{ id: EmoteId; label: string }> = [
@@ -186,7 +186,7 @@ export class DoodleAppShell {
   private showLegendPopover = false;
 
   // Player setup drafts
-  private draftName = 'Pemain Kece';
+  private draftName = 'Mochi';
   private draftPawn: PawnId = 'kucing';
   private draftColor: PlayerColorId = 'pink';
   private draftAccessory: AccessoryId = 'none';
@@ -268,6 +268,17 @@ export class DoodleAppShell {
       this.arenaPanel.setInitialMatchInvite(arenaMatchParam);
       this.screen = 'arena';
     }
+    const arenaRoomParam = (search.get('arenaRoom') ?? '').trim().toUpperCase();
+    if (/^[A-Z0-9]{3,6}$/.test(arenaRoomParam)) {
+      const isGuest = search.get('guest') === '1';
+      if (isGuest) {
+        this.draftName = 'Boba';
+        this.draftPawn = 'kodok';
+        this.draftColor = 'mint';
+      }
+      this.arenaPanel.setInitialOnlineRoomInvite(arenaRoomParam, isGuest, this.draftName);
+      this.screen = 'arena';
+    }
 
     // Persistent 4-layer DOM prevents background updates from wiping active mini-games
     this.root.innerHTML = `
@@ -318,12 +329,12 @@ export class DoodleAppShell {
       colorblindMode: false,
       largeText: false,
       reducedMotion: prefersReduced,
-      language: 'id',
+      language: 'en',
     };
     try {
       const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
       const parsed = raw ? { ...defaults, ...(JSON.parse(raw) as Partial<AccessibilitySettings>) } : defaults;
-      parsed.language = parsed.language === 'en' ? 'en' : 'id';
+      parsed.language = parsed.language === 'id' ? 'id' : 'en';
       return parsed;
     } catch {
       return defaults;
@@ -1348,24 +1359,25 @@ export class DoodleAppShell {
               : ''
           }
           <button class="doodle-btn doodle-btn-arena stagger-item stagger-1" id="btn-menu-arena">
-            <span>🔐 ${en ? 'Confidential Onchain Arena' : 'Arena Onchain Rahasia'}</span>
+            <span class="ui-ico-row">${renderUiIconSvg('lock', 17)}<span>${en ? 'Confidential Onchain Arena' : 'Arena Onchain Rahasia'}</span></span>
             <span class="arena-new-pill">FHEVM • ERC-7984</span>
           </button>
           <button class="doodle-btn doodle-btn-primary stagger-item stagger-1" id="btn-menu-online">
             ${renderUiIconSvg('globe', 18)} ${this.t('playOnline')} (2-6)
           </button>
-          <button class="doodle-btn doodle-btn-mint stagger-item stagger-2" id="btn-menu-local">
-            ${renderUiIconSvg('users', 18)} ${this.t('playLocal')}
-          </button>
-          <button class="doodle-btn doodle-btn-blue stagger-item stagger-3" id="btn-menu-bot">
-            ${renderUiIconSvg('bot', 18)} ${this.t('playBot')}
-          </button>
-          <div class="menu-util-row stagger-item stagger-4">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px" class="stagger-item stagger-2">
+            <button class="doodle-btn doodle-btn-mint" id="btn-menu-local">
+              ${renderUiIconSvg('users', 17)} ${en ? 'Local Play' : 'Main Lokal'}
+            </button>
+            <button class="doodle-btn doodle-btn-blue" id="btn-menu-bot">
+              ${renderUiIconSvg('bot', 17)} ${this.t('playBot')}
+            </button>
+          </div>
+          <div class="menu-util-row stagger-item stagger-3">
             <button class="doodle-btn" id="btn-menu-howto">${renderUiIconSvg('help', 15)} ${this.t('howToPlay')}</button>
-            <button class="doodle-btn" id="btn-menu-faucets">🚰 ${en ? 'Faucets' : 'Faucet'}</button>
+            <button class="doodle-btn" id="btn-menu-faucets">${renderUiIconSvg('faucet', 15)} ${en ? 'Faucets' : 'Faucet'}</button>
             <button class="doodle-btn" id="btn-menu-settings">${renderUiIconSvg('settings', 15)} ${this.t('settings')}</button>
           </div>
-          <div class="showcase-hint">${en ? 'Drag the 3D board to orbit the diorama' : 'Tarik papan 3D untuk mengintip diorama'}</div>
           <div class="protocol-disclaimer">${escapeHtml(PROTOCOL_DISCLAIMER)}</div>
         </div>
       </div>
@@ -1765,11 +1777,8 @@ export class DoodleAppShell {
         <div class="hud-actions-top">
           <div class="player-pill tabular-num" id="hud-turn-timer" style="display:none;font-weight:700"></div>
           <button class="doodle-btn hud-icon-btn" id="btn-hud-cam" title="${camOverview ? (en ? 'Follow Pawn' : 'Mode Ikuti Pion') : (en ? 'Overview Camera' : 'Mode Lihat Penuh')}">${renderUiIconSvg('camera', 16)}</button>
-          <button class="doodle-btn hud-icon-btn" id="btn-hud-reset-cam" title="${en ? 'Reset Camera' : 'Kembalikan Sudut Kamera'}">${renderUiIconSvg('reset', 16)}</button>
           <button class="doodle-btn hud-icon-btn ${this.hudCompact ? 'doodle-btn-blue' : ''}" id="btn-hud-peek" title="${this.hudCompact ? (en ? 'Show HUD Overlay' : 'Tampilkan Overlay HUD') : (en ? 'Peek Board' : 'Intip Papan Penuh')}">${renderUiIconSvg('eye', 16)}</button>
-          <button class="doodle-btn hud-icon-btn ${!this.settings.musicEnabled ? 'hud-btn-off' : ''}" id="btn-hud-music" title="${this.t('musicLabel')}">${renderUiIconSvg('music', 16)}</button>
           <button class="doodle-btn hud-icon-btn ${this.settings.muted ? 'hud-btn-off' : ''}" id="btn-hud-mute" title="${this.t('muteLabel')}">${renderUiIconSvg(this.settings.muted ? 'muted' : 'sound', 16)}</button>
-          <button class="doodle-btn hud-icon-btn ${this.showLegendPopover ? 'doodle-btn-mint' : ''}" id="btn-hud-legend" title="${en ? 'Board Guide & Rules' : 'Panduan Papan & Aturan'}">${renderUiIconSvg('book', 16)}</button>
           <button class="doodle-btn hud-icon-btn" id="btn-hud-settings" title="${this.t('settingsTitle')}">${renderUiIconSvg('settings', 16)}</button>
           <button class="doodle-btn doodle-btn-pink hud-leave-btn" id="btn-hud-leave" title="${this.t('leaveRoom')}">${renderUiIconSvg('leave', 15)}<span class="hud-btn-label">${en ? 'Leave' : 'Keluar'}</span></button>
         </div>
@@ -1816,16 +1825,6 @@ export class DoodleAppShell {
 
       <div class="hud-bottom">
         ${!this.hudCompact ? this.renderRaceProgressBarHtml(state) : ''}
-        ${
-          !this.hudCompact && isMyTurn && state.phase === 'TURN_BEGIN' && me
-            ? `<div class="hud-turn-helper tabular-num">
-                 <span><b>${this.t('turnYou')}</b> ${this.t('tileShort')}${me.position}/100</span>
-                 <span class="helper-dot-row"><span class="preview-dot is-ladder"></span>${en ? 'Ladder' : 'Tangga'}</span>
-                 <span class="helper-dot-row"><span class="preview-dot is-snake"></span>${en ? 'Snake' : 'Ular'}</span>
-                 <span class="helper-key-hint">${en ? '[Space]' : '[Spasi]'}</span>
-               </div>`
-            : ''
-        }
         ${!this.hudCompact && activeBuffs.length > 0 ? `<div class="hud-buffs-pill">${en ? 'Active' : 'Aktif'}: ${activeBuffs.join(' • ')}</div>` : ''}
         ${
           !this.hudCompact && me?.mission

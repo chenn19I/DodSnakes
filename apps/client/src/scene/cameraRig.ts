@@ -9,6 +9,8 @@ export class DoodleCameraRig {
   private readonly followTarget = new THREE.Vector3(0, 0, 2);
   private readonly tmpDesiredPos = new THREE.Vector3();
   private mode: CameraMode = 'showcase';
+  private sprintFocus = false;
+  private fastSnapFrames = 0;
   private shakeTime = 0;
   private shakeDuration = 0.25;
   private shakeIntensity = 0.28;
@@ -38,13 +40,29 @@ export class DoodleCameraRig {
   }
 
   public setMode(mode: CameraMode): void {
+    const prevMode = this.mode;
     this.mode = mode;
+    if (prevMode === 'showcase' && mode !== 'showcase') {
+      this.userYaw = 0;
+      this.userPitch = 0;
+      this.userZoom = 1;
+      this.fastSnapFrames = 2;
+    }
     if (mode === 'victory') {
       this.victoryOrbitAngle = 0;
     }
     if (mode === 'challenge') {
       this.userYaw *= 0.25;
       this.userPitch *= 0.25;
+    }
+  }
+
+  public setSprintFocus(enabled: boolean): void {
+    if (this.sprintFocus !== enabled) {
+      this.sprintFocus = enabled;
+      if (this.mode === 'overview') {
+        this.fastSnapFrames = 2;
+      }
     }
   }
 
@@ -70,7 +88,10 @@ export class DoodleCameraRig {
   }
 
   public update(dtSec: number, elapsedSec: number, reducedMotion: boolean): void {
-    const aspectPullback = this.camera.aspect < 0.85 ? 1.24 : 1.0;
+    const aspectPullback =
+      this.camera.aspect < 1.0
+        ? THREE.MathUtils.clamp(1.04 / Math.max(0.38, this.camera.aspect), 1.24, 2.35)
+        : 1.0;
 
     let baseDist = 14.2 * aspectPullback;
     let baseHeight = 20.2 * aspectPullback;
@@ -78,12 +99,19 @@ export class DoodleCameraRig {
     if (this.mode === 'showcase') {
       this.desiredTarget.set(-1.6, 0.4, 0.2);
       this.showcaseOrbitAngle += dtSec * (reducedMotion ? 0.04 : 0.14);
-      baseDist = 17.5 * aspectPullback;
-      baseHeight = 14.5 * aspectPullback;
+      baseDist = 17.5 * Math.min(aspectPullback, 1.55);
+      baseHeight = 14.5 * Math.min(aspectPullback, 1.55);
     } else if (this.mode === 'overview') {
-      this.desiredTarget.set(0, 0, 0.3);
-      baseDist = 15.2 * aspectPullback;
-      baseHeight = 21.8 * aspectPullback;
+      if (this.sprintFocus) {
+        // Sprint 30 spans rows 0..2 (z = +8.1 down to +4.5); center squarely on z = 6.1
+        this.desiredTarget.set(0, 0.2, 6.1);
+        baseDist = 11.4 * aspectPullback;
+        baseHeight = 18.2 * aspectPullback;
+      } else {
+        this.desiredTarget.set(0, 0, 0.3);
+        baseDist = 15.2 * aspectPullback;
+        baseHeight = 21.8 * aspectPullback;
+      }
     } else if (this.mode === 'follow') {
       this.desiredTarget.set(
         THREE.MathUtils.clamp(this.followTarget.x * 0.62, -4.5, 4.5),
@@ -103,7 +131,8 @@ export class DoodleCameraRig {
       baseHeight = 6.2;
     }
 
-    const alpha = 1 - Math.exp(-dtSec / 0.32);
+    const alpha = this.fastSnapFrames > 0 ? 1 : 1 - Math.exp(-dtSec / 0.32);
+    if (this.fastSnapFrames > 0) this.fastSnapFrames -= 1;
     this.currentTarget.lerp(this.desiredTarget, alpha);
 
     const swayAmt = reducedMotion ? 0 : 0.22;

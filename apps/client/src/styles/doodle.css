@@ -3011,11 +3011,59 @@ button.arena-step-pill:hover {
 
 .arena-vault-card,
 .arena-proof-card {
-  width: min(305px, 34vw);
-  max-height: 62vh;
+  width: min(268px, 30vw);
+  max-height: 58vh;
   overflow: auto;
-  padding: 10px 12px;
-  background: rgba(255, 246, 229, 0.94);
+  padding: 9px 11px;
+  background: rgba(255, 248, 235, 0.9);
+  backdrop-filter: blur(6px);
+}
+
+.arena-step-formula {
+  margin-top: 5px;
+  padding: 4px 8px;
+  border-radius: 9px;
+  border: 1.5px solid var(--ink);
+  background: #fff9db;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.arena-vault-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+
+.arena-vault-metric {
+  padding: 4px 6px;
+  border-radius: 9px;
+  border: 1.5px solid rgba(36, 34, 45, 0.25);
+  background: #ffffff;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.arena-vault-metric small {
+  font-size: 0.66rem;
+  opacity: 0.74;
+}
+
+.arena-vault-metric b {
+  font-size: 0.8rem;
+}
+
+.arena-mission-compact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1.5px dashed rgba(36, 34, 45, 0.22);
 }
 
 .arena-turn-badge {
@@ -3149,7 +3197,9 @@ button.arena-step-pill:hover {
 
 .arena-bottom-deck {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
 }
 
 .arena-action-bar,
@@ -3158,9 +3208,10 @@ button.arena-step-pill:hover {
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: rgba(255, 246, 229, 0.96);
+  gap: 7px;
+  padding: 7px 12px;
+  background: rgba(255, 248, 235, 0.92);
+  backdrop-filter: blur(6px);
 }
 
 .arena-trap-inline {
@@ -3258,6 +3309,9 @@ button.arena-step-pill:hover {
     padding: 2px 6px !important;
     font-size: 0.68rem !important;
   }
+  .arena-addr-badge {
+    display: none;
+  }
   .arena-hud-layout {
     flex-direction: column;
     overflow: auto;
@@ -3294,3 +3348,82 @@ button.arena-step-pill:hover {
 }
 
 
+
+
+/* ---- Online multiplayer (Confidential Arena rooms) ---- */
+.arena-online-join-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  align-items: center;
+}
+
+.arena-online-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 5px;
+  padding: 4px 8px;
+  border: 2px dashed var(--ink, #2b2b3a);
+  border-radius: 10px;
+  background: rgba(189, 242, 213, 0.55);
+  font-size: 0.78rem;
+}
+
+.arena-online-code {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.arena-online-code small {
+  opacity: 0.7;
+}
+
+.arena-online-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #f0a23a;
+  border: 1.5px solid var(--ink, #2b2b3a);
+}
+
+.arena-online-dot.is-live {
+  background: #3ecf7a;
+}
+
+.arena-duel-incoming {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  background: #fff1c9;
+  animation: arena-duel-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes arena-duel-pulse {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arena-duel-incoming {
+    animation: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .arena-online-join-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
