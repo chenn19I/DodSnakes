@@ -10,7 +10,7 @@ function renderStartupError(uiRoot: HTMLElement | null, error: unknown): void {
   uiRoot.innerHTML = `
     <div class="boot-fallback" style="pointer-events:auto;">
       <div class="boot-fallback-card">
-        <div class="boot-fallback-title">DodSnake</div>
+        <div class="boot-fallback-title">DodSnakes</div>
         <p style="margin:6px 0 12px;">Ups, gagal menyiapkan tampilan 3D di browser ini.</p>
         <pre style="text-align:left;font-size:0.78rem;background:#fff;border:2px solid #24222D;border-radius:12px;padding:8px;overflow:auto;max-height:110px;">${safeMsg}</pre>
         <button id="btn-boot-retry" class="doodle-btn doodle-btn-primary" style="margin-top:10px;width:100%;">Muat Ulang</button>
@@ -53,8 +53,12 @@ function attachCameraControls(canvas: HTMLCanvasElement, scene: DoodleSceneManag
     if (canvas.hasPointerCapture(e.pointerId)) {
       canvas.releasePointerCapture(e.pointerId);
     }
-    if (dragMovedPx <= 5 && scene.hasActiveAnimation()) {
-      scene.toggleSpeedUp(!scene.isSpeedUp());
+    if (dragMovedPx <= 5) {
+      if (scene.hasActiveAnimation()) {
+        scene.toggleSpeedUp(!scene.isSpeedUp());
+      } else {
+        scene.handleCanvasTap(e.clientX, e.clientY);
+      }
     }
   };
 
@@ -83,7 +87,7 @@ if (canvas && uiRoot) {
     new DoodleAppShell(uiRoot, scene, sound);
     attachCameraControls(canvas, scene);
   } catch (err) {
-    console.error('[DodSnake] Boot error:', err);
+    console.error('[DodSnakes] Boot error:', err);
     renderStartupError(uiRoot, err);
   }
 }
