@@ -35,7 +35,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 contract DodSnakeArena is ZamaEthereumConfig, ReentrancyGuard {
     uint8 public constant MAX_PLAYERS = 4;
     uint8 public constant MAX_TRAPS_PER_MATCH = 8;
-    uint8 public constant MAX_TRAPS_PER_PLAYER = 2;
+    uint8 public constant MAX_TRAPS_PER_PLAYER = 3;
     uint8 public constant BOARD_CLASSIC_SIZE = 100;
     uint8 public constant BOARD_SPRINT_SIZE = 30;
     uint8 public constant TRAP_MUD_SLIDE = 1;
@@ -352,6 +352,7 @@ contract DodSnakeArena is ZamaEthereumConfig, ReentrancyGuard {
         );
 
         ebool hasCharge = FHE.gt(p.encryptedTrapCharges, FHE.asEuint8(0));
+        euint8 effectiveTile = FHE.select(hasCharge, clampedTile, FHE.asEuint8(0));
         p.encryptedTrapCharges = FHE.select(
             hasCharge,
             FHE.sub(p.encryptedTrapCharges, FHE.asEuint8(1)),
@@ -363,7 +364,7 @@ contract DodSnakeArena is ZamaEthereumConfig, ReentrancyGuard {
         uint8 idx = m.trapCount++;
         SecretTrap storage trap = _traps[matchId][idx];
         trap.owner = msg.sender;
-        trap.encryptedTile = clampedTile;
+        trap.encryptedTile = effectiveTile;
         trap.encryptedKind = clampedKind;
         FHE.allowThis(trap.encryptedTile);
         FHE.allowThis(trap.encryptedKind);
@@ -504,8 +505,9 @@ contract DodSnakeArena is ZamaEthereumConfig, ReentrancyGuard {
         emit DiceMoved(matchId, mover, clearDie, fromPos, toPos);
 
         uint8 snakeDest = _getSnakeDest(m.boardSize, toPos);
-        bool hasEnemyTrap = _hasEnemyTrap(m, mover);
-        bool needsShieldCheck = snakeDest > 0;
+        bool isExactFinish = toPos >= target;
+        bool hasEnemyTrap = !isExactFinish && _hasEnemyTrap(m, mover);
+        bool needsShieldCheck = !isExactFinish && snakeDest > 0;
 
         if (!hasEnemyTrap && !needsShieldCheck) {
             _finishTileResolution(m, mover, toPos, 0, false);
@@ -930,6 +932,33 @@ contract DodSnakeArena is ZamaEthereumConfig, ReentrancyGuard {
             m.pendingMissionHandle,
             m.pendingMover,
             m.pendingLandingPos
+        );
+    }
+
+    function getBlindDuelState(
+        uint256 matchId
+    )
+        external
+        view
+        returns (
+            bool active,
+            address challenger,
+            address opponent,
+            bool challengerCommitted,
+            bool opponentCommitted,
+            bytes32 pendingResultHandle
+        )
+    {
+        MatchData storage m = _matches[matchId];
+        if (m.id == 0) revert MatchNotFound();
+        BlindDuel storage d = m.duel;
+        return (
+            d.active,
+            d.challenger,
+            d.opponent,
+            d.challengerCommitted,
+            d.opponentCommitted,
+            d.pendingResultHandle
         );
     }
 
