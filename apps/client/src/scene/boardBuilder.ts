@@ -22,7 +22,7 @@ import {
 
 export interface TilePreviewMarker {
   tileId: number;
-  kind: 'normal' | 'ladder' | 'snake' | 'boss' | 'bounced' | 'special';
+  kind: 'normal' | 'ladder' | 'snake' | 'boss' | 'bounced' | 'special' | 'trap';
 }
 
 export interface BoardVisuals {
@@ -799,6 +799,7 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
     boss: DOODLE_PALETTE.orange,
     bounced: DOODLE_PALETTE.coral,
     special: DOODLE_PALETTE.purple,
+    trap: '#FF477E',
   };
   const previewKindColorsCb: Record<TilePreviewMarker['kind'], string> = {
     normal: '#E69F00',
@@ -807,12 +808,13 @@ export function buildBoardVisuals(outlineCtrl: DoodleOutlineController): BoardVi
     boss: '#CC79A7',
     bounced: '#0072B2',
     special: '#56B4E9',
+    trap: '#F0E442',
   };
   let colorblindMode = false;
   let latestPreviews: TilePreviewMarker[] = [];
   const getPreviewColor = (kind: TilePreviewMarker['kind']): string =>
     (colorblindMode ? previewKindColorsCb : previewKindColorsDefault)[kind];
-  const previewRings = Array.from({ length: 6 }, () => {
+  const previewRings = Array.from({ length: 14 }, () => {
     const mat = new THREE.MeshBasicMaterial({
       color: DOODLE_PALETTE.yellow,
       transparent: true,
