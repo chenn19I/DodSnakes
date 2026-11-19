@@ -120,10 +120,10 @@ sequenceDiagram
 - [`packages/contracts`](packages/contracts) (`@doodle-dash/contracts`): Hardhat workspace with `@fhevm/solidity` (`0.11.1`) and `@openzeppelin/confidential-contracts` (`0.5.3`).
   - [`DodChipERC7984.sol`](packages/contracts/contracts/DodChipERC7984.sol): ERC-7984 confidential chip token (`DodChip` / `cDOD`, 6 decimals) with `claimFaucet()` (`100 cDOD`, 1-hour cooldown) and batch testnet minting.
   - [`DodSnakeArena.sol`](packages/contracts/contracts/DodSnakeArena.sol): Full FHEVM game contract supporting Sprint `30`-tile and Classic `100`-tile modes, hidden House/Player Traps, random zero-ACL Golden Warp, `castSecretBrake`, Encrypted Mystery Bag, Verifiable FHE Dice, Blind 1v1 RPS Duels, Secret Match Missions, and ERC-7984 pot escrow.
-  - [`DodSnakeConfidential.test.ts`](packages/contracts/test/DodSnakeConfidential.test.ts): **16 automated FHEVM + ERC-7984 tests** including ACL leak rejection, forged/replayed proof rejection, Secret Brake, Golden Warp, and 10-account multi-room gameplay.
+  - [`DodSnakeConfidential.test.ts`](packages/contracts/test/DodSnakeConfidential.test.ts): **18 automated FHEVM + ERC-7984 tests** including ACL leak rejection, forged/replayed proof rejection, encrypted trap charge exhaustion (`FHE.select`), Secret Brake, Golden Warp, early lobby kickoff, Blind Duel progress getters, and 10-account multi-room play.
 - [`packages/shared`](packages/shared) (`@doodle-dash/shared`): Pure deterministic game engine, seeded PRNG, tile generator, Zod multiplayer schemas, 1,000-match bot simulator, and Vitest suite.
 - [`apps/server`](apps/server) (`@doodle-dash/server`): Authoritative Express + Socket.IO real-time multiplayer server (`4`-letter invites, reconnect handling, anti-cheat challenge verification, spectator support).
-- [`apps/client`](apps/client) (`@doodle-dash/client`): Vite + TypeScript + Three.js + GSAP + `@zama-fhe/sdk` (`viem` + Web Worker WASM) frontend with dual **Instant FHE Preview** and **Sepolia FHEVM** modes.
+- [`apps/client`](apps/client) (`@doodle-dash/client`): Vite + TypeScript + Three.js + GSAP + `@zama-fhe/sdk` (`viem` + Web Worker WASM) frontend with dual **Instant FHE Preview** (1P–4P AI rivals) and **Sepolia FHEVM** (live waiting room, shareable `?arenaMatch=` invites, interrupted KMS proof recovery, and PvP blind duel responder).
 - [`data/board.json`](data/board.json) & [`data/tiles.json`](data/tiles.json): Board geometry (snakes, ladders, zones) and 100 tile challenge definitions.
 
 ---
@@ -175,8 +175,8 @@ Run `npm run wallets:gen` to generate local keys inside gitignored `.env.testnet
 npm install
 npm run dev              # Starts Socket.IO server (:3001) + Vite dev client (:5173)
 npm run build            # Builds shared, server, compiles contracts, exports ABIs & client bundle
-npm test                 # Runs Vitest suites (shared + server) AND 16 Hardhat FHEVM tests
-npm run test:contracts   # Runs only the 16 FHEVM + ERC-7984 Hardhat tests
+npm test                 # Runs Vitest suites (shared + server) AND 18 Hardhat FHEVM tests
+npm run test:contracts   # Runs only the 18 FHEVM + ERC-7984 Hardhat tests
 npm run sim              # Runs 1,000-match bot-vs-bot determinism & deadlock simulation
 npm run generate:tiles   # Regenerates deterministic data/tiles.json
 ```
