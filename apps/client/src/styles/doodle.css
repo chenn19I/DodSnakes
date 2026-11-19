@@ -3068,6 +3068,30 @@ body.colorblind-mode .lobby-ready-pill.is-wait {
   font-weight: 700;
 }
 
+.arena-players-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 2px 0 4px;
+}
+
+.arena-seat-chip {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1.5px solid var(--ink);
+  background: #ffffff;
+}
+
+.arena-seat-chip.is-me {
+  background: #e6f4ff;
+}
+
+.arena-seat-chip.is-turn {
+  background: var(--mint);
+}
+
 .arena-secret-box {
   margin-top: 6px;
   padding: 7px 9px;
