@@ -86,6 +86,10 @@ export class ConfidentialArenaPanel {
   private customChipInput = '';
   private customArenaInput = '';
   private duelOpponentInput = '0x0000000000000000000000000000000000000000';
+  private pollTimerId: number | null = null;
+  private pollInFlight = false;
+  private pollEn = true;
+  private pollDraft: ArenaPlayerDraft | null = null;
 
   constructor(opts: {
     scene: DoodleSceneManager;
@@ -107,6 +111,99 @@ export class ConfidentialArenaPanel {
     this.fheClient.setLogListener(() => {
       this.onRequestRender();
     });
+  }
+
+  public setInitialMatchInvite(matchId: string): void {
+    this.mode = 'sepolia';
+    this.joinMatchInput = matchId;
+  }
+
+  public stopPolling(): void {
+    if (this.pollTimerId !== null) {
+      clearInterval(this.pollTimerId);
+      this.pollTimerId = null;
+    }
+    this.pollInFlight = false;
+  }
+
+  private ensureSepoliaPoller(en: boolean, draft: ArenaPlayerDraft): void {
+    this.pollEn = en;
+    this.pollDraft = draft;
+    const activeNeedsPoll = Boolean(
+      this.mode === 'sepolia' &&
+        this.activeMatchId &&
+        this.snapshot &&
+        this.snapshot.status < 2,
+    );
+    if (!activeNeedsPoll) {
+      this.stopPolling();
+      return;
+    }
+    if (this.pollTimerId !== null) return;
+
+    this.pollTimerId = window.setInterval(() => {
+      void this.pollSepoliaState();
+    }, 4500);
+  }
+
+  private async pollSepoliaState(): Promise<void> {
+    if (
+      this.mode !== 'sepolia' ||
+      !this.activeMatchId ||
+      !this.snapshot ||
+      this.snapshot.status >= 2 ||
+      this.busyLabel ||
+      this.isAnimatingRoll ||
+      this.pollInFlight
+    ) {
+      return;
+    }
+    const myAddr = this.walletInfo?.address?.toLowerCase() || '';
+    const prevTurnAddr = this.snapshot.players[this.snapshot.turnIndex]?.address?.toLowerCase() || '';
+    const prevWasMyTurn = this.snapshot.status === 1 && prevTurnAddr === myAddr;
+    const prevStatus = this.snapshot.status;
+    const prevCount = this.snapshot.playerCount;
+    const prevDuel = Boolean(this.snapshot.duel?.active);
+
+    // Pause polling when waiting for caller's own normal turn action unless duel waiting
+    if (this.snapshot.status === 1 && prevWasMyTurn && !prevDuel && this.snapshot.pendingAction === 0) {
+      return;
+    }
+
+    this.pollInFlight = true;
+    try {
+      const next = await this.fheClient.fetchMatchSnapshot(this.activeMatchId, false);
+      const changed =
+        next.status !== prevStatus ||
+        next.playerCount !== prevCount ||
+        next.turnNumber !== this.snapshot.turnNumber ||
+        next.turnIndex !== this.snapshot.turnIndex ||
+        next.pendingAction !== this.snapshot.pendingAction ||
+        Boolean(next.duel?.active) !== prevDuel;
+
+      if (!changed) return;
+      this.snapshot = next;
+      if (this.pollDraft) {
+        this.syncSceneWithArena(this.pollDraft);
+      }
+
+      const nextTurnAddr = next.players[next.turnIndex]?.address?.toLowerCase() || '';
+      if (prevStatus === 0 && next.status === 1) {
+        this.sound.playTurnReady();
+        this.onToast(this.pollEn ? '🎮 Multiplayer Match started!' : '🎮 Laga Multiplayer dimulai!');
+      } else if (!prevWasMyTurn && next.status === 1 && nextTurnAddr === myAddr) {
+        this.sound.playTurnReady();
+        this.onToast(this.pollEn ? '🎲 Your turn on Sepolia!' : '🎲 Giliranmu di Sepolia!');
+      } else if (!prevDuel && next.duel?.active && next.duel.opponent.toLowerCase() === myAddr) {
+        this.sound.playTurnReady();
+        this.onToast(this.pollEn ? '⚔️ You were challenged to a Blind Duel!' : '⚔️ Kamu ditantang Duel Buta!');
+      }
+      this.onRequestRender();
+    } catch {
+      // Ignore transient RPC polling blips
+    } finally {
+      this.pollInFlight = false;
+    }
   }
 
   public isFaucetsModalOpen(): boolean {
@@ -383,9 +480,13 @@ export class ConfidentialArenaPanel {
     const logs: FheProofLogEntry[] =
       this.mode === 'preview' ? this.sim.getLogs() : this.fheClient.getLogs();
 
+    const isWaitingLobby = Boolean(
+      this.mode === 'sepolia' && this.activeMatchId && snap && snap.status === 0,
+    );
     const isMatchActive = Boolean(snap && snap.status > 0);
     const addrs = resolveConfiguredAddresses(this.walletInfo?.chainId);
     const hasSepoliaDeployed = Boolean(addrs.chipAddress && addrs.arenaAddress);
+    this.ensureSepoliaPoller(en, draft);
 
     return `
       <div class="arena-shell">
@@ -442,9 +543,11 @@ export class ConfidentialArenaPanel {
         }
 
         ${
-          !isMatchActive
-            ? this.renderOnboardingLobby(en, draft, hasSepoliaDeployed)
-            : this.renderActiveArenaHud(en, snap!, logs)
+          isWaitingLobby
+            ? this.renderWaitingRoomLobby(en, snap!)
+            : !isMatchActive
+              ? this.renderOnboardingLobby(en, draft, hasSepoliaDeployed)
+              : this.renderActiveArenaHud(en, snap!, logs)
         }
 
         ${this.showBlindDuelModal && isMatchActive ? this.renderBlindDuelModal(en, snap!) : ''}
@@ -452,6 +555,74 @@ export class ConfidentialArenaPanel {
 
         <div class="arena-disclaimer-bar ui-interactive">
           <span>⚠️ ${esc(PROTOCOL_DISCLAIMER)}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderWaitingRoomLobby(en: boolean, snap: OnchainMatchSnapshot): string {
+    const myAddr = this.walletInfo?.address?.toLowerCase() || '';
+    const isHost = snap.host.toLowerCase() === myAddr;
+    const isFree =
+      !snap.stakeToken || snap.stakeToken === '0x0000000000000000000000000000000000000000';
+    const stakeLabel = isFree
+      ? en
+        ? 'Free Play'
+        : 'Gratis'
+      : snap.stakeToken.toLowerCase() === PROTOCOL_SEPOLIA_ADDRESSES.cUsdtWrapper.toLowerCase()
+        ? 'Sepolia cUSDT (ERC-7984)'
+        : 'DodChip cDOD (ERC-7984)';
+
+    return `
+      <div class="arena-lobby-wrap">
+        <div class="doodle-card sketchbook-panel arena-lobby-card ui-interactive stagger-item">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <div class="showcase-badge">⏳ ${en ? `Sepolia Lobby • Match #${snap.matchId}` : `Lobi Sepolia • Laga #${snap.matchId}`}</div>
+            <span class="arena-turn-badge is-mine">${snap.playerCount} / ${snap.maxPlayers} ${en ? 'Seated' : 'Pemain'}</span>
+          </div>
+          <h2 style="margin:6px 0 4px;font-family:var(--font-display)">
+            ${en ? `Waiting for Players (#${snap.matchId})` : `Menunggu Pemain (#${snap.matchId})`}
+          </h2>
+          <p style="margin:0 0 8px;font-size:0.84rem;opacity:0.86">
+            ${en ? 'Share this Match ID or Invite Link with friends on Sepolia. Auto-refresh runs every 4.5s.' : 'Bagikan Match ID atau Link Undangan ini ke teman di Sepolia. Lobi otomatis menyegarkan tiap 4.5 detik.'}
+          </p>
+
+          <div class="arena-secret-box" style="margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;font-size:0.84rem">
+              <span>🗺️ ${snap.boardSize === 30 ? 'Sprint 30' : 'Classic 100'}</span>
+              <span>🪙 ${esc(stakeLabel)}</span>
+            </div>
+            <div style="display:grid;gap:4px;margin-top:8px">
+              ${snap.players
+                .map(
+                  (p, idx) => `
+                <div class="arena-proof-item" style="display:flex;justify-content:space-between;align-items:center">
+                  <span><b>Seat #${idx + 1}</b>: <code>${shortAddr(p.address)}</code></span>
+                  <span class="faucet-token-badge">${p.address.toLowerCase() === snap.host.toLowerCase() ? 'Host' : 'Joined'}</span>
+                </div>`,
+                )
+                .join('')}
+            </div>
+          </div>
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="doodle-btn doodle-btn-blue" id="btn-copy-arena-invite" style="flex:1;min-height:38px">
+              🔗 ${en ? 'Copy Invite Link' : 'Salin Link Undangan'}
+            </button>
+            <button class="doodle-btn" id="btn-refresh-lobby" style="min-height:38px">
+              🔄 ${en ? 'Refresh' : 'Segarkan'}
+            </button>
+            ${
+              isHost && snap.playerCount >= 2
+                ? `<button class="doodle-btn doodle-btn-primary" id="btn-arena-start-early" style="flex:1;min-height:38px">
+                     🚀 ${en ? `Start Now (${snap.playerCount}P)` : `Mulai Sekarang (${snap.playerCount}P)`}
+                   </button>`
+                : ''
+            }
+            <button class="doodle-btn" id="btn-arena-new-match" style="min-height:38px">
+              ${en ? 'Leave' : 'Keluar'}
+            </button>
+          </div>
         </div>
       </div>
     `;
@@ -672,6 +843,20 @@ export class ConfidentialArenaPanel {
             <span>⚔️ ${me?.duelWins ?? 0}</span>
           </div>
 
+          ${
+            snap.players.length > 1
+              ? `<div class="arena-players-strip">
+                   ${snap.players
+                     .map((p, idx) => {
+                       const isMeSeat = p.address.toLowerCase() === myAddr.toLowerCase();
+                       const isTurnSeat = idx === snap.turnIndex;
+                       return `<span class="arena-seat-chip ${isTurnSeat ? 'is-turn' : ''} ${isMeSeat ? 'is-me' : ''}">${isMeSeat ? (en ? 'You' : 'Kamu') : `P${idx + 1}`}: #${p.position} ★${p.stars}</span>`;
+                     })
+                     .join('')}
+                 </div>`
+              : ''
+          }
+
           <div class="arena-secret-box">
             <div style="display:flex;justify-content:space-between;align-items:center">
               <b>🎯 ${en ? 'Secret Mission' : 'Misi Rahasia'}</b>
@@ -757,74 +942,119 @@ export class ConfidentialArenaPanel {
       </div>
 
       <div class="arena-bottom-deck ui-interactive">
-        ${
-          snap.status === 2
-            ? `<div class="doodle-card arena-win-banner">
+        ${(() => {
+          if (snap.status === 2) {
+            return `<div class="doodle-card arena-win-banner">
                  <b>🏆 ${isWinner ? (en ? 'Victory! You reached the goal!' : 'Menang! Kamu mencapai finis!') : `${shortAddr(snap.winner)} Won!`}</b>
                  ${
                    !snap.payoutClaimed
                      ? `<button class="doodle-btn doodle-btn-primary" id="btn-arena-claim-pot">💰 ${en ? 'Claim Encrypted ERC-7984 Pot' : 'Klaim Pot ERC-7984 Terenkripsi'}</button>`
                      : `<span>✓ ${en ? 'Encrypted Pot Paid Out' : 'Pot Terenkripsi Dibayarkan'}</span>`
                  }
-               </div>`
-            : `<div class="doodle-card arena-action-bar">
+               </div>`;
+          }
+
+          if (snap.pendingAction > 0) {
+            const pendingLabels: Record<number, string> = {
+              1: en ? 'Verifiable FHE Dice Roll' : 'Dadu FHE Terverifikasi',
+              2: en ? 'Homomorphic Secret Trap Check' : 'Pengecekan Jebakan Rahasia',
+              3: en ? 'Blind Duel Outcome Proof' : 'Bukti Hasil Duel Buta',
+              4: en ? 'Secret Mission Verification' : 'Verifikasi Misi Rahasia',
+            };
+            return `<div class="doodle-card arena-win-banner">
+                 <b>⚡ ${en ? 'Pending Onchain KMS Proof:' : 'Menunggu Verifikasi Bukti KMS:'} ${esc(pendingLabels[snap.pendingAction] || `#${snap.pendingAction}`)}</b>
+                 <button class="doodle-btn doodle-btn-primary" id="btn-arena-resume-pending">
+                   🔄 ${en ? 'Complete Pending KMS Proof' : 'Selesaikan Bukti KMS'}
+                 </button>
+               </div>`;
+          }
+
+          if (snap.duel?.active) {
+            const myLow = myAddr.toLowerCase();
+            const isChal = snap.duel.challenger.toLowerCase() === myLow;
+            const isOpp = snap.duel.opponent.toLowerCase() === myLow;
+            const needsMyMove =
+              (isChal && !snap.duel.challengerCommitted) ||
+              (isOpp && !snap.duel.opponentCommitted);
+            const rivalAddr = isChal ? snap.duel.opponent : snap.duel.challenger;
+            return `<div class="doodle-card arena-win-banner">
+                 <b>⚔️ ${
+                   needsMyMove
+                     ? en
+                       ? `Blind Duel vs ${shortAddr(rivalAddr)} — Choose Your Move!`
+                       : `Duel Buta vs ${shortAddr(rivalAddr)} — Pilih Langkahmu!`
+                     : en
+                       ? `Waiting for ${shortAddr(rivalAddr)}'s encrypted move...`
+                       : `Menunggu langkah terenkripsi ${shortAddr(rivalAddr)}...`
+                 }</b>
+                 ${
+                   needsMyMove
+                     ? `<button class="doodle-btn doodle-btn-mint" id="btn-arena-open-duel">⚔️ ${en ? 'Commit Secret RPS Move' : 'Kirim Langkah RPS Rahasia'}</button>`
+                     : `<button class="doodle-btn" id="btn-refresh-lobby">🔄 ${en ? 'Refresh' : 'Segarkan'}</button>`
+                 }
+               </div>`;
+          }
+
+          return `<div class="doodle-card arena-action-bar">
                  <button class="doodle-btn doodle-btn-primary" id="btn-arena-roll" ${!isMyTurn ? 'disabled' : ''} style="min-height:46px;font-size:1.05rem;padding:8px 18px">
                    🎲 ${en ? 'Roll FHE Dice' : 'Lempar Dadu FHE'}
                  </button>
 
                  <div class="arena-trap-inline">
-                   <input class="doodle-input" id="inp-trap-tile" type="number" min="2" max="${snap.boardSize - 1}" value="${this.trapTileInput}" style="width:62px;min-height:38px;padding:4px 6px" title="${en ? 'Target tile' : 'Target kotak'}" />
-                   <select class="doodle-input" id="sel-trap-kind" style="min-height:38px;padding:4px 6px;font-size:0.8rem">
+                   <input class="doodle-input" id="inp-trap-tile" type="number" min="2" max="${snap.boardSize - 1}" value="${this.trapTileInput}" style="width:58px;min-height:38px;padding:4px 6px" title="${en ? 'Target tile' : 'Target kotak'}" />
+                   <select class="doodle-input" id="sel-trap-kind" style="width:auto;min-height:38px;padding:4px 6px;font-size:0.8rem">
                      ${TRAP_KIND_META.map(
                        (tm) =>
                          `<option value="${tm.kind}" ${this.trapKindInput === tm.kind ? 'selected' : ''}>${esc(en ? tm.shortEn : tm.shortId)}</option>`,
                      ).join('')}
                    </select>
-                   <button class="doodle-btn doodle-btn-pink" id="btn-arena-plant-trap" ${!isMyTurn ? 'disabled' : ''} style="min-height:38px;font-size:0.82rem">
+                   <button class="doodle-btn doodle-btn-pink" id="btn-arena-plant-trap" ${!isMyTurn ? 'disabled' : ''} style="min-height:38px;font-size:0.82rem;white-space:nowrap">
                      💣 ${en ? 'Plant Trap' : 'Tanam Jebakan'}
                    </button>
                  </div>
 
-                 <button class="doodle-btn doodle-btn-blue" id="btn-arena-buy-mystery" ${!isMyTurn || (me?.stars ?? 0) < 2 ? 'disabled' : ''} style="min-height:38px;font-size:0.82rem">
+                 <button class="doodle-btn doodle-btn-blue" id="btn-arena-buy-mystery" ${!isMyTurn || (me?.stars ?? 0) < 2 ? 'disabled' : ''} style="min-height:38px;font-size:0.82rem;white-space:nowrap">
                    🎁 ${en ? 'Mystery (2★)' : 'Misteri (2★)'}
                  </button>
 
-                 ${
-                   this.mode === 'sepolia' && snap.players.length > 1
-                     ? `<select class="doodle-input" id="sel-brake-seat" style="min-height:38px;padding:4px 6px;font-size:0.78rem" title="${en ? 'Hidden target seat for FHE Brake' : 'Kursi target terenkripsi'}">
-                          ${snap.players
-                            .map((p, idx) =>
-                              p.address.toLowerCase() === myAddr.toLowerCase()
-                                ? ''
-                                : `<option value="${idx}" ${this.brakeSeatInput === idx ? 'selected' : ''}>Seat #${idx + 1}</option>`,
-                            )
-                            .join('')}
-                        </select>`
-                     : ''
-                 }
-                 <button class="doodle-btn" id="btn-arena-cast-brake" ${
-                   !isMyTurn ||
-                   (me?.stars ?? 0) < 2 ||
-                   (this.mode === 'sepolia' && snap.players.length <= 1)
-                     ? 'disabled'
-                     : ''
-                 } style="min-height:38px;font-size:0.82rem" title="${
-                   this.mode === 'sepolia' && snap.players.length <= 1
-                     ? en
-                       ? 'Multiplayer (2P/4P) only — encrypts target seat & caps next dice to 1..3'
-                       : 'Khusus Multiplayer (2P/4P) — mengutuk dadu lawan jadi 1..3'
-                     : en
-                       ? 'Cast FHE Secret Brake (caps next dice roll to 1..3)'
-                       : 'Kutuk Rem FHE Rahasia (dadu berikutnya max 3)'
-                 }">
-                   🧊 ${en ? 'Secret Brake (2★)' : 'Rem Rahasia (2★)'}
-                 </button>
+                 <div class="arena-trap-inline">
+                   ${
+                     snap.players.length > 1
+                       ? `<select class="doodle-input" id="sel-brake-seat" style="width:auto;min-width:84px;min-height:38px;padding:4px 8px;font-size:0.78rem" title="${en ? 'Hidden target seat for FHE Brake' : 'Kursi target terenkripsi'}">
+                            ${snap.players
+                              .map((p, idx) =>
+                                p.address.toLowerCase() === myAddr.toLowerCase()
+                                  ? ''
+                                  : `<option value="${idx}" ${this.brakeSeatInput === idx ? 'selected' : ''}>Seat #${idx + 1}</option>`,
+                              )
+                              .join('')}
+                          </select>`
+                       : ''
+                   }
+                   <button class="doodle-btn" id="btn-arena-cast-brake" ${
+                     !isMyTurn ||
+                     (me?.stars ?? 0) < 2 ||
+                     (this.mode === 'sepolia' && snap.players.length <= 1)
+                       ? 'disabled'
+                       : ''
+                   } style="min-height:38px;font-size:0.82rem;white-space:nowrap" title="${
+                     this.mode === 'sepolia' && snap.players.length <= 1
+                       ? en
+                         ? 'Multiplayer (2P/4P) only — encrypts target seat & caps next dice to 1..3'
+                         : 'Khusus Multiplayer (2P/4P) — mengutuk dadu lawan jadi 1..3'
+                       : en
+                         ? 'Cast FHE Secret Brake (caps next dice roll to 1..3)'
+                         : 'Kutuk Rem FHE Rahasia (dadu berikutnya max 3)'
+                   }">
+                     🧊 ${en ? 'Secret Brake (2★)' : 'Rem Rahasia (2★)'}
+                   </button>
+                 </div>
 
-                 <button class="doodle-btn doodle-btn-mint" id="btn-arena-open-duel" ${!isMyTurn ? 'disabled' : ''} style="min-height:38px;font-size:0.82rem">
+                 <button class="doodle-btn doodle-btn-mint" id="btn-arena-open-duel" ${!isMyTurn ? 'disabled' : ''} style="min-height:38px;font-size:0.82rem;white-space:nowrap">
                    ⚔️ ${en ? 'Blind Duel' : 'Duel Buta'}
                  </button>
-               </div>`
-        }
+               </div>`;
+        })()}
       </div>
     `;
   }
@@ -832,6 +1062,11 @@ export class ConfidentialArenaPanel {
   private renderBlindDuelModal(en: boolean, snap: OnchainMatchSnapshot): string {
     const myAddr = (this.mode === 'sepolia' ? this.walletInfo?.address : this.sim.getAddress()) || '';
     const rivals = snap.players.filter((p) => p.address.toLowerCase() !== myAddr.toLowerCase());
+    const lockedOpponent = snap.duel?.active
+      ? snap.duel.challenger.toLowerCase() === myAddr.toLowerCase()
+        ? snap.duel.opponent
+        : snap.duel.challenger
+      : null;
     return `
       <div class="challenge-backdrop ui-interactive">
         <div class="doodle-card menu-box setup-card-compact stagger-item">
@@ -844,13 +1079,17 @@ export class ConfidentialArenaPanel {
             }
           </p>
           ${
-            this.mode === 'sepolia' && rivals.length > 0
-              ? `<label><b>${en ? 'Target Opponent' : 'Target Lawan'}:</b></label>
-                 <select class="doodle-input" id="sel-duel-opp" style="margin-bottom:8px">
-                   <option value="0x0000000000000000000000000000000000000000">${en ? 'FHE Encrypted House Bot' : 'Bot Rumah Terenkripsi FHE'}</option>
-                   ${rivals.map((r) => `<option value="${r.address}">${shortAddr(r.address)}</option>`).join('')}
-                 </select>`
-              : ''
+            lockedOpponent
+              ? `<div class="arena-secret-box" style="margin-bottom:8px;font-size:0.84rem">
+                   🎯 ${en ? 'Active Duel vs' : 'Duel Aktif vs'}: <b>${lockedOpponent === '0x0000000000000000000000000000000000000000' ? (en ? 'FHE House Bot' : 'Bot Rumah FHE') : shortAddr(lockedOpponent)}</b>
+                 </div>`
+              : this.mode === 'sepolia' && rivals.length > 0
+                ? `<label><b>${en ? 'Target Opponent' : 'Target Lawan'}:</b></label>
+                   <select class="doodle-input" id="sel-duel-opp" style="margin-bottom:8px">
+                     <option value="0x0000000000000000000000000000000000000000">${en ? 'FHE Encrypted House Bot' : 'Bot Rumah Terenkripsi FHE'}</option>
+                     ${rivals.map((r) => `<option value="${r.address}">${shortAddr(r.address)}</option>`).join('')}
+                   </select>`
+                : ''
           }
           <div style="display:flex;gap:8px;margin-bottom:10px">
             <button class="doodle-btn doodle-btn-primary" data-duel-rps="0" style="flex:1;min-height:60px;flex-direction:column">
@@ -1021,11 +1260,13 @@ export class ConfidentialArenaPanel {
 
     q('#btn-arena-back')?.addEventListener('click', () => {
       this.sound.playUiClick();
+      this.stopPolling();
       this.onBackToMenu();
     });
 
     q('#btn-mode-preview')?.addEventListener('click', () => {
       this.sound.playUiClick();
+      this.stopPolling();
       this.mode = 'preview';
       this.snapshot = this.sim.getSnapshot();
       this.syncSceneWithArena(draft);
@@ -1034,8 +1275,10 @@ export class ConfidentialArenaPanel {
 
     q('#btn-mode-sepolia')?.addEventListener('click', () => {
       this.sound.playUiClick();
+      this.stopPolling();
       this.mode = 'sepolia';
       this.snapshot = null;
+      this.activeMatchId = null;
       this.syncSceneWithArena(draft);
       this.onRequestRender();
     });
@@ -1175,8 +1418,19 @@ export class ConfidentialArenaPanel {
     });
     q('#btn-arena-claim-mission')?.addEventListener('click', () => void this.handleVerifyMission(en, draft));
     q('#btn-arena-claim-pot')?.addEventListener('click', () => void this.handleClaimPot(en));
+    q('#btn-copy-arena-invite')?.addEventListener('click', () => {
+      if (!this.activeMatchId) return;
+      const url = `${window.location.origin}/?arenaMatch=${this.activeMatchId}`;
+      void navigator.clipboard?.writeText(url);
+      this.sound.playUiClick();
+      this.onToast(en ? `🔗 Invite copied: Match #${this.activeMatchId}` : `🔗 Link undangan disalin: Laga #${this.activeMatchId}`);
+    });
+    q('#btn-refresh-lobby')?.addEventListener('click', () => void this.handleRefreshMatch(en, draft));
+    q('#btn-arena-start-early')?.addEventListener('click', () => void this.handleStartEarly(en, draft));
+    q('#btn-arena-resume-pending')?.addEventListener('click', () => void this.handleResumePending(en, draft));
     q('#btn-arena-new-match')?.addEventListener('click', () => {
       this.sound.playUiClick();
+      this.stopPolling();
       this.snapshot = null;
       this.activeMatchId = null;
       this.syncSceneWithArena(draft);
@@ -1295,10 +1549,14 @@ export class ConfidentialArenaPanel {
     this.sound.playUiClick();
     const tokenCfg = this.getSelectedTokenConfig();
     if (this.mode === 'preview') {
-      this.activeMatchId = this.sim.createMatch(this.boardMode, this.stakeTokens);
+      this.activeMatchId = this.sim.createMatch(this.boardMode, this.stakeTokens, this.maxPlayers);
       this.snapshot = this.sim.getSnapshot();
       this.syncSceneWithArena(draft);
-      this.onToast(en ? '🎮 Confidential Match started!' : '🎮 Laga Rahasia dimulai!');
+      this.onToast(
+        en
+          ? `🎮 Confidential ${this.maxPlayers === 1 ? 'Solo' : `${this.maxPlayers}P`} Match started!`
+          : `🎮 Laga Rahasia ${this.maxPlayers === 1 ? 'Solo' : `${this.maxPlayers}P`} dimulai!`,
+      );
       this.onRequestRender();
       return;
     }
@@ -1317,7 +1575,13 @@ export class ConfidentialArenaPanel {
       this.activeMatchId = matchId;
       this.snapshot = await this.fheClient.fetchMatchSnapshot(matchId, false);
       this.syncSceneWithArena(draft);
-      this.onToast(`✅ Match #${matchId} created onchain!`);
+      this.onToast(
+        this.snapshot.status === 0
+          ? en
+            ? `⏳ Lobby #${matchId} created! Share invite link.`
+            : `⏳ Lobi #${matchId} dibuat! Bagikan link undangan.`
+          : `✅ Match #${matchId} created onchain!`,
+      );
     });
   }
 
@@ -1328,14 +1592,107 @@ export class ConfidentialArenaPanel {
       this.onToast(en ? 'Enter a valid numeric Match ID.' : 'Masukkan Match ID angka yang valid.');
       return;
     }
-    await this.withBusy(en ? `Joining Match #${idNum}...` : `Bergabung ke Laga #${idNum}...`, async () => {
+    const targetId = BigInt(idNum);
+    await this.withBusy(en ? `Checking Match #${idNum}...` : `Memeriksa Laga #${idNum}...`, async () => {
       if (!this.fheClient.isConnected()) {
         this.walletInfo = await this.fheClient.connectWallet();
       }
-      await this.fheClient.joinMatch(BigInt(idNum), this.stakeTokens > 0, this.stakeTokens);
-      this.activeMatchId = BigInt(idNum);
-      this.snapshot = await this.fheClient.fetchMatchSnapshot(this.activeMatchId, false);
+      const myAddr = this.walletInfo?.address?.toLowerCase() || '';
+      const existingSnap = await this.fheClient.fetchMatchSnapshot(targetId, false);
+      const alreadySeated = existingSnap.players.some((p) => p.address.toLowerCase() === myAddr);
+
+      if (!alreadySeated && existingSnap.status === 0) {
+        const isZeroToken =
+          !existingSnap.stakeToken ||
+          existingSnap.stakeToken === '0x0000000000000000000000000000000000000000';
+        const wagerAmt = isZeroToken ? 0 : this.stakeTokens;
+        if (!isZeroToken && wagerAmt > 0) {
+          const tokSt = await this.fheClient.readChipStatus(existingSnap.stakeToken);
+          if (!tokSt.isArenaOperator) {
+            this.busyLabel = en ? 'Approving ERC-7984 Operator...' : 'Menyetujui Operator ERC-7984...';
+            this.onRequestRender();
+            await this.fheClient.approveArenaOperator(existingSnap.stakeToken, 'ERC-7984');
+          }
+        }
+        this.busyLabel = en ? `Joining Match #${idNum}...` : `Bergabung ke Laga #${idNum}...`;
+        this.onRequestRender();
+        await this.fheClient.joinMatch(targetId, !isZeroToken && wagerAmt > 0, wagerAmt);
+      }
+
+      this.activeMatchId = targetId;
+      this.snapshot = await this.fheClient.fetchMatchSnapshot(targetId, false);
       this.syncSceneWithArena(draft);
+      this.onToast(
+        alreadySeated
+          ? en
+            ? `🔓 Reconnected to Match #${idNum}`
+            : `🔓 Terhubung kembali ke Laga #${idNum}`
+          : en
+            ? `✅ Joined Match #${idNum}!`
+            : `✅ Bergabung ke Laga #${idNum}!`,
+      );
+    });
+  }
+
+  private async handleRefreshMatch(en: boolean, draft: ArenaPlayerDraft): Promise<void> {
+    this.sound.playUiClick();
+    if (!this.activeMatchId || this.mode !== 'sepolia') return;
+    await this.withBusy(en ? 'Syncing match state...' : 'Menyinkronkan status laga...', async () => {
+      this.snapshot = await this.fheClient.fetchMatchSnapshot(this.activeMatchId!, false);
+      this.syncSceneWithArena(draft);
+    });
+  }
+
+  private async handleStartEarly(en: boolean, draft: ArenaPlayerDraft): Promise<void> {
+    this.sound.playUiClick();
+    if (!this.activeMatchId || this.mode !== 'sepolia') return;
+    await this.withBusy(en ? 'Starting multiplayer match...' : 'Memulai laga multiplayer...', async () => {
+      await this.fheClient.startMatchEarly(this.activeMatchId!);
+      this.snapshot = await this.fheClient.fetchMatchSnapshot(this.activeMatchId!, false);
+      this.syncSceneWithArena(draft);
+      this.sound.playTurnReady();
+      this.onToast(en ? '🚀 Match started on Sepolia!' : '🚀 Laga dimulai di Sepolia!');
+    });
+  }
+
+  private async handleResumePending(en: boolean, draft: ArenaPlayerDraft): Promise<void> {
+    this.sound.playUiClick();
+    if (!this.activeMatchId || this.mode !== 'sepolia') return;
+    await this.withBusy(en ? 'Resuming pending KMS proof...' : 'Melanjutkan bukti KMS tertunda...', async () => {
+      const moverAddr =
+        this.snapshot?.players[this.snapshot.turnIndex]?.address ||
+        this.walletInfo?.address ||
+        '';
+      const res = await this.fheClient.resumePendingAction(this.activeMatchId!);
+      const nextSnap = await this.fheClient.fetchMatchSnapshot(this.activeMatchId!, false);
+      this.snapshot = nextSnap;
+      if (res.roll && res.roll.dieValue > 0) {
+        this.isAnimatingRoll = true;
+        this.onRequestRender();
+        await this.animateRollOutcome(nextSnap, draft, moverAddr || nextSnap.players[0]?.address || '', res.roll);
+        this.onToast(this.formatRollOutcomeToast(en, res.roll));
+      } else {
+        this.syncSceneWithArena(draft);
+        if (res.actionKind === 3) {
+          this.onToast(
+            res.duelOutcome === 1
+              ? '✅ Blind Duel Won!'
+              : res.duelOutcome === 2
+                ? '❌ Blind Duel Lost!'
+                : '🤝 Blind Duel Tie!',
+          );
+        } else if (res.actionKind === 4) {
+          this.onToast(
+            res.missionPassed
+              ? '🏆 Secret Mission verified (+3 ★ +1 Shield)!'
+              : en
+                ? 'Mission criteria not met yet.'
+                : 'Syarat misi belum terpenuhi.',
+          );
+        } else {
+          this.onToast(en ? '✅ Pending KMS proof finalized!' : '✅ Bukti KMS selesai diverifikasi!');
+        }
+      }
     });
   }
 
@@ -1397,6 +1754,27 @@ export class ConfidentialArenaPanel {
         await this.animateRollOutcome(this.snapshot, draft, this.sim.getAddress(), res);
         this.sound.playDiceLand();
         this.onToast(this.formatRollOutcomeToast(en, res));
+
+        // Simulate multiplayer FHE Rival bots taking turns sequentially
+        while (this.sim.getSnapshot().status === 1 && this.sim.getSnapshot().turnIndex !== 0) {
+          this.busyLabel = en ? 'FHE Rival Bot Rolling...' : 'Bot Lawan FHE Mengocok Dadu...';
+          this.onRequestRender();
+          await new Promise((r) => setTimeout(r, 320));
+          const botRes = this.sim.stepBotTurn();
+          if (!botRes) break;
+          this.isAnimatingRoll = true;
+          this.snapshot = this.sim.getSnapshot();
+          await this.animateRollOutcome(this.snapshot, draft, botRes.actorAddr, botRes);
+          if (botRes.trapTriggered >= 1 && botRes.trapTriggered <= 3) {
+            this.onToast(
+              en
+                ? `💥 P${botRes.botNumber} stepped on YOUR Secret Trap (#${botRes.trapTriggered})!`
+                : `💥 P${botRes.botNumber} menginjak Jebakan Rahasiamu (#${botRes.trapTriggered})!`,
+            );
+          } else if (botRes.trapTriggered === GOLDEN_WARP_KIND) {
+            this.onToast(en ? `⚡ P${botRes.botNumber} hit Golden Warp!` : `⚡ P${botRes.botNumber} kena Golden Warp!`);
+          }
+        }
       });
       return;
     }
@@ -1479,14 +1857,18 @@ export class ConfidentialArenaPanel {
     this.sound.playUiClick();
     if (this.mode === 'preview') {
       try {
-        this.sim.castSecretBrake(0);
+        this.sim.castSecretBrake(this.brakeSeatInput);
         this.snapshot = this.sim.getSnapshot();
         this.syncSceneWithArena(draft);
         this.sound.playItemUse();
         this.onToast(
           en
-            ? '🧊 Secret Brake cast! Next roll secretly capped to 1..3.'
-            : '🧊 Rem Rahasia aktif! Lemparan dadu berikutnya maksimal 3.',
+            ? this.snapshot.players.length > 1
+              ? '🧊 Secret Brake cast on rival seat (next roll ≤ 3)!'
+              : '🧊 Secret Brake cast! Next roll secretly capped to 1..3.'
+            : this.snapshot.players.length > 1
+              ? '🧊 Rem Rahasia dilempar ke lawan (dadu berikutnya ≤ 3)!'
+              : '🧊 Rem Rahasia aktif! Lemparan dadu berikutnya maksimal 3.',
         );
       } catch (e) {
         this.onToast(e instanceof Error ? e.message : String(e));
@@ -1547,9 +1929,16 @@ export class ConfidentialArenaPanel {
     }
     if (!this.activeMatchId) return;
     await this.withBusy(en ? 'Encrypting Blind Duel move...' : 'Mengenkripsi langkah Duel Buta...', async () => {
+      const myLow = this.walletInfo?.address?.toLowerCase() || '';
+      const duel = this.snapshot?.duel;
+      const oppAddr = duel?.active
+        ? duel.challenger.toLowerCase() === myLow
+          ? duel.opponent
+          : duel.challenger
+        : (this.duelOpponentInput as `0x${string}`);
       const res = await this.fheClient.playBlindDuel(
         this.activeMatchId!,
-        this.duelOpponentInput as `0x${string}`,
+        oppAddr,
         choice,
       );
       this.snapshot = await this.fheClient.fetchMatchSnapshot(this.activeMatchId!, false);

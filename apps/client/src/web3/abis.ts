@@ -1934,6 +1934,50 @@ export const DOD_SNAKE_ARENA_ABI = [
   {
     "inputs": [
       {
+        "internalType": "uint256",
+        "name": "matchId",
+        "type": "uint256"
+      }
+    ],
+    "name": "getBlindDuelState",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "active",
+        "type": "bool"
+      },
+      {
+        "internalType": "address",
+        "name": "challenger",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "opponent",
+        "type": "address"
+      },
+      {
+        "internalType": "bool",
+        "name": "challengerCommitted",
+        "type": "bool"
+      },
+      {
+        "internalType": "bool",
+        "name": "opponentCommitted",
+        "type": "bool"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "pendingResultHandle",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint8",
         "name": "boardSize",
         "type": "uint8"

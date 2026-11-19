@@ -45,6 +45,24 @@ function fakeHandle(tag: string): `0x${string}` {
   return `0x${tag.slice(0, 4).padEnd(4, '0')}${hex.slice(4)}`;
 }
 
+interface SimBotState {
+  address: `0x${string}`;
+  position: number;
+  stars: number;
+  laddersClimbed: number;
+  snakesDodged: number;
+  duelWins: number;
+  trapsPlanted: number;
+  shields: number;
+  brakeActive: boolean;
+}
+
+const BOT_ADDRESSES: readonly `0x${string}`[] = [
+  '0xB071000000000000000000000000000000000001',
+  '0xB072000000000000000000000000000000000002',
+  '0xB073000000000000000000000000000000000003',
+];
+
 export class ArenaPreviewSimulator {
   private chipBalanceMicro = 100_000_000n;
   private balanceDecrypted = false;
@@ -53,6 +71,8 @@ export class ArenaPreviewSimulator {
   private logs: FheProofLogEntry[] = [];
 
   private boardSize = 30;
+  private maxPlayers = 1;
+  private turnIndex = 0;
   private status = 0;
   private turnNumber = 1;
   private position = 1;
@@ -64,14 +84,16 @@ export class ArenaPreviewSimulator {
   private missionClaimed = false;
   private payoutClaimed = false;
   private stakeMicro = 0n;
+  private winnerAddr: `0x${string}` = '0x0000000000000000000000000000000000000000';
 
   private secretMissionId = 0;
   private secretShields = 1;
   private secretTrapCharges = 2;
   private missionUnlocked = false;
-  private playerTraps: Array<{ tile: number; kind: number }> = [];
+  private playerTraps: Array<{ tile: number; kind: number; active: boolean }> = [];
   private houseTraps: Array<{ tile: number; kind: number; active: boolean }> = [];
   private brakeActive = false;
+  private bots: SimBotState[] = [];
 
   private readonly playerAddress = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed' as const;
 
@@ -130,9 +152,11 @@ export class ArenaPreviewSimulator {
     });
   }
 
-  public createMatch(boardMode: 0 | 1, stakeWholeTokens: number): bigint {
+  public createMatch(boardMode: 0 | 1, stakeWholeTokens: number, maxPlayers = 1): bigint {
     this.matchCounter += 1n;
     this.boardSize = boardMode === 1 ? 30 : 100;
+    this.maxPlayers = Math.max(1, Math.min(4, maxPlayers));
+    this.turnIndex = 0;
     this.status = 1;
     this.turnNumber = 1;
     this.position = 1;
@@ -143,6 +167,7 @@ export class ArenaPreviewSimulator {
     this.trapsPlanted = 0;
     this.missionClaimed = false;
     this.payoutClaimed = false;
+    this.winnerAddr = '0x0000000000000000000000000000000000000000';
     this.missionUnlocked = false;
     this.secretMissionId = Math.floor(Math.random() * 4);
     this.secretShields = 1;
@@ -153,7 +178,19 @@ export class ArenaPreviewSimulator {
     this.stakeMicro = wantMicro <= this.chipBalanceMicro ? wantMicro : 0n;
     this.chipBalanceMicro -= this.stakeMicro;
 
-    // 2 hidden encrypted FHE House Traps + 1 hidden Golden Warp shortcut (+3 steps +1★)
+    this.bots = Array.from({ length: Math.max(0, this.maxPlayers - 1) }, (_, idx) => ({
+      address: BOT_ADDRESSES[idx % BOT_ADDRESSES.length],
+      position: 1,
+      stars: 2,
+      laddersClimbed: 0,
+      snakesDodged: 0,
+      duelWins: 0,
+      trapsPlanted: 0,
+      shields: 1,
+      brakeActive: false,
+    }));
+
+    // 2 hidden encrypted FHE House Traps (solo) + 1 hidden Golden Warp shortcut (+3 steps +1★)
     const span = this.boardSize - 4;
     const h1 = 2 + Math.floor(Math.random() * span);
     let h2 = 2 + Math.floor(Math.random() * span);
@@ -161,16 +198,19 @@ export class ArenaPreviewSimulator {
     let w1 = 2 + Math.floor(Math.random() * span);
     if (w1 === h1 || w1 === h2) w1 = Math.min(this.boardSize - 2, h2 + 2);
     this.brakeActive = false;
-    this.houseTraps = [
-      { tile: h1, kind: 1 + Math.floor(Math.random() * 3), active: true },
-      { tile: h2, kind: 1 + Math.floor(Math.random() * 3), active: true },
-      { tile: w1, kind: 4, active: true },
-    ];
+    this.houseTraps =
+      this.bots.length === 0
+        ? [
+            { tile: h1, kind: 1 + Math.floor(Math.random() * 3), active: true },
+            { tile: h2, kind: 1 + Math.floor(Math.random() * 3), active: true },
+            { tile: w1, kind: 4, active: true },
+          ]
+        : [{ tile: w1, kind: 4, active: true }];
 
     this.pushLog({
       kind: 'encrypt',
-      title: `[Preview] Match #${this.matchCounter} Created`,
-      detail: `${this.boardSize} tiles • Secret Mission & 2 FHE House Traps initialized`,
+      title: `[Preview] Match #${this.matchCounter} Created (${this.maxPlayers}P)`,
+      detail: `${this.boardSize} tiles • Secret Mission & Hidden Golden Warp initialized`,
       handle: fakeHandle('m001'),
     });
     return this.matchCounter;
@@ -187,14 +227,14 @@ export class ArenaPreviewSimulator {
   }
 
   public plantTrap(tileId: number, kind: number): void {
-    if (this.secretTrapCharges <= 0 || this.trapsPlanted >= 2) {
-      throw new Error('No trap charges left (max 2 per match).');
+    if (this.secretTrapCharges <= 0 || this.trapsPlanted >= 3) {
+      throw new Error('No trap charges left (buy Mystery Item for more, max 3 traps).');
     }
     const clampedTile = Math.max(2, Math.min(this.boardSize - 1, tileId));
     const clampedKind = Math.max(1, Math.min(3, kind));
     this.secretTrapCharges -= 1;
     this.trapsPlanted += 1;
-    this.playerTraps.push({ tile: clampedTile, kind: clampedKind });
+    this.playerTraps.push({ tile: clampedTile, kind: clampedKind, active: true });
     this.pushLog({
       kind: 'encrypt',
       title: `[Preview] Secret Trap Planted on Tile ${clampedTile}`,
@@ -225,16 +265,32 @@ export class ArenaPreviewSimulator {
   public castSecretBrake(seatIndex = 0): void {
     if (this.stars < 2) throw new Error('Need at least 2 ★.');
     this.stars -= 2;
+    if (this.bots.length > 0) {
+      const botIdx = Math.max(0, Math.min(this.bots.length - 1, seatIndex - 1));
+      const targetBot =
+        seatIndex > 0
+          ? this.bots[botIdx]
+          : this.bots.slice().sort((a, b) => b.position - a.position)[0];
+      targetBot.brakeActive = true;
+      this.pushLog({
+        kind: 'encrypt',
+        title: '[Preview] Secret Rival Brake Cast (euint8 seat)',
+        detail: `Encrypted target ${targetBot.address.slice(0, 6)}... cursed to roll <= 3 next turn.`,
+        handle: fakeHandle('brk1'),
+      });
+      return;
+    }
     this.brakeActive = true;
     this.pushLog({
       kind: 'encrypt',
-      title: '[Preview] Secret Rival Brake Cast (euint8 seat)',
-      detail: `Encrypted target seat #${seatIndex}; next roll capped at 1..3.`,
+      title: '[Preview] Secret Brake Demo Active (ebool)',
+      detail: 'Next dice roll is secretly capped at 1..3.',
       handle: fakeHandle('brk1'),
     });
   }
 
-  public rollDice(): {
+  private resolveTurnForActor(isHuman: boolean, botIdx = -1): {
+    actorAddr: `0x${string}`;
     dieValue: number;
     fromPos: number;
     landedPos: number;
@@ -245,29 +301,41 @@ export class ArenaPreviewSimulator {
     snakeTo: number;
     usedBrake: boolean;
   } {
-    if (this.status !== 1) throw new Error('Start a match first.');
-    const fromPos = this.position;
-    const usedBrake = this.brakeActive;
+    const bot = botIdx >= 0 ? this.bots[botIdx] : null;
+    const fromPos = isHuman ? this.position : bot!.position;
+    const usedBrake = isHuman ? this.brakeActive : bot!.brakeActive;
     const rawDie = 1 + Math.floor(Math.random() * 6);
     const dieValue = usedBrake ? Math.min(3, rawDie) : rawDie;
-    this.brakeActive = false;
+    if (isHuman) this.brakeActive = false;
+    else bot!.brakeActive = false;
+
     const raw = fromPos + dieValue;
     const landedPos = raw <= this.boardSize ? raw : this.boardSize - (raw - this.boardSize);
     let finalPos = landedPos;
 
     let trapTriggered = 0;
-    for (const ht of this.houseTraps) {
-      if (ht.active && ht.tile === landedPos) {
-        ht.active = false;
-        trapTriggered = ht.kind;
-        if (ht.kind === 1) finalPos = Math.max(1, finalPos - 2);
-        else if (ht.kind === 2) this.stars = Math.max(0, this.stars - 1);
-        else if (ht.kind === 3) finalPos = Math.max(1, finalPos - 4);
-        else if (ht.kind === 4) {
-          finalPos = Math.min(this.boardSize - 1, finalPos + 3);
-          this.stars += 1;
+    const isExactFinish = landedPos >= this.boardSize;
+    if (!isExactFinish) {
+      const trapPool = isHuman
+        ? this.houseTraps
+        : [...this.playerTraps, ...this.houseTraps];
+      for (const t of trapPool) {
+        if (t.active && t.tile === landedPos) {
+          t.active = false;
+          trapTriggered = t.kind;
+          if (t.kind === 1) finalPos = Math.max(1, finalPos - 2);
+          else if (t.kind === 2) {
+            if (isHuman) this.stars = Math.max(0, this.stars - 1);
+            else bot!.stars = Math.max(0, bot!.stars - 1);
+          } else if (t.kind === 3) {
+            finalPos = Math.max(1, finalPos - 4);
+          } else if (t.kind === 4) {
+            finalPos = Math.min(this.boardSize - 1, finalPos + 3);
+            if (isHuman) this.stars += 1;
+            else bot!.stars += 1;
+          }
+          break;
         }
-        break;
       }
     }
 
@@ -279,40 +347,49 @@ export class ArenaPreviewSimulator {
 
     if (ladderTo > 0) {
       finalPos = ladderTo;
-      this.laddersClimbed += 1;
-      this.stars += 2;
+      if (isHuman) {
+        this.laddersClimbed += 1;
+        this.stars += 2;
+      } else {
+        bot!.laddersClimbed += 1;
+        bot!.stars += 2;
+      }
     } else if (snakeTo > 0) {
-      if (this.secretShields > 0) {
-        this.secretShields -= 1;
-        this.snakesDodged += 1;
-        this.stars += 1;
+      const shieldsAvail = isHuman ? this.secretShields : bot!.shields;
+      if (shieldsAvail > 0) {
+        if (isHuman) {
+          this.secretShields -= 1;
+          this.snakesDodged += 1;
+          this.stars += 1;
+        } else {
+          bot!.shields -= 1;
+          bot!.snakesDodged += 1;
+          bot!.stars += 1;
+        }
         shieldBlocked = true;
       } else {
         finalPos = snakeTo;
       }
     } else if (trapTriggered === 0) {
-      this.stars += 1;
+      if (isHuman) this.stars += 1;
+      else bot!.stars += 1;
     }
 
-    this.position = finalPos;
-    this.turnNumber += 1;
+    const actorAddr = isHuman ? this.playerAddress : bot!.address;
+    if (isHuman) this.position = finalPos;
+    else bot!.position = finalPos;
+
     if (finalPos >= this.boardSize) {
       this.status = 2;
+      this.winnerAddr = actorAddr;
+    } else {
+      const totalSeats = 1 + this.bots.length;
+      this.turnIndex = (this.turnIndex + 1) % totalSeats;
+      this.turnNumber += 1;
     }
 
-    this.pushLog({
-      kind: 'public_decrypt',
-      title: `[Preview] FHE Dice = ${dieValue} (${fromPos} → ${finalPos})`,
-      detail:
-        trapTriggered > 0
-          ? `FHE House Trap #${trapTriggered} triggered!`
-          : shieldBlocked
-            ? 'Confidential Shield blocked Snake!'
-            : 'KMS proof verified; untriggered traps stayed hidden.',
-      handle: fakeHandle('dice'),
-    });
-
     return {
+      actorAddr,
       dieValue,
       fromPos,
       landedPos,
@@ -323,6 +400,45 @@ export class ArenaPreviewSimulator {
       snakeTo,
       usedBrake,
     };
+  }
+
+  public rollDice() {
+    if (this.status !== 1 || this.turnIndex !== 0) throw new Error('Wait for your turn.');
+    const res = this.resolveTurnForActor(true, -1);
+    this.pushLog({
+      kind: 'public_decrypt',
+      title: `[Preview] FHE Dice = ${res.dieValue} (${res.fromPos} → ${res.finalPos})`,
+      detail:
+        res.trapTriggered === 4
+          ? 'Hidden Golden Warp discovered (+3 steps +1★)!'
+          : res.trapTriggered > 0
+            ? `FHE House Trap #${res.trapTriggered} triggered!`
+            : res.shieldBlocked
+              ? 'Confidential Shield blocked Snake!'
+              : 'KMS proof verified; untriggered traps stayed hidden.',
+      handle: fakeHandle('dice'),
+    });
+    return res;
+  }
+
+  public stepBotTurn() {
+    if (this.status !== 1 || this.turnIndex === 0 || this.bots.length === 0) return null;
+    const botIdx = this.turnIndex - 1;
+    const res = this.resolveTurnForActor(false, botIdx);
+    this.pushLog({
+      kind: 'public_decrypt',
+      title: `[Preview] Rival #${botIdx + 1} Rolled ${res.dieValue} (${res.fromPos} → ${res.finalPos})`,
+      detail:
+        res.trapTriggered === 4
+          ? 'Rival hit Golden Warp!'
+          : res.trapTriggered > 0
+            ? `BOOM! Rival hit YOUR Secret Trap #${res.trapTriggered}!`
+            : res.shieldBlocked
+              ? 'Rival Shield blocked Snake!'
+              : 'Rival resolved FHE turn.',
+      handle: fakeHandle('bot0'),
+    });
+    return { botNumber: botIdx + 2, ...res };
   }
 
   public playBlindDuel(choice: 0 | 1 | 2): { outcome: 0 | 1 | 2; houseChoice: number } {
@@ -341,11 +457,12 @@ export class ArenaPreviewSimulator {
       this.duelWins += 1;
     } else {
       outcome = 2;
+      if (this.stars > 0) this.stars -= 1;
     }
 
     this.pushLog({
       kind: 'public_decrypt',
-      title: `[Preview] Blind Duel: ${outcome === 1 ? 'You Won +2 ★' : outcome === 0 ? 'Tie +1 ★' : 'House Won'}`,
+      title: `[Preview] Blind Duel: ${outcome === 1 ? 'You Won +2 ★' : outcome === 0 ? 'Tie +1 ★' : 'Rival Won (-1 ★)'}`,
       detail: 'Both encrypted RPS moves evaluated homomorphically.',
       handle: fakeHandle('duel'),
     });
@@ -379,28 +496,32 @@ export class ArenaPreviewSimulator {
   public claimPayout(): void {
     if (this.status !== 2 || this.payoutClaimed) return;
     this.payoutClaimed = true;
-    this.chipBalanceMicro += this.stakeMicro;
+    const pot = this.stakeMicro * BigInt(1 + this.bots.length);
+    if (this.winnerAddr === this.playerAddress) {
+      this.chipBalanceMicro += pot;
+    }
     this.pushLog({
       kind: 'tx',
       title: '[Preview] Confidential Pot Paid Out!',
-      detail: `${(Number(this.stakeMicro) / 1e6).toFixed(2)} cDOD returned confidentially.`,
+      detail: `${(Number(pot) / 1e6).toFixed(2)} cDOD settled confidentially.`,
       handle: fakeHandle('pay0'),
     });
   }
 
   public getSnapshot(): OnchainMatchSnapshot {
+    const totalSeats = 1 + this.bots.length;
     return {
       matchId: this.matchCounter,
       host: this.playerAddress,
       stakeToken: this.stakeMicro > 0n ? this.playerAddress : '0x0000000000000000000000000000000000000000',
       boardSize: this.boardSize,
-      maxPlayers: 1,
-      playerCount: 1,
-      turnIndex: 0,
+      maxPlayers: this.maxPlayers,
+      playerCount: totalSeats,
+      turnIndex: this.turnIndex % totalSeats,
       turnNumber: this.turnNumber,
       status: this.status,
       pendingAction: 0,
-      winner: this.status === 2 ? this.playerAddress : '0x0000000000000000000000000000000000000000',
+      winner: this.winnerAddr,
       payoutClaimed: this.payoutClaimed,
       trapCount: this.playerTraps.length + this.houseTraps.length,
       players: [
@@ -414,6 +535,16 @@ export class ArenaPreviewSimulator {
           trapsPlanted: this.trapsPlanted,
           missionClaimed: this.missionClaimed,
         },
+        ...this.bots.map((b) => ({
+          address: b.address,
+          position: b.position,
+          stars: b.stars,
+          laddersClimbed: b.laddersClimbed,
+          snakesDodged: b.snakesDodged,
+          duelWins: b.duelWins,
+          trapsPlanted: b.trapsPlanted,
+          missionClaimed: false,
+        })),
       ],
       mySecret: this.matchCounter > 0n
         ? {
@@ -427,7 +558,7 @@ export class ArenaPreviewSimulator {
             stakeMicro: this.missionUnlocked ? this.stakeMicro : undefined,
           }
         : undefined,
-      myPlantedTrapTiles: this.playerTraps.map((t) => t.tile),
+      myPlantedTrapTiles: this.playerTraps.filter((t) => t.active).map((t) => t.tile),
     };
   }
 }
