@@ -9,8 +9,11 @@
   ],
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "build": "npm run build --workspace=@doodle-dash/shared && npm run build --workspace=@doodle-dash/server && npm run build --workspace=@doodle-dash/client",
-    "test": "npm test --workspace=@doodle-dash/shared && npm test --workspace=@doodle-dash/server",
+    "build": "npm run build --workspace=@doodle-dash/shared && npm run build --workspace=@doodle-dash/server && npm run compile --workspace=@doodle-dash/contracts && npm run export:abis --workspace=@doodle-dash/contracts && npm run build --workspace=@doodle-dash/client",
+    "test": "npm test --workspace=@doodle-dash/shared && npm test --workspace=@doodle-dash/server && npm test --workspace=@doodle-dash/contracts",
+    "test:contracts": "npm test --workspace=@doodle-dash/contracts",
+    "deploy:sepolia": "npm run deploy:sepolia --workspace=@doodle-dash/contracts",
+    "wallets:gen": "npm run wallets:gen --workspace=@doodle-dash/contracts",
     "generate:tiles": "npm run generate:tiles --workspace=@doodle-dash/shared",
     "sim": "npm run sim --workspace=@doodle-dash/shared"
   },
