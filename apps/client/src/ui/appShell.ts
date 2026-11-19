@@ -242,6 +242,8 @@ export class DoodleAppShell {
       this.screen = 'online_setup';
     }
 
+    const arenaMatchParam = search.get('arenaMatch')?.trim() ?? '';
+
     this.settings = this.loadSettings();
     this.career = this.loadCareer();
     this.applyAccessibilitySettings();
@@ -257,6 +259,10 @@ export class DoodleAppShell {
         this.render();
       },
     });
+    if (/^\d+$/.test(arenaMatchParam)) {
+      this.arenaPanel.setInitialMatchInvite(arenaMatchParam);
+      this.screen = 'arena';
+    }
 
     // Persistent 4-layer DOM prevents background updates from wiping active mini-games
     this.root.innerHTML = `
