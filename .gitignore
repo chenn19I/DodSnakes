@@ -29,8 +29,14 @@ node_modules/
 dist/
 build/
 out/
+cache/
+artifacts/
+typechain-types/
+fhevmTemp/
+testnet-wallets.local.json
 .vite/
 .vitest/
+apps/client/public/encrypt.worker.js
 .vercel
 coverage/
 *.tsbuildinfo
